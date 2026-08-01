@@ -117,6 +117,28 @@ class KeyInsight(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
+Speaker = Literal["host_a", "host_b"]
+
+
+class Utterance(BaseModel):
+    """One line of dialogue in a `PodcastScript`, spoken by a fixed two-host cast (`host_a`/
+    `host_b` — see CLAUDE.md's Audio Overview invariant for why the cast is fixed rather than
+    freely-named). Citation-grounded like everything else this project generates: `citations`
+    verifies the same way `Answer.citations` does."""
+
+    speaker: Speaker
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class PodcastScript(BaseModel):
+    """`GeneratePodcastScript`'s SUBMIT shape (`audio.py`). `utterances` may legitimately be empty
+    — sources with nothing worth discussing should produce an empty script, not a fabricated one,
+    the same allowance `Timeline.events`/`FAQ.items` already make."""
+
+    utterances: list[Utterance] = Field(default_factory=list)
+
+
 class VerifiedCitation(BaseModel):
     """A `Citation` after `citations.py` has checked it against the corpus (see `verify_citations`).
     `verified=False` means the coordinate did not resolve — the citation is surfaced as unverified,

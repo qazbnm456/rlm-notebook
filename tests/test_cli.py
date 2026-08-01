@@ -13,7 +13,7 @@ from rlm_notebook.cli import (
     build_parser,
 )
 from rlm_notebook.corpus import Corpus
-from rlm_notebook.schema import FAQ, Answer, Citation, Source, SourceBlock, Timeline
+from rlm_notebook.schema import FAQ, Answer, Citation, PodcastScript, Source, SourceBlock, Timeline, Utterance
 
 
 def test_is_url():
@@ -265,3 +265,163 @@ def test_cmd_guide_reports_an_empty_timeline_explicitly_instead_of_printing_noth
     out = capsys.readouterr().out
     assert out.strip() != ""
     assert "no timeline" in out
+
+
+def test_speaker_labels_cover_every_known_speaker_value():
+    """Tripwire: `cli._SPEAKER_LABELS` is a plain dict keyed by `schema.Speaker`'s literal values,
+    with no type-checker enforcement that the two stay in sync (this project's CI runs ruff +
+    pytest only, no mypy/pyright — an independent review confirmed a third `Speaker` value would
+    raise an uncaught `KeyError` in `_cmd_audio` with nothing to catch it ahead of time). If this
+    fails, `_SPEAKER_LABELS` is missing an entry for a `Speaker` value that now exists."""
+    from typing import get_args
+
+    from rlm_notebook.schema import Speaker
+
+    assert set(get_args(Speaker)) <= set(cli._SPEAKER_LABELS)
+
+
+def test_audio_parses_source_and_out():
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", "a.pdf", "--out", "ep.mp3"])
+    assert args.source == ["a.pdf"]
+    assert args.out == "ep.mp3"
+
+
+def test_audio_out_defaults_to_podcast_mp3():
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", "a.pdf"])
+    assert args.out == "podcast.mp3"
+
+
+def test_cmd_audio_refuses_with_no_sources_and_no_notebook(capsys):
+    parser = build_parser()
+    args = parser.parse_args(["audio"])
+    assert cli._cmd_audio(args) == 1
+    assert "no sources" in capsys.readouterr().err
+
+
+def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(PodcastScript(utterances=[])))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a)])
+    assert cli._cmd_audio(args) == 0
+    out = capsys.readouterr().out
+    assert out.strip() != ""
+    assert "no podcast script" in out
+
+
+class _FakeTTSProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self._fail = fail
+        self.calls: list = []
+
+    def synthesize(self, script, voice_map, out_path):
+        self.calls.append((script, voice_map, out_path))
+        if self._fail:
+            from rlm_notebook.tts import TTSError
+
+            raise TTSError("simulated synthesis failure")
+        out_path.write_bytes(b"fake mp3 bytes")
+
+
+def test_cmd_audio_synthesizes_and_reports_the_output_path(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    script = PodcastScript(
+        utterances=[Utterance(speaker="host_a", text="hello", citations=[])]
+    )
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+    fake_provider = _FakeTTSProvider()
+    monkeypatch.setattr(cli, "get_tts_provider", lambda name: fake_provider)
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+    out = tmp_path / "ep.mp3"
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a), "--out", str(out)])
+    assert cli._cmd_audio(args) == 0
+    captured = capsys.readouterr().out
+    assert "Host A: hello" in captured
+    assert str(out) in captured
+    assert out.read_bytes() == b"fake mp3 bytes"
+    assert len(fake_provider.calls) == 1
+
+
+def test_cmd_audio_reports_tts_failure_but_keeps_the_transcript_visible(monkeypatch, tmp_path, capsys):
+    """The transcript is printed BEFORE synthesis is attempted — a network/provider failure must
+    not make it look like nothing happened at all; the script itself is still useful without audio."""
+    _live_env(monkeypatch)
+    script = PodcastScript(
+        utterances=[Utterance(speaker="host_a", text="hello", citations=[])]
+    )
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+    monkeypatch.setattr(cli, "get_tts_provider", lambda name: _FakeTTSProvider(fail=True))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a), "--out", str(tmp_path / "ep.mp3")])
+    assert cli._cmd_audio(args) == 1
+    out = capsys.readouterr()
+    assert "Host A: hello" in out.out
+    assert "synthesis failed" in out.err
+
+
+def test_cmd_audio_rejects_a_bad_tts_provider_before_running_the_expensive_model_call(
+    monkeypatch, tmp_path, capsys
+):
+    """Found by an independent review: `get_tts_provider(config.tts_provider)` used to be called
+    AFTER `GeneratePodcastScript().run(...)` — a mistyped RN_TTS_PROVIDER only surfaced as an
+    uncaught TTSError once the (potentially expensive) model call had already run and the
+    transcript had already printed. Now it's resolved first; this asserts the model task is never
+    even constructed when the provider name is bad."""
+    _live_env(monkeypatch)
+    monkeypatch.setenv("RN_TTS_PROVIDER", "not-a-real-provider")
+
+    model_was_called = False
+
+    def _tracking_task():
+        nonlocal model_was_called
+        model_was_called = True
+        raise AssertionError("GeneratePodcastScript must not run when the TTS provider is invalid")
+
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _tracking_task)
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a)])
+    assert cli._cmd_audio(args) == 1
+    assert not model_was_called
+    err = capsys.readouterr().err
+    assert "cannot generate audio" in err
+    assert "not-a-real-provider" in err
+
+
+def test_cmd_audio_passes_the_configured_provider_name_to_get_tts_provider(monkeypatch, tmp_path):
+    """Found by an independent review: every prior audio test monkeypatched `get_tts_provider`
+    wholesale, so none of them would have caught `_cmd_audio` accidentally passing the wrong
+    config field (e.g. `config.ocr_provider` instead of `config.tts_provider`) — a spy on the
+    NAME argument closes that gap."""
+    _live_env(monkeypatch)
+    monkeypatch.setenv("RN_TTS_PROVIDER", "edge-tts")
+    script = PodcastScript(utterances=[Utterance(speaker="host_a", text="hello", citations=[])])
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+
+    received_names: list[str] = []
+
+    def _spy(name):
+        received_names.append(name)
+        return _FakeTTSProvider()
+
+    monkeypatch.setattr(cli, "get_tts_provider", _spy)
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a), "--out", str(tmp_path / "ep.mp3")])
+    assert cli._cmd_audio(args) == 0
+    assert received_names == ["edge-tts"]

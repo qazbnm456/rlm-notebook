@@ -4,11 +4,11 @@
 ones) — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions
 grounded in them, with a citation you can check back against the original text yourself.
 
-**Status: three slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
-citation-grounded chat, a persistent multi-turn notebook, and a Notebook Guide (summary/FAQ/
-timeline/key-insight generation) are implemented and driveable from the command line. Not yet
-built: an Audio Overview and an API/UI. See `CLAUDE.md` for the hard invariants this project is
-built against.
+**Status: four slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
+citation-grounded chat, a persistent multi-turn notebook, a Notebook Guide (summary/FAQ/
+timeline/key-insight generation), and an Audio Overview (two-host podcast script + synthesized
+speech) are implemented and driveable from the command line. Not yet built: an API/UI. See
+`CLAUDE.md` for the hard invariants this project is built against.
 
 ## Install and run
 
@@ -57,8 +57,19 @@ uv run rlm-notebook guide insight --notebook mynb   # the single most important 
 Guide artifacts are citation-verified the same way answers are, and aren't cached — each `guide`
 call regenerates fresh from the notebook's current sources.
 
+```bash
+# generate a two-host podcast-style Audio Overview: a citation-grounded script + an MP3
+uv run rlm-notebook audio --source ./paper.pdf --out episode.mp3
+uv run rlm-notebook audio --notebook mynb
+```
+
+The transcript prints first (with citations, same as `ask`/`guide`) regardless of whether audio
+synthesis succeeds — a TTS failure doesn't lose the script. The default TTS provider (`edge-tts`)
+needs no API key; set `RN_TTS_PROVIDER`/`RN_TTS_VOICE_HOST_A`/`RN_TTS_VOICE_HOST_B` in `.env` to
+change voices (see `.env.example`).
+
 ## What this is not (yet)
 
-This is not the whole design. In particular: there is no generated Podcast-style audio overview,
-no provider-swappable TTS/LLM configuration beyond what `rlm-kit`'s own environment variables
-already give you, and no web UI or API. Those are follow-up work.
+This is not the whole design. In particular: there is no provider-swappable LLM configuration
+beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
+and no web UI or API. Those are follow-up work.

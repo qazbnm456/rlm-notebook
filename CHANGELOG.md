@@ -170,3 +170,69 @@ questions with verifiable citations, and get a distilled research artifact out.
   shape (generated vs. ingested) that `citations.py`/`corpus.py` don't yet distinguish, and no
   concrete need for it has shown up yet. Each `guide` call regenerates from the current `sources`
   blob fresh every time.
+
+- **Fourth slice: an Audio Overview** — `rlm-notebook audio` generates a two-host podcast script
+  (`audio.py`'s `GeneratePodcastScript`, same citation-grounded `RLMTask` pattern, sharing
+  `instructions.py`'s citation rules) and synthesizes it to an MP3 (`tts.py`). The transcript
+  prints first, with citations, regardless of whether synthesis succeeds afterward — a TTS
+  failure (network, misconfigured voice) doesn't lose the script, since it was already generated
+  and printed before synthesis is even attempted.
+
+  **Script generation and audio synthesis are two fully separate steps with no RLM-side coupling**
+  (invariant 14): `GeneratePodcastScript` doesn't import `tts.py` at all, and the TTS provider is
+  never a tool the model can call — the same "the model's job is done before this step runs"
+  reasoning invariants 1/3 already establish for ingestion/fetching. `tts.py` only ever receives
+  an already-generated, already-schema-validated `PodcastScript`.
+
+  **Default TTS provider is `edge-tts` — free, no API key, no paid account** (invariant 15),
+  matching the OCR default's "ship a working default" reasoning (invariant 7) rather than leaving
+  `rlm-notebook audio` usable only after separately acquiring TTS credentials. Verified against
+  the REAL edge-tts network service (not just the offline-injected-fake unit tests) before
+  landing this: a two-utterance script produced a 52KB MP3 starting with a valid MPEG frame sync
+  header. The known-provider list lives in exactly one place, `tts.py`'s `_PROVIDERS` — unlike
+  `RN_OCR_PROVIDER`, `config.py` does not keep a second copy to validate against, so the two lists
+  can't drift apart the way a duplicated list eventually does.
+
+  **`EdgeTTSProvider` synthesizes per-utterance and concatenates raw MP3 bytes, no re-encoding**
+  (invariant 17) — `edge-tts` is one-voice-per-call, and re-encoding a proper gapless multi-speaker
+  file would need `pydub` + a system `ffmpeg` binary (not pip-installable) for what's ultimately a
+  playback-smoothness cosmetic improvement. Documented, deliberate tradeoff, not an oversight.
+
+  **The cast is a fixed two hosts, `host_a`/`host_b`** (invariant 18) — not a per-episode
+  configurable roster. Keeps `Utterance.speaker` a closed enum and the voice-selection surface
+  (`RN_TTS_VOICE_HOST_A`/`_B`) two fixed variables rather than an open-ended cast config; a
+  deliberate MVP scope cut matching how NotebookLM's own Audio Overview also ships a fixed
+  two-host format.
+
+  **An empty `PodcastScript` is a legitimate answer, and `cli._cmd_audio` says so explicitly**
+  rather than printing nothing — the identical fix (and the identical bug shape) `guide`'s empty
+  FAQ/timeline needed; applied proactively here rather than waiting for a second independent
+  review to find the same class of bug again.
+
+  **Found and fixed two invariant cross-references that had gone stale across earlier
+  renumberings and survived three prior independent reviews: `pyproject.toml`'s inline comments
+  (citing invariant 1/6 where the actual invariants were 3/7) and `.env.example`'s (citing
+  invariant 7/6 where they were 8/7, and still describing OCR as behind an `ocr` extra that no
+  longer exists).** Earlier renumbering passes grepped `.py`/`.md` files only — `.toml`/`.env.example`
+  were never included, so these survived undetected. Worth remembering next time invariants are
+  renumbered: grep needs `--include` for every text format the repo actually has comments in, not
+  just the two most common ones.
+
+  **A fourth independent review reproduced two real, previously-uncaught crashes and fixed both**
+  (invariant 19): (1) `cli._cmd_audio` called `get_tts_provider(config.tts_provider)` AFTER
+  `GeneratePodcastScript().run(...)`, so a mistyped `RN_TTS_PROVIDER` only surfaced as an uncaught
+  `TTSError` once a real model call had already run and the transcript had already printed —
+  reordered so the provider is resolved (and its error handled) first. (2)
+  `EdgeTTSProvider.synthesize`'s `out_path.write_bytes(...)` sat outside its own try/except, so a
+  `--out` path whose parent directory doesn't exist raised an uncaught `OSError` AFTER a real
+  network synthesis call had already succeeded and been spent — reproduced against the real
+  edge-tts service (not just the offline fake) both before and after the fix. Also added a spy
+  test asserting `_cmd_audio` passes `config.tts_provider` (not some other, wrongly-named config
+  field) to `get_tts_provider` — every prior audio test had monkeypatched that function wholesale
+  and would have passed even if the wrong field were wired in. Documented (not fixed, low
+  priority) that `EdgeTTSProvider.synthesize`'s internal `asyncio.run()` would raise if ever called
+  from inside an already-running event loop — harmless for today's synchronous CLI, a real
+  constraint for the planned API/UI slice to keep in mind if it calls this directly. Added a
+  tripwire test pinning that `cli._SPEAKER_LABELS` covers every `schema.Speaker` value, since
+  nothing in this project's CI (ruff + pytest, no type checker) would otherwise catch the two
+  drifting apart.

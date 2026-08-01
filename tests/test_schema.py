@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import pytest
+from pydantic import ValidationError
+
 from rlm_notebook.schema import (
     FAQ,
     Answer,
     Citation,
     FAQItem,
     KeyInsight,
+    PodcastScript,
     Source,
     SourceBlock,
     Summary,
     Timeline,
     TimelineEvent,
+    Utterance,
 )
 
 
@@ -78,3 +83,23 @@ def test_key_insight_round_trips_citations():
         citations=[Citation(source_id="s1", locator="whole", quote="x")],
     )
     assert insight.model_dump()["citations"][0]["source_id"] == "s1"
+
+
+def test_utterance_requires_a_known_speaker():
+    with pytest.raises(ValidationError):
+        Utterance(speaker="host_c", text="hello")
+
+
+def test_utterance_round_trips_citations():
+    utterance = Utterance(
+        speaker="host_a",
+        text="did you know...",
+        citations=[Citation(source_id="s1", locator="page:1", quote="x")],
+    )
+    assert utterance.model_dump()["citations"][0]["source_id"] == "s1"
+
+
+def test_podcast_script_defaults_to_no_utterances():
+    """A source with nothing worth discussing must be representable as an empty script, not force
+    a fabricated episode into existence — same allowance Timeline/FAQ already make."""
+    assert PodcastScript().utterances == []

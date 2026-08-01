@@ -26,14 +26,16 @@ uv pip install -e ../rlm-kit
 
 ## Scope note
 
-Three slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
+Four slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
 persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one JSON
-file, no database), and now a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
-generates a whole-corpus artifact (`guide.py`). There is still no subprocess-per-turn execution
-isolation, no Audio Overview, and no API/UI yet — `cli.py` drives one RLMTask run in-process,
-synchronously, per invocation. Guide artifacts are also not cached onto a notebook or made citable
-as sources for later `ask` turns yet — each `guide` call regenerates from scratch. Each of these is
-its own follow-up slice; do not assume any of them exist because an earlier design discussion
+file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
+generates a whole-corpus artifact (`guide.py`) — and now an Audio Overview — `rlm-notebook audio`
+generates a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`). There is
+still no subprocess-per-turn execution isolation and no API/UI yet — `cli.py` drives one RLMTask
+run in-process, synchronously, per invocation. Guide/audio artifacts are also not cached onto a
+notebook or made citable as sources for later `ask` turns yet — each call regenerates from
+scratch. Each of these is its own follow-up slice; do not assume any of them exist because an
+earlier design discussion
 mentioned them.
 
 ## Invariants — do not break
@@ -144,5 +146,44 @@ mentioned them.
     shared too. `cli._prepare` is the same "one copy, not five" discipline applied to the
     ingestion/notebook setup `ask` and `guide` both need before running their own task; don't
     reintroduce a second copy of that setup either.
+14. **TTS synthesis (`tts.py`) runs entirely host-side, on an already-generated,
+    already-schema-validated `PodcastScript` — it is never a tool the model can call, and
+    `GeneratePodcastScript` (`audio.py`) has no dependency on `tts.py` at all.** Same reasoning as
+    invariants 1/3: audio synthesis is a real network call to a TTS provider, and the model's job
+    (writing a grounded script) is finished long before any audio is generated. Don't wire
+    synthesis into the RLM loop, e.g. as a tool the script-writing task could call mid-run.
+15. **The default TTS provider (`RN_TTS_PROVIDER=edge-tts`) needs no API key or paid account, so
+    `rlm-notebook audio` works out of the box** — the same "ship a working default, not just a
+    pluggable interface" reasoning as OCR (invariant 7). The known-provider list lives in ONE
+    place, `tts.py`'s `_PROVIDERS` dict (`get_tts_provider` refuses loudly on an unknown name) —
+    unlike `RN_OCR_PROVIDER`, `config.py` does NOT keep a second copy of the known-provider list to
+    validate against; don't add one; a second list is exactly the kind of thing that drifts.
+    Instead, `cli._cmd_audio` calls `get_tts_provider(config.tts_provider)` and handles its
+    `TTSError` BEFORE running `GeneratePodcastScript` (invariant 19) — that's how a bad provider
+    name gets caught early without a second validated list.
+19. **`cli._cmd_audio` resolves the TTS provider before running the (potentially expensive)
+    script-generation model call, not after.** An independent review found and reproduced the
+    original ordering wasting a real model call whenever `RN_TTS_PROVIDER` was misconfigured — the
+    error only surfaced as an uncaught `TTSError` once the transcript had already been generated
+    and printed. Don't move `get_tts_provider(...)` back after `GeneratePodcastScript().run(...)`.
+    Relatedly, `tts.py`'s `EdgeTTSProvider.synthesize` now wraps its file WRITE in the same
+    try/except as the network synthesis call — an independent review reproduced (against the real
+    edge-tts network service, not just an offline fake) that a bad `--out` directory used to raise
+    an uncaught `OSError` after synthesis had already succeeded and spent a real network call; both
+    are one "make this file exist" operation as far as any caller is concerned and share one error
+    boundary now.
+16. **`PodcastScript.utterances` may legitimately be empty, and `cli._cmd_audio` says so
+    explicitly rather than printing nothing** — the same allowance and the same UI fix
+    `Timeline.events`/`FAQ.items` already have (see the Notebook Guide's own history in
+    CHANGELOG.md for why "silently prints nothing" was a real bug there, not a hypothetical one).
+17. **`EdgeTTSProvider` synthesizes one utterance at a time (one voice per `edge-tts` call) and
+    concatenates the raw MP3 byte streams — it does not re-encode.** This is a deliberate,
+    documented tradeoff (`tts.py`'s docstring) to avoid an `ffmpeg`/`pydub` dependency (`ffmpeg` is
+    a system binary, not pip-installable) for what would only be a gapless-playback cosmetic
+    improvement; don't "fix" the concatenation without weighing that dependency cost first.
+18. **The Audio Overview's cast is a fixed two hosts, `host_a`/`host_b` (`schema.Speaker`), not
+    freely-named per episode.** Keeps `Utterance.speaker` a closed enum citations/voice-mapping
+    can rely on, and keeps `RN_TTS_VOICE_HOST_A`/`_B` a fixed two-variable surface rather than an
+    open-ended per-episode cast configuration — a deliberate MVP scope cut, not an oversight.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
