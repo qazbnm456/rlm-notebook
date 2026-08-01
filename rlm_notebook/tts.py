@@ -53,6 +53,14 @@ class EdgeTTSProvider:
     MP3 frames as one continuous stream). Not perfectly gapless; real re-encoding (via `pydub` +
     `ffmpeg`) is a deferred follow-up, not pulled in for this slice to avoid a system-binary
     dependency (`ffmpeg` isn't pip-installable) for a cosmetic improvement.
+
+    **Residual risk, not yet an issue for this slice**: `synthesize()` is a SYNC method that calls
+    `asyncio.run(...)` internally. `asyncio.run()` raises `RuntimeError: cannot be called from a
+    running event loop` if invoked from inside one — fine for today's synchronous CLI call site
+    (`cli._cmd_audio`), but a future caller inside an async context (e.g. a FastAPI async handler,
+    should the planned API/UI slice call this directly rather than off-loading it to a worker
+    thread/process) would need to route around this, not call `synthesize()` as-is. Flagging now
+    so that future slice doesn't have to rediscover it.
     """
 
     _communicate_factory: CommunicateFactory = field(default=_default_communicate_factory)
@@ -62,11 +70,17 @@ class EdgeTTSProvider:
             raise TTSError("script has no utterances to synthesize")
         try:
             audio = asyncio.run(self._synthesize_all(script, voice_map))
+            out_path.write_bytes(audio)
         except TTSError:
             raise
         except Exception as exc:
+            # Found by an independent review: `out_path.write_bytes(...)` used to sit OUTSIDE this
+            # try/except, so a bad `--out` path (a nonexistent parent directory, most commonly —
+            # reproduced with a real network synthesis that succeeded and then crashed on the
+            # write) raised a raw, uncaught OSError after already spending a real TTS network call.
+            # Both the synthesis call and the write are "make this audio file exist" as far as the
+            # caller is concerned, so both share one error boundary.
             raise TTSError(f"TTS synthesis failed: {type(exc).__name__}: {exc}") from exc
-        out_path.write_bytes(audio)
 
     async def _synthesize_all(self, script: PodcastScript, voice_map: dict[str, str]) -> bytes:
         chunks: list[bytes] = []

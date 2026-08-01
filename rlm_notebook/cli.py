@@ -274,6 +274,16 @@ def _cmd_audio(args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
+    # Resolve the TTS provider BEFORE the (potentially expensive) script-generation model call,
+    # not after — found by an independent review: a mistyped RN_TTS_PROVIDER used to only surface
+    # as an uncaught TTSError once the model had already run and the transcript had already
+    # printed, wasting that model call on a config mistake that was knowable up front.
+    try:
+        provider = get_tts_provider(config.tts_provider)
+    except TTSError as exc:
+        print(f"cannot generate audio: {exc}", file=sys.stderr)
+        return 1
+
     script = GeneratePodcastScript().run(sources=blob)
 
     if not script.utterances:
@@ -288,14 +298,14 @@ def _cmd_audio(args) -> int:
             print()
 
         out_path = Path(args.out)
-        provider = get_tts_provider(config.tts_provider)
         voice_map = {"host_a": config.tts_voice_host_a, "host_b": config.tts_voice_host_b}
         try:
             provider.synthesize(script, voice_map, out_path)
         except TTSError as exc:
             # The transcript above already printed successfully — a synthesis failure (network,
-            # bad voice config) must not make it look like NOTHING happened; the script is still
-            # useful on its own even without audio.
+            # bad voice config, an --out path whose parent doesn't exist — see tts.py's own fix)
+            # must not make it look like NOTHING happened; the script is still useful on its own
+            # even without audio.
             print(f"transcript generated above, but audio synthesis failed: {exc}", file=sys.stderr)
             return 1
         print(f"-> {out_path}")

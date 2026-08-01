@@ -78,6 +78,20 @@ def test_synthesize_raises_on_missing_voice(tmp_path):
         provider.synthesize(script, {"host_b": "voice-b"}, tmp_path / "x.mp3")
 
 
+def test_synthesize_raises_tts_error_not_a_raw_oserror_when_out_dir_is_missing(tmp_path):
+    """Found by an independent review: `out_path.write_bytes(...)` used to sit OUTSIDE the
+    try/except, so a bad `--out` path (most commonly a nonexistent parent directory) raised an
+    uncaught `FileNotFoundError` after synthesis had already succeeded — reproduced with a REAL
+    network call to edge-tts before this fix, not just this fake-factory test. Synthesis and the
+    write are one "make this file exist" operation as far as the caller is concerned."""
+    provider = EdgeTTSProvider(_communicate_factory=_fake_factory([]))
+    script = _script(speakers_texts=[("host_a", "hello")])
+    missing_dir_path = tmp_path / "does" / "not" / "exist" / "episode.mp3"
+    with pytest.raises(TTSError, match="synthesis failed"):
+        provider.synthesize(script, {"host_a": "voice-a"}, missing_dir_path)
+    assert not missing_dir_path.exists()
+
+
 def test_synthesize_wraps_an_unexpected_exception_as_tts_error(tmp_path):
     def _boom(text, voice):
         raise RuntimeError("network exploded")

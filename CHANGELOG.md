@@ -217,3 +217,22 @@ questions with verifiable citations, and get a distilled research artifact out.
   were never included, so these survived undetected. Worth remembering next time invariants are
   renumbered: grep needs `--include` for every text format the repo actually has comments in, not
   just the two most common ones.
+
+  **A fourth independent review reproduced two real, previously-uncaught crashes and fixed both**
+  (invariant 19): (1) `cli._cmd_audio` called `get_tts_provider(config.tts_provider)` AFTER
+  `GeneratePodcastScript().run(...)`, so a mistyped `RN_TTS_PROVIDER` only surfaced as an uncaught
+  `TTSError` once a real model call had already run and the transcript had already printed —
+  reordered so the provider is resolved (and its error handled) first. (2)
+  `EdgeTTSProvider.synthesize`'s `out_path.write_bytes(...)` sat outside its own try/except, so a
+  `--out` path whose parent directory doesn't exist raised an uncaught `OSError` AFTER a real
+  network synthesis call had already succeeded and been spent — reproduced against the real
+  edge-tts service (not just the offline fake) both before and after the fix. Also added a spy
+  test asserting `_cmd_audio` passes `config.tts_provider` (not some other, wrongly-named config
+  field) to `get_tts_provider` — every prior audio test had monkeypatched that function wholesale
+  and would have passed even if the wrong field were wired in. Documented (not fixed, low
+  priority) that `EdgeTTSProvider.synthesize`'s internal `asyncio.run()` would raise if ever called
+  from inside an already-running event loop — harmless for today's synchronous CLI, a real
+  constraint for the planned API/UI slice to keep in mind if it calls this directly. Added a
+  tripwire test pinning that `cli._SPEAKER_LABELS` covers every `schema.Speaker` value, since
+  nothing in this project's CI (ruff + pytest, no type checker) would otherwise catch the two
+  drifting apart.

@@ -158,6 +158,20 @@ mentioned them.
     place, `tts.py`'s `_PROVIDERS` dict (`get_tts_provider` refuses loudly on an unknown name) —
     unlike `RN_OCR_PROVIDER`, `config.py` does NOT keep a second copy of the known-provider list to
     validate against; don't add one; a second list is exactly the kind of thing that drifts.
+    Instead, `cli._cmd_audio` calls `get_tts_provider(config.tts_provider)` and handles its
+    `TTSError` BEFORE running `GeneratePodcastScript` (invariant 19) — that's how a bad provider
+    name gets caught early without a second validated list.
+19. **`cli._cmd_audio` resolves the TTS provider before running the (potentially expensive)
+    script-generation model call, not after.** An independent review found and reproduced the
+    original ordering wasting a real model call whenever `RN_TTS_PROVIDER` was misconfigured — the
+    error only surfaced as an uncaught `TTSError` once the transcript had already been generated
+    and printed. Don't move `get_tts_provider(...)` back after `GeneratePodcastScript().run(...)`.
+    Relatedly, `tts.py`'s `EdgeTTSProvider.synthesize` now wraps its file WRITE in the same
+    try/except as the network synthesis call — an independent review reproduced (against the real
+    edge-tts network service, not just an offline fake) that a bad `--out` directory used to raise
+    an uncaught `OSError` after synthesis had already succeeded and spent a real network call; both
+    are one "make this file exist" operation as far as any caller is concerned and share one error
+    boundary now.
 16. **`PodcastScript.utterances` may legitimately be empty, and `cli._cmd_audio` says so
     explicitly rather than printing nothing** — the same allowance and the same UI fix
     `Timeline.events`/`FAQ.items` already have (see the Notebook Guide's own history in
