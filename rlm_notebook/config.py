@@ -24,6 +24,12 @@ _DEFAULT_MAX_CORPUS_CHARS = 8_000_000
 
 _KNOWN_OCR_PROVIDERS = ("local", "vision_llm")
 
+#: Default two-host voice cast for the Audio Overview (`RN_TTS_VOICE_HOST_A`/`_B`) — edge-tts voice
+#: ids needing no API key or account, chosen only so `rlm-notebook audio` works out of the box;
+#: override either independently.
+_DEFAULT_TTS_VOICE_HOST_A = "en-US-GuyNeural"
+_DEFAULT_TTS_VOICE_HOST_B = "en-US-JennyNeural"
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -76,6 +82,13 @@ class NotebookConfig:
     #: validation is ready for it, but `parsers/pdf.py` does not yet implement that branch.
     ocr_provider: str = "local"
 
+    #: Which TTS backend `tts.py` dispatches to. Default is a free, no-API-key provider so
+    #: `rlm-notebook audio` works with no paid credentials — see CLAUDE.md's Audio Overview
+    #: invariant (mirrors the OCR default's reasoning, invariant 7).
+    tts_provider: str = "edge-tts"
+    tts_voice_host_a: str = _DEFAULT_TTS_VOICE_HOST_A
+    tts_voice_host_b: str = _DEFAULT_TTS_VOICE_HOST_B
+
     @classmethod
     def from_env(cls) -> NotebookConfig:
         """Read `RN_*`. Raises `SystemExit` on a missing required var or an invalid enum value."""
@@ -106,6 +119,9 @@ class NotebookConfig:
             adapter=(os.getenv("RN_ADAPTER") or "json").strip(),
             max_corpus_chars=_env_int("RN_MAX_CORPUS_CHARS", _DEFAULT_MAX_CORPUS_CHARS),
             ocr_provider=_ocr_provider_from_env(),
+            tts_provider=(os.getenv("RN_TTS_PROVIDER") or "edge-tts").strip(),
+            tts_voice_host_a=(os.getenv("RN_TTS_VOICE_HOST_A") or _DEFAULT_TTS_VOICE_HOST_A).strip(),
+            tts_voice_host_b=(os.getenv("RN_TTS_VOICE_HOST_B") or _DEFAULT_TTS_VOICE_HOST_B).strip(),
         )
 
 

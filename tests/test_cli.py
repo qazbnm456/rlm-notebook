@@ -13,7 +13,7 @@ from rlm_notebook.cli import (
     build_parser,
 )
 from rlm_notebook.corpus import Corpus
-from rlm_notebook.schema import FAQ, Answer, Citation, Source, SourceBlock, Timeline
+from rlm_notebook.schema import FAQ, Answer, Citation, PodcastScript, Source, SourceBlock, Timeline, Utterance
 
 
 def test_is_url():
@@ -265,3 +265,93 @@ def test_cmd_guide_reports_an_empty_timeline_explicitly_instead_of_printing_noth
     out = capsys.readouterr().out
     assert out.strip() != ""
     assert "no timeline" in out
+
+
+def test_audio_parses_source_and_out():
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", "a.pdf", "--out", "ep.mp3"])
+    assert args.source == ["a.pdf"]
+    assert args.out == "ep.mp3"
+
+
+def test_audio_out_defaults_to_podcast_mp3():
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", "a.pdf"])
+    assert args.out == "podcast.mp3"
+
+
+def test_cmd_audio_refuses_with_no_sources_and_no_notebook(capsys):
+    parser = build_parser()
+    args = parser.parse_args(["audio"])
+    assert cli._cmd_audio(args) == 1
+    assert "no sources" in capsys.readouterr().err
+
+
+def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(PodcastScript(utterances=[])))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a)])
+    assert cli._cmd_audio(args) == 0
+    out = capsys.readouterr().out
+    assert out.strip() != ""
+    assert "no podcast script" in out
+
+
+class _FakeTTSProvider:
+    def __init__(self, *, fail: bool = False) -> None:
+        self._fail = fail
+        self.calls: list = []
+
+    def synthesize(self, script, voice_map, out_path):
+        self.calls.append((script, voice_map, out_path))
+        if self._fail:
+            from rlm_notebook.tts import TTSError
+
+            raise TTSError("simulated synthesis failure")
+        out_path.write_bytes(b"fake mp3 bytes")
+
+
+def test_cmd_audio_synthesizes_and_reports_the_output_path(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    script = PodcastScript(
+        utterances=[Utterance(speaker="host_a", text="hello", citations=[])]
+    )
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+    fake_provider = _FakeTTSProvider()
+    monkeypatch.setattr(cli, "get_tts_provider", lambda name: fake_provider)
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+    out = tmp_path / "ep.mp3"
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a), "--out", str(out)])
+    assert cli._cmd_audio(args) == 0
+    captured = capsys.readouterr().out
+    assert "Host A: hello" in captured
+    assert str(out) in captured
+    assert out.read_bytes() == b"fake mp3 bytes"
+    assert len(fake_provider.calls) == 1
+
+
+def test_cmd_audio_reports_tts_failure_but_keeps_the_transcript_visible(monkeypatch, tmp_path, capsys):
+    """The transcript is printed BEFORE synthesis is attempted — a network/provider failure must
+    not make it look like nothing happened at all; the script itself is still useful without audio."""
+    _live_env(monkeypatch)
+    script = PodcastScript(
+        utterances=[Utterance(speaker="host_a", text="hello", citations=[])]
+    )
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+    monkeypatch.setattr(cli, "get_tts_provider", lambda name: _FakeTTSProvider(fail=True))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["audio", "--source", str(a), "--out", str(tmp_path / "ep.mp3")])
+    assert cli._cmd_audio(args) == 1
+    out = capsys.readouterr()
+    assert "Host A: hello" in out.out
+    assert "synthesis failed" in out.err

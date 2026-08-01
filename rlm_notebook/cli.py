@@ -1,8 +1,9 @@
-"""THE entry point for this slice: sources in, a grounded answer OR a whole-notebook artifact out
-— optionally as a multi-turn conversation.
+"""THE entry point for this slice: sources in, a grounded answer, a whole-notebook artifact, or a
+podcast-style Audio Overview out — optionally as a multi-turn conversation.
 
     rlm-notebook ask "what does it say about X?" --source ./paper.pdf --source https://example.com
     rlm-notebook guide summary --source ./paper.pdf
+    rlm-notebook audio --source ./paper.pdf
 
     # a persistent, continuing conversation / notebook:
     rlm-notebook ask "what does it say about X?" --source ./paper.pdf --notebook mynb
@@ -24,6 +25,7 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from . import __version__
+from .audio import GeneratePodcastScript
 from .citations import verify_citations
 from .config import NotebookConfig, setup
 from .corpus import Corpus, CorpusTooLargeError
@@ -35,25 +37,32 @@ from .parsers.text import parse_text
 from .parsers.web import FetchError, parse_web
 from .schema import ChatTurn, Citation, Notebook, Source
 from .task import AnswerQuestion
+from .tts import TTSError, get_tts_provider
+
+_SPEAKER_LABELS = {"host_a": "Host A", "host_b": "Host B"}
 
 _CLI_DESCRIPTION = """\
-Ask a question grounded in one or more sources, with citations you can verify — or generate a
-whole-notebook artifact (a summary, an FAQ, a timeline, or a single key insight).
+Ask a question grounded in one or more sources, with citations you can verify — generate a
+whole-notebook artifact (a summary, an FAQ, a timeline, or a single key insight) — or generate a
+two-host podcast script + synthesized Audio Overview.
 
     rlm-notebook ask "what does it say about X?" --source ./paper.pdf --source ./notes.txt
     rlm-notebook ask "..." --source https://example.com/article
     rlm-notebook guide summary --source ./paper.pdf
     rlm-notebook guide faq --source ./paper.pdf
+    rlm-notebook audio --source ./paper.pdf --out episode.mp3
 
 Add --notebook <id> to persist sources (and, for `ask`, history) across invocations:
 
     rlm-notebook ask "what does it say about X?" --source ./paper.pdf --notebook mynb
     rlm-notebook ask "and what about Y?" --notebook mynb    # no --source needed to continue
     rlm-notebook guide timeline --notebook mynb
+    rlm-notebook audio --notebook mynb
 
 `--source` accepts a path to a text file, a path to a PDF (scanned pages are OCR'd automatically),
 or an http(s) URL. Needs RN_* model credentials (see .env.example) and a sandbox (brew install
-deno) for a live run.
+deno) for a live run. `audio` additionally needs network access to the TTS provider (edge-tts by
+default — free, no API key).
 """
 
 #: Notebook id used when `--notebook` is omitted — never persisted (see `_prepare`), so it never
@@ -252,6 +261,50 @@ def _cmd_guide(args) -> int:
     return 0
 
 
+def _cmd_audio(args) -> int:
+    prepared = _prepare(args)
+    if prepared is None:
+        return 1
+    notebook, corpus = prepared
+
+    config = setup(NotebookConfig.from_env())
+    try:
+        blob = corpus.blob(max_chars=config.max_corpus_chars)
+    except CorpusTooLargeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+
+    script = GeneratePodcastScript().run(sources=blob)
+
+    if not script.utterances:
+        # A source with nothing worth discussing is a legitimate answer (audio.py's instructions
+        # explicitly allow it) — same "don't print silence and look broken" fix guide.py's empty
+        # FAQ/timeline needed.
+        print("(no podcast script — the sources didn't produce enough to discuss)")
+    else:
+        for utterance in script.utterances:
+            print(f"{_SPEAKER_LABELS[utterance.speaker]}: {utterance.text}")
+            _print_citations(utterance.citations, corpus)
+            print()
+
+        out_path = Path(args.out)
+        provider = get_tts_provider(config.tts_provider)
+        voice_map = {"host_a": config.tts_voice_host_a, "host_b": config.tts_voice_host_b}
+        try:
+            provider.synthesize(script, voice_map, out_path)
+        except TTSError as exc:
+            # The transcript above already printed successfully — a synthesis failure (network,
+            # bad voice config) must not make it look like NOTHING happened; the script is still
+            # useful on its own even without audio.
+            print(f"transcript generated above, but audio synthesis failed: {exc}", file=sys.stderr)
+            return 1
+        print(f"-> {out_path}")
+
+    if args.notebook:
+        save_notebook(notebook)
+    return 0
+
+
 def _add_source_and_notebook_args(sub: argparse.ArgumentParser) -> None:
     sub.add_argument(
         "--source", action="append", dest="source",
@@ -283,6 +336,17 @@ def build_parser() -> argparse.ArgumentParser:
     g.add_argument("kind", choices=sorted(_GUIDE_TASKS), help="which artifact to generate")
     _add_source_and_notebook_args(g)
     g.set_defaults(func=_cmd_guide)
+
+    au = sub.add_parser(
+        "audio", help="generate a two-host podcast script + synthesized audio (Audio Overview)"
+    )
+    _add_source_and_notebook_args(au)
+    au.add_argument(
+        "--out", default="podcast.mp3",
+        help="output audio file path (default: podcast.mp3). Only written if the script is "
+             "non-empty and synthesis succeeds; the transcript is always printed regardless",
+    )
+    au.set_defaults(func=_cmd_audio)
 
     return p
 
