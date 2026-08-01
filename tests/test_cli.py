@@ -2,7 +2,17 @@ from __future__ import annotations
 
 import pytest
 
-from rlm_notebook.cli import _cmd_ask, _ingest_new, _ingest_one, _is_url, build_parser
+from rlm_notebook.cli import (
+    _cmd_ask,
+    _cmd_guide,
+    _ingest_new,
+    _ingest_one,
+    _is_url,
+    _print_citations,
+    build_parser,
+)
+from rlm_notebook.corpus import Corpus
+from rlm_notebook.schema import Citation, Source, SourceBlock
 
 
 def test_is_url():
@@ -110,3 +120,69 @@ def test_cmd_ask_reports_a_clear_error_on_a_corrupted_notebook_file(tmp_path, mo
     assert _cmd_ask(args) == 1
     err = capsys.readouterr().err
     assert "mynb" in err and "not a valid notebook file" in err
+
+
+def test_guide_parses_kind_and_source():
+    parser = build_parser()
+    args = parser.parse_args(["guide", "summary", "--source", "a.pdf"])
+    assert args.kind == "summary"
+    assert args.source == ["a.pdf"]
+
+
+def test_guide_rejects_an_unknown_kind():
+    parser = build_parser()
+    with pytest.raises(SystemExit):
+        parser.parse_args(["guide", "not-a-real-kind", "--source", "a.pdf"])
+
+
+@pytest.mark.parametrize("kind", ["summary", "faq", "timeline", "insight"])
+def test_guide_accepts_every_known_kind(kind):
+    parser = build_parser()
+    args = parser.parse_args(["guide", kind, "--source", "a.pdf"])
+    assert args.kind == kind
+
+
+def test_cmd_guide_refuses_with_no_sources_and_no_notebook(capsys):
+    """Shares `_prepare` with `_cmd_ask` — this early-return path runs before any model
+    config/call, so it's safe to exercise offline."""
+    parser = build_parser()
+    args = parser.parse_args(["guide", "summary"])
+    assert _cmd_guide(args) == 1
+    assert "no sources" in capsys.readouterr().err
+
+
+def test_cmd_guide_reports_a_clear_error_on_a_corrupted_notebook_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "mynb.json").write_text('{"id": "mynb", "sources": [}', encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["guide", "summary", "--notebook", "mynb"])
+
+    assert _cmd_guide(args) == 1
+    err = capsys.readouterr().err
+    assert "mynb" in err and "not a valid notebook file" in err
+
+
+def _corpus_with_page1(source_id: str = "s1") -> Corpus:
+    corpus = Corpus()
+    corpus.add(
+        Source(id=source_id, kind="pdf", origin="x.pdf", blocks=[SourceBlock(locator="page:1", text="hi")])
+    )
+    return corpus
+
+
+def test_print_citations_prints_nothing_for_an_empty_list(capsys):
+    _print_citations([], _corpus_with_page1())
+    assert capsys.readouterr().out == ""
+
+
+def test_print_citations_marks_verified_and_unverified(capsys):
+    citations = [
+        Citation(source_id="s1", locator="page:1", quote="hi"),
+        Citation(source_id="s1", locator="page:99", quote="nope"),
+    ]
+    _print_citations(citations, _corpus_with_page1())
+    out = capsys.readouterr().out
+    assert "✓" in out
+    assert "✗ UNVERIFIED" in out

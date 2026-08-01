@@ -1,6 +1,17 @@
 from __future__ import annotations
 
-from rlm_notebook.schema import Answer, Citation, Source, SourceBlock
+from rlm_notebook.schema import (
+    FAQ,
+    Answer,
+    Citation,
+    FAQItem,
+    KeyInsight,
+    Source,
+    SourceBlock,
+    Summary,
+    Timeline,
+    TimelineEvent,
+)
 
 
 def test_source_marker_and_block_text():
@@ -27,3 +38,43 @@ def test_answer_round_trips_citations():
     )
     dumped = answer.model_dump()
     assert dumped["citations"][0]["source_id"] == "s1"
+
+
+def test_summary_defaults_to_no_citations():
+    assert Summary(text="a summary").citations == []
+
+
+def test_faq_holds_items_with_their_own_citations():
+    faq = FAQ(
+        items=[
+            FAQItem(
+                question="what color are apples?",
+                answer="red or green",
+                citations=[Citation(source_id="s1", locator="page:1", quote="Apples are red or green.")],
+            )
+        ]
+    )
+    assert faq.items[0].citations[0].source_id == "s1"
+
+
+def test_faq_defaults_to_no_items():
+    assert FAQ().items == []
+
+
+def test_timeline_events_default_to_empty_list():
+    """A source describing no sequence of events must be representable as an empty timeline, not
+    force a fabricated event into existence."""
+    assert Timeline().events == []
+
+
+def test_timeline_event_when_is_free_text_not_a_parsed_date():
+    event = TimelineEvent(when="before the trial began", description="setup phase")
+    assert event.when == "before the trial began"
+
+
+def test_key_insight_round_trips_citations():
+    insight = KeyInsight(
+        text="the single most important thing",
+        citations=[Citation(source_id="s1", locator="whole", quote="x")],
+    )
+    assert insight.model_dump()["citations"][0]["source_id"] == "s1"

@@ -1,0 +1,99 @@
+"""Notebook Guide: whole-corpus artifacts generated from a notebook's sources — a summary, an FAQ,
+a timeline, and a single key insight. Same citation-grounded `RLMTask` pattern as `AnswerQuestion`
+(`task.py`): `signature` names one input field, `sources` (the corpus blob), and one output field,
+with no `question`/`history` since these describe the corpus as a whole rather than answer one
+question. Everything else (retry, sandbox selection, budget caps, tracing) is inherited from
+`rlm_kit.RLMTask`, exactly as `AnswerQuestion` inherits it.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Callable
+from typing import Any, ClassVar
+
+from rlm_kit import RLMTask
+from rlm_kit.tools.validation import make_schema_validator
+
+from .instructions import CITATION_RULES, validate_before_submit_rule
+from .schema import FAQ, KeyInsight, Summary, Timeline
+
+__all__ = ["GenerateFAQ", "GenerateKeyInsight", "GenerateSummary", "GenerateTimeline"]
+
+
+def _grounded_instructions(task_description: str, tool_name: str) -> str:
+    """Compose one Guide task's instructions: a task-specific opening paragraph, the shared
+    grounding rule, the shared citation-marker rules, and the shared validate-before-submit rule —
+    see `instructions.py`'s docstring for why the shared parts are factored out rather than
+    hand-duplicated across four task classes."""
+    return f"""\
+{task_description} Ground EVERY claim ONLY in the `sources` text given to you as a REPL variable —
+never your own background knowledge. If the sources don't support a claim, leave it out rather
+than filling the gap from what you already know.
+
+{CITATION_RULES}
+
+{validate_before_submit_rule(tool_name)}
+"""
+
+
+class GenerateSummary(RLMTask):
+    """A concise summary of a notebook's sources, with citations."""
+
+    signature = "sources: str -> summary: Summary"
+    output_field = "summary"
+    output_model = Summary
+    instructions = _grounded_instructions(
+        "You are writing a concise summary of the sources in this notebook — the key points a "
+        "reader would need, not a chapter-by-chapter recap.",
+        "validate_summary",
+    )
+    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(Summary)]
+
+
+class GenerateFAQ(RLMTask):
+    """A set of frequently-asked questions and answers derived from a notebook's sources."""
+
+    signature = "sources: str -> faq: FAQ"
+    output_field = "faq"
+    output_model = FAQ
+    instructions = _grounded_instructions(
+        "You are generating a FAQ (frequently-asked questions and answers) that a reader of these "
+        "sources would find useful — questions the sources actually answer, not ones you invent "
+        "for their own sake.",
+        "validate_faq",
+    )
+    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(FAQ)]
+
+
+class GenerateTimeline(RLMTask):
+    """A chronological (or otherwise ordered) timeline of events described across a notebook's
+    sources."""
+
+    signature = "sources: str -> timeline: Timeline"
+    output_field = "timeline"
+    output_model = Timeline
+    instructions = _grounded_instructions(
+        "You are extracting a timeline of events, milestones, or ordered steps described across "
+        "the sources. If the sources give explicit dates, use them in `when`; if they only imply "
+        "an order (e.g. \"first ... then ... finally\"), describe that order in `when` instead of "
+        "inventing a date. If the sources describe no sequence of events at all, return an empty "
+        "list of events rather than fabricating one.",
+        "validate_timeline",
+    )
+    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(Timeline)]
+
+
+class GenerateKeyInsight(RLMTask):
+    """The single most important, non-obvious takeaway from a notebook's sources, in one sentence."""
+
+    signature = "sources: str -> insight: KeyInsight"
+    output_field = "insight"
+    output_model = KeyInsight
+    instructions = _grounded_instructions(
+        "You are identifying the SINGLE most important, non-obvious takeaway from these sources — "
+        "one sentence that would let someone who has not read the sources understand the one "
+        "thing that matters most. Not a summary of everything: the ONE insight a careful reader "
+        "would consider most worth knowing.",
+        "validate_keyinsight",
+    )
+    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(KeyInsight)]

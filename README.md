@@ -4,10 +4,11 @@
 ones) — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions
 grounded in them, with a citation you can check back against the original text yourself.
 
-**Status: two slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
-citation-grounded chat, and a persistent multi-turn notebook are implemented and driveable from
-the command line. Not yet built: a Notebook Guide (summary/FAQ/timeline), an Audio Overview, and
-an API/UI. See `CLAUDE.md` for the hard invariants this project is built against.
+**Status: three slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
+citation-grounded chat, a persistent multi-turn notebook, and a Notebook Guide (summary/FAQ/
+timeline/key-insight generation) are implemented and driveable from the command line. Not yet
+built: an Audio Overview and an API/UI. See `CLAUDE.md` for the hard invariants this project is
+built against.
 
 ## Install and run
 
@@ -45,9 +46,19 @@ Sources with a flagged prompt-injection pattern (see `injection_scan.py`) still 
 the flag is surfaced alongside the answer rather than blocking it, for as long as that source
 stays part of the notebook.
 
+```bash
+# generate a whole-notebook artifact instead of asking a question
+uv run rlm-notebook guide summary --source ./paper.pdf
+uv run rlm-notebook guide faq --notebook mynb
+uv run rlm-notebook guide timeline --notebook mynb
+uv run rlm-notebook guide insight --notebook mynb   # the single most important takeaway, one sentence
+```
+
+Guide artifacts are citation-verified the same way answers are, and aren't cached — each `guide`
+call regenerates fresh from the notebook's current sources.
+
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no generated Podcast-style audio overview,
-no Notebook Guide (summary/FAQ/timeline), no provider-swappable TTS/LLM configuration beyond what
-`rlm-kit`'s own environment variables already give you, and no web UI or API. Those are follow-up
-work.
+no provider-swappable TTS/LLM configuration beyond what `rlm-kit`'s own environment variables
+already give you, and no web UI or API. Those are follow-up work.
