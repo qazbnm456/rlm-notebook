@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from rlm_notebook import cli
 from rlm_notebook.cli import (
     _cmd_ask,
     _cmd_guide,
@@ -12,7 +13,7 @@ from rlm_notebook.cli import (
     build_parser,
 )
 from rlm_notebook.corpus import Corpus
-from rlm_notebook.schema import Citation, Source, SourceBlock
+from rlm_notebook.schema import FAQ, Answer, Citation, Source, SourceBlock, Timeline
 
 
 def test_is_url():
@@ -186,3 +187,81 @@ def test_print_citations_marks_verified_and_unverified(capsys):
     out = capsys.readouterr().out
     assert "✓" in out
     assert "✗ UNVERIFIED" in out
+
+
+def test_print_citations_leading_blank_line_is_its_own_output_not_the_caller_s():
+    """`_print_citations` owns its own leading blank line — a citation-less call must print
+    NOTHING, not a stray blank line a caller printed unconditionally before calling it (found by
+    an independent review of an earlier version where every call site did exactly that)."""
+    import io
+    from contextlib import redirect_stdout
+
+    buf = io.StringIO()
+    with redirect_stdout(buf):
+        _print_citations([], _corpus_with_page1())
+    assert buf.getvalue() == ""
+
+
+class _FakeTask:
+    """A stand-in RLMTask instance — `.run(**kwargs)` returns a canned result without touching
+    dspy/rlm-kit at all, so these tests exercise `_cmd_ask`/`_cmd_guide`'s own output-formatting
+    logic in isolation. `_fake_task(result)` below is the zero-arg factory `cli._GUIDE_TASKS[kind]`
+    / `cli.AnswerQuestion` is called as (`SomeTask()`), returning an instance of this."""
+
+    def __init__(self, result) -> None:
+        self._result = result
+
+    def run(self, **kwargs):
+        del kwargs
+        return self._result
+
+
+def _fake_task(result):
+    return lambda: _FakeTask(result)
+
+
+def _live_env(monkeypatch) -> None:
+    monkeypatch.setenv("RN_MAIN_MODEL", "test/model")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+
+
+def test_cmd_ask_prints_no_trailing_blank_line_when_there_are_no_citations(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    monkeypatch.setattr(cli, "AnswerQuestion", _fake_task(Answer(text="the answer", citations=[])))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["ask", "a question", "--source", str(a)])
+    assert _cmd_ask(args) == 0
+    assert capsys.readouterr().out == "the answer\n"
+
+
+def test_cmd_guide_reports_an_empty_faq_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+    """An empty FAQ is a legitimate answer (guide.py's instructions explicitly allow it) — it must
+    not look identical to the command having silently produced no output at all."""
+    _live_env(monkeypatch)
+    monkeypatch.setitem(cli._GUIDE_TASKS, "faq", _fake_task(FAQ(items=[])))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["guide", "faq", "--source", str(a)])
+    assert _cmd_guide(args) == 0
+    out = capsys.readouterr().out
+    assert out.strip() != ""
+    assert "no FAQ items" in out
+
+
+def test_cmd_guide_reports_an_empty_timeline_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+    _live_env(monkeypatch)
+    monkeypatch.setitem(cli._GUIDE_TASKS, "timeline", _fake_task(Timeline(events=[])))
+    a = tmp_path / "a.txt"
+    a.write_text("hello", encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["guide", "timeline", "--source", str(a)])
+    assert _cmd_guide(args) == 0
+    out = capsys.readouterr().out
+    assert out.strip() != ""
+    assert "no timeline" in out

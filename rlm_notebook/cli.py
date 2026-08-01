@@ -165,9 +165,15 @@ def _prepare(args) -> tuple[Notebook, Corpus] | None:
 
 
 def _print_citations(citations: list[Citation], corpus: Corpus) -> None:
+    """Print a blank-line-separated "Citations:" block, or nothing at all if `citations` is empty
+    — the blank line is part of THIS function's output, not a separate `print()` each call site
+    must remember, so "no citations" prints nothing rather than a stray trailing blank line (an
+    independent review caught a version where every call site printed its own unconditional blank
+    line first, so a citation-less answer ended in `"...text\\n\\n"` instead of `"...text\\n"`)."""
     verified = verify_citations(citations, corpus)
     if not verified:
         return
+    print()
     print("Citations:")
     for v in verified:
         mark = "✓" if v.verified else "✗ UNVERIFIED"
@@ -192,7 +198,6 @@ def _cmd_ask(args) -> int:
     result = AnswerQuestion().run(sources=blob, history=history_text(notebook), question=args.question)
 
     print(result.text)
-    print()
     _print_citations(result.citations, corpus)
 
     notebook.turns.append(ChatTurn(question=args.question, answer=result))
@@ -218,21 +223,26 @@ def _cmd_guide(args) -> int:
 
     if args.kind == "summary":
         print(result.text)
-        print()
         _print_citations(result.citations, corpus)
     elif args.kind == "faq":
+        if not result.items:
+            # A source with nothing FAQ-worthy is a legitimate answer this task is explicitly
+            # instructed to give (guide.py) — an empty list must not look identical to "this
+            # silently produced no output," which an independent review found it did.
+            print("(no FAQ items — the sources didn't raise anything worth asking)")
         for i, item in enumerate(result.items, start=1):
             print(f"Q{i}: {item.question}\nA{i}: {item.answer}")
             _print_citations(item.citations, corpus)
             print()
     elif args.kind == "timeline":
+        if not result.events:
+            print("(no timeline — the sources don't describe a sequence of events)")
         for event in result.events:
             print(f"[{event.when}] {event.description}")
             _print_citations(event.citations, corpus)
             print()
     else:  # "insight"
         print(result.text)
-        print()
         _print_citations(result.citations, corpus)
 
     # Guide artifacts aren't cached onto the notebook or made citable as sources yet (deferred —

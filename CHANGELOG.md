@@ -127,13 +127,31 @@ questions with verifiable citations, and get a distilled research artifact out.
   task. Guide artifacts share `ask`'s citation verification (`citations.py`) unmodified — it was
   already generic over any `list[Citation]` + `Corpus`, so nothing needed to change there.
 
-  **Grounding/citation-marker/validate-before-submit instructions are now factored into
-  `instructions.py`**, shared by `AnswerQuestion` and all four Guide tasks (invariant 13) — five
-  near-identical copies of the same paragraph was a drift hazard (a wording fix landing on one
-  task and not the others), not a stylistic preference. Each task supplies only its own
-  task-specific opening sentence; `CITATION_RULES` and `validate_before_submit_rule(tool_name)` are
-  the one shared copy. Invariant 4 (citation-marker copying) is reworded to say it applies to every
-  grounded task, not just `AnswerQuestion`, since it's now literally the same instruction text.
+  **Citation-marker and validate-before-submit instructions are now factored into
+  `instructions.py`** (`CITATION_RULES`, `validate_before_submit_rule`), shared by `AnswerQuestion`
+  and all four Guide tasks (invariant 13) — five near-identical copies of the same paragraph was a
+  drift hazard (a wording fix landing on one task and not the others), not a stylistic preference.
+  Invariant 4 (citation-marker copying) is reworded to say it applies to every grounded task, not
+  just `AnswerQuestion`, since it's now literally the same instruction text. The task-specific
+  "ground only in sources" OPENING sentence each task supplies is deliberately NOT unified into
+  `instructions.py` — `AnswerQuestion`'s is worded for a missing *answer*, the Guide tasks'
+  (`guide.py:_grounded_instructions`, shared across just those four) for an unsupported *claim* —
+  and an earlier draft of this entry (and of `guide.py`'s docstring) overstated that this opening
+  was shared too, which it never was; corrected by the same independent review that found the two
+  gaps below.
+
+  **`guide` printed nothing at all for a legitimately empty FAQ/timeline.** `GenerateFAQ`/
+  `GenerateTimeline`'s instructions explicitly allow "the sources don't support any items" as an
+  honest answer (schema.py's Timeline/FAQ default to an empty list) — but `cli._cmd_guide`'s
+  per-item loop then printed literally nothing, so a source with a legitimately empty timeline
+  looked identical to a hung or broken command. Fixed with an explicit "(no FAQ items — ...)" /
+  "(no timeline — ...)" message when the list comes back empty.
+
+  **A citation-less answer printed a stray trailing blank line.** Refactoring `_cmd_ask`'s output
+  around the new shared `_print_citations` helper left every call site printing its own
+  unconditional blank line before calling it, so `"...text\n"` became `"...text\n\n"` even when
+  there were no citations to print. Fixed by moving the leading blank line INTO
+  `_print_citations` itself, printed only when there's something to print after it.
 
   **`cli._prepare` factors out the load-or-create-notebook / ingest-new-sources / print-flags setup
   `ask` and `guide` both need**, returning `(notebook, corpus)` or `None` (an error already

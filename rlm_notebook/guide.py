@@ -21,10 +21,13 @@ __all__ = ["GenerateFAQ", "GenerateKeyInsight", "GenerateSummary", "GenerateTime
 
 
 def _grounded_instructions(task_description: str, tool_name: str) -> str:
-    """Compose one Guide task's instructions: a task-specific opening paragraph, the shared
-    grounding rule, the shared citation-marker rules, and the shared validate-before-submit rule —
-    see `instructions.py`'s docstring for why the shared parts are factored out rather than
-    hand-duplicated across four task classes."""
+    """Compose one Guide task's instructions: a task-specific opening paragraph, a grounding rule
+    shared across the FOUR Guide tasks (below — worded for "generating a claim," not "answering a
+    question," so it is NOT the same text `AnswerQuestion` uses and is not in `instructions.py`;
+    don't conflate the two when editing either), then the truly cross-cutting pieces every
+    citation-grounded task (Guide AND `AnswerQuestion`) shares from `instructions.py`: the
+    citation-marker rules and the validate-before-submit rule. See `instructions.py`'s docstring
+    for why THOSE two are factored out rather than hand-duplicated across five task classes."""
     return f"""\
 {task_description} Ground EVERY claim ONLY in the `sources` text given to you as a REPL variable —
 never your own background knowledge. If the sources don't support a claim, leave it out rather

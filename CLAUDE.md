@@ -130,14 +130,19 @@ mentioned them.
     re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
     numbered starting from `len(notebook.sources) + 1`, so a source already cited in a saved
     `ChatTurn.answer` can never have its id silently repointed at different text on a later `ask`.
-13. **Every citation-grounded RLMTask shares its grounding/citation-marker/validate-before-submit
-    instructions from `instructions.py`, not a hand-copied paragraph per task.** `AnswerQuestion`
-    and the four Notebook Guide tasks (`GenerateSummary`/`GenerateFAQ`/`GenerateTimeline`/
-    `GenerateKeyInsight`) each supply only their own task-specific opening sentence; `CITATION_RULES`
-    and `validate_before_submit_rule(...)` are the ONE copy every task composes. A wording fix to
-    the shared rules must never be applied to just one task's local copy — there should be no local
-    copy to apply it to. `cli._prepare` is the same discipline applied to the ingestion/notebook
-    setup `ask` and `guide` both need before running their own task; don't reintroduce a second
-    copy of that setup either.
+13. **Every citation-grounded RLMTask shares its citation-marker and validate-before-submit
+    instructions from `instructions.py` (`CITATION_RULES`, `validate_before_submit_rule(...)`) —
+    not a hand-copied paragraph per task.** `AnswerQuestion` and the four Notebook Guide tasks
+    (`GenerateSummary`/`GenerateFAQ`/`GenerateTimeline`/`GenerateKeyInsight`) each compose the SAME
+    two shared pieces onto their own task-specific opening. A wording fix to either shared piece
+    must never be applied to just one task's local copy — there should be no local copy to apply
+    it to. **The task-specific opening (including its "ground only in sources" sentence) is
+    deliberately NOT unified across all five** — `AnswerQuestion`'s says so for a missing *answer*
+    to a question, the four Guide tasks' (`guide.py:_grounded_instructions`) says so for an
+    unsupported *claim* in a generated artifact — different enough failure modes that forcing one
+    shared sentence would blur one of them; don't read this invariant as claiming that opening is
+    shared too. `cli._prepare` is the same "one copy, not five" discipline applied to the
+    ingestion/notebook setup `ask` and `guide` both need before running their own task; don't
+    reintroduce a second copy of that setup either.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
