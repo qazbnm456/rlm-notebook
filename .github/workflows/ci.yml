@@ -1,0 +1,47 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: test (py${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+      - name: Sync
+        run: uv sync --python ${{ matrix.python-version }}
+      - name: Tests
+        run: uv run --python ${{ matrix.python-version }} python -m pytest
+
+  lint:
+    name: ruff
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@d4b2f3b6ecc6e67c4457f6d3e41ec42d3d0fcb86 # v5.4.2
+        with:
+          enable-cache: true
+      - name: Lint
+        # PINNED deliberately, matching rlm-kit/ctx-distillery — an unpinned `uvx ruff check .`
+        # resolves the latest ruff at run time and can redden CI with nobody having touched a line
+        # of code. Bump this pin on purpose, and land the resulting fixes in the SAME commit.
+        run: uvx ruff@0.16.0 check .

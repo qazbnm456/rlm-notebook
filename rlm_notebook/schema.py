@@ -1,0 +1,80 @@
+"""dspy-free data shapes shared across ingestion, the corpus blob, and the RLM task.
+
+Kept separate from `task.py` (which imports `rlm_kit.RLMTask`, and therefore `dspy`) for the same
+reason ctx-distillery split its own `schema.py` out of `task.py`: importing these shapes from
+`corpus.py`/`citations.py`/a future CLI-only code path should never drag `dspy` in.
+"""
+
+from __future__ import annotations
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+SourceKind = Literal["text", "web", "pdf"]
+
+
+class SourceBlock(BaseModel):
+    """One citable unit of a source's text, tagged with the locator a citation must echo verbatim.
+
+    A `text`/`web` source has exactly one block, `locator="whole"` — see CLAUDE.md's Scope note:
+    finer-grained (paragraph/char-offset) citation within a text/web source is a deferred follow-up.
+    A `pdf` source has one block per page, `locator="page:<n>"` (1-indexed) — pymupdf4llm's natural
+    per-page granularity, which also gives OCR'd pages the same citable grain as text-layer ones.
+    """
+
+    locator: str
+    text: str
+
+
+class Source(BaseModel):
+    """One ingested source, already parsed into citable blocks (CLAUDE.md invariant 2 — parsing
+    happens before this object exists; nothing here does any I/O)."""
+
+    id: str
+    kind: SourceKind
+    #: Human-readable origin for display (a file path or a URL) — never used as a locator.
+    origin: str
+    blocks: list[SourceBlock]
+    #: Deterministic prompt-injection heuristic flags from `injection_scan.py` (CLAUDE.md invariant
+    #: 5) — additive metadata, never a gate. Empty means "not flagged", not "verified clean".
+    flags: list[str] = Field(default_factory=list)
+
+    def marker(self, locator: str) -> str:
+        """The literal `[[SRC:<id>|<locator>]]` marker text for one of this source's blocks."""
+        return f"[[SRC:{self.id}|{locator}]]"
+
+    def block_text(self, locator: str) -> str | None:
+        """The text of the block at `locator`, or `None` if this source has no such block."""
+        for block in self.blocks:
+            if block.locator == locator:
+                return block.text
+        return None
+
+
+class Citation(BaseModel):
+    """A claimed citation. `source_id`/`locator` MUST be copied verbatim from a marker the model
+    actually saw in the corpus blob (see `task.py`'s instructions) — `citations.py` verifies this
+    coordinate exists; it does not verify `quote` is a faithful summary of that block's text (see
+    CLAUDE.md invariant 4)."""
+
+    source_id: str
+    locator: str
+    quote: str
+
+
+class Answer(BaseModel):
+    """`AnswerQuestion`'s SUBMIT shape."""
+
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class VerifiedCitation(BaseModel):
+    """A `Citation` after `citations.py` has checked it against the corpus (see `verify_citations`).
+    `verified=False` means the coordinate did not resolve — the citation is surfaced as unverified,
+    never silently dropped (CLAUDE.md invariant 4)."""
+
+    citation: Citation
+    verified: bool
+    reason: str | None = None
