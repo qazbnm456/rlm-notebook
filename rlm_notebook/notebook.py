@@ -9,7 +9,9 @@ API/UI yet, so there is exactly one writer at a time.
 
 from __future__ import annotations
 
+import os
 import re
+import tempfile
 from pathlib import Path
 
 from .corpus import Corpus
@@ -50,9 +52,25 @@ def load_notebook(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_
 
 
 def save_notebook(notebook: Notebook, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> None:
+    """Write `notebook` atomically: a same-directory temp file, `fsync`ed, then `os.replace`d onto
+    the real path. Found by an independent review that a plain `path.write_text(...)` left a
+    truncated, unparseable JSON file behind if the process was interrupted mid-write (Ctrl+C,
+    crash, power loss) — the NEXT `load_notebook` call for that id would then raise an uncaught
+    `pydantic.ValidationError` with no recovery but deleting the file, silently losing the whole
+    conversation. `os.replace` is atomic on both POSIX and Windows, so a reader only ever sees the
+    fully-old or fully-new file, never a partial one."""
     path = notebook_path(notebook.id, base_dir=base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(notebook.model_dump_json(indent=2), encoding="utf-8")
+    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            fh.write(notebook.model_dump_json(indent=2))
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_name, path)
+    except BaseException:
+        Path(tmp_name).unlink(missing_ok=True)
+        raise
 
 
 def corpus_of(notebook: Notebook) -> Corpus:

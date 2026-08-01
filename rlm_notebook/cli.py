@@ -19,6 +19,8 @@ import argparse
 import sys
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from . import __version__
 from .citations import verify_citations
 from .config import NotebookConfig, setup
@@ -70,12 +72,18 @@ def _ingest_new(values: list[str], *, start_index: int, skip_origins: set[str]) 
     """Ingest `values` not already in `skip_origins` (a notebook's existing source origins — see
     `notebook.existing_origins`), numbering ids from `start_index` so they never collide with a
     notebook's existing sources. Re-passing the same `--source` on a later turn against the same
-    notebook is therefore a cheap no-op, not a duplicate ingestion."""
+    notebook is therefore a cheap no-op, not a duplicate ingestion — and so is repeating one
+    WITHIN the same `--source ... --source ...` list on a single invocation: `seen` starts as a
+    copy of `skip_origins` and grows as this loop runs, so `--source a.txt --source a.txt` ingests
+    `a.txt` once, not twice (found by an independent review: the first version only checked the
+    caller's static set, so a duplicate value in the SAME invocation sailed through unfiltered)."""
     sources: list[Source] = []
+    seen = set(skip_origins)
     next_index = start_index
     for value in values:
-        if value in skip_origins:
+        if value in seen:
             continue
+        seen.add(value)
         source = _ingest_one(value, source_id=f"s{next_index}")
         flags = sorted({flag for block in source.blocks for flag in scan_source(block.text)})
         if flags:
@@ -86,7 +94,19 @@ def _ingest_new(values: list[str], *, start_index: int, skip_origins: set[str]) 
 
 
 def _cmd_ask(args) -> int:
-    notebook = load_notebook(args.notebook) if args.notebook else None
+    try:
+        notebook = load_notebook(args.notebook) if args.notebook else None
+    except ValidationError as exc:
+        # `save_notebook` writes atomically (temp file + os.replace), so this should only happen
+        # to a file this tool never wrote — hand-edited, or corrupted by something outside this
+        # process. Fail with a clear message rather than an uncaught pydantic traceback; there is
+        # no automatic recovery (see notebook.save_notebook's docstring).
+        print(
+            f"notebooks/{args.notebook}.json exists but is not a valid notebook file "
+            f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
+            file=sys.stderr,
+        )
+        return 1
     if notebook is None:
         notebook = Notebook(id=args.notebook or _EPHEMERAL_ID)
 

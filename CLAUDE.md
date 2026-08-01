@@ -114,7 +114,12 @@ slice; do not assume any of them exist because an earlier design discussion ment
     special-cases a citation just because a similar one appeared in an earlier turn: every citation
     in every answer is verified fresh against the CURRENT `sources` blob (invariant 5), regardless
     of what history says was cited before. A past answer being wrong, or a source having been
-    removed since, must not be inherited into a new one.
+    removed since, must not be inherited into a new one. **Residual risk, not yet verified** (the
+    same class as invariant 4's): the offline test drives a scripted LM with a fixed
+    `history="(no prior turns in this conversation)"` — it cannot demonstrate that a real model,
+    handed a history containing an EARLIER citation, reliably treats that citation as inert context
+    rather than something to reuse or re-cite without re-deriving it from `sources`. Treat that as
+    unverified until a live run confirms it, not as covered.
 12. **Extending an existing notebook with `--source` dedupes by origin, and never reassigns an
     existing source's id.** `notebook.existing_origins` + `cli._ingest_new`'s `skip_origins` make
     re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are

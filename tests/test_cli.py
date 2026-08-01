@@ -84,3 +84,29 @@ def test_ingest_new_numbers_ids_from_start_index(tmp_path):
     sources = _ingest_new([str(a), str(b)], start_index=5, skip_origins=set())
 
     assert [s.id for s in sources] == ["s5", "s6"]
+
+
+def test_ingest_new_dedupes_a_value_repeated_within_the_same_call(tmp_path):
+    """Found by an independent review: the first version only checked the caller's static
+    `skip_origins` set, so `--source a.txt --source a.txt` in ONE invocation (not across two) sailed
+    through and ingested `a.txt` twice under two different ids."""
+    a = tmp_path / "a.txt"
+    a.write_text("hello a", encoding="utf-8")
+
+    sources = _ingest_new([str(a), str(a), str(a)], start_index=1, skip_origins=set())
+
+    assert len(sources) == 1
+    assert sources[0].id == "s1"
+
+
+def test_cmd_ask_reports_a_clear_error_on_a_corrupted_notebook_file(tmp_path, monkeypatch, capsys):
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "notebooks").mkdir()
+    (tmp_path / "notebooks" / "mynb.json").write_text('{"id": "mynb", "sources": [}', encoding="utf-8")
+
+    parser = build_parser()
+    args = parser.parse_args(["ask", "a question", "--notebook", "mynb"])
+
+    assert _cmd_ask(args) == 1
+    err = capsys.readouterr().err
+    assert "mynb" in err and "not a valid notebook file" in err
