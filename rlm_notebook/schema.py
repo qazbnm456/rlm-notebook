@@ -28,7 +28,7 @@ class SourceBlock(BaseModel):
 
 
 class Source(BaseModel):
-    """One ingested source, already parsed into citable blocks (CLAUDE.md invariant 2 — parsing
+    """One ingested source, already parsed into citable blocks (CLAUDE.md invariant 3 — parsing
     happens before this object exists; nothing here does any I/O)."""
 
     id: str
@@ -56,7 +56,7 @@ class Citation(BaseModel):
     """A claimed citation. `source_id`/`locator` MUST be copied verbatim from a marker the model
     actually saw in the corpus blob (see `task.py`'s instructions) — `citations.py` verifies this
     coordinate exists; it does not verify `quote` is a faithful summary of that block's text (see
-    CLAUDE.md invariant 4)."""
+    CLAUDE.md invariant 5)."""
 
     source_id: str
     locator: str
@@ -73,8 +73,24 @@ class Answer(BaseModel):
 class VerifiedCitation(BaseModel):
     """A `Citation` after `citations.py` has checked it against the corpus (see `verify_citations`).
     `verified=False` means the coordinate did not resolve — the citation is surfaced as unverified,
-    never silently dropped (CLAUDE.md invariant 4)."""
+    never silently dropped (CLAUDE.md invariant 5)."""
 
     citation: Citation
     verified: bool
     reason: str | None = None
+
+
+class ChatTurn(BaseModel):
+    """One past (question, answer) exchange in a `Notebook`'s history."""
+
+    question: str
+    answer: Answer
+
+
+class Notebook(BaseModel):
+    """Sources plus chat history that survive across `ask` invocations (see `notebook.py`). This is
+    the whole persisted unit — one JSON file per notebook, no database."""
+
+    id: str
+    sources: list[Source] = Field(default_factory=list)
+    turns: list[ChatTurn] = Field(default_factory=list)

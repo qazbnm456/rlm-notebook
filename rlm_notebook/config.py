@@ -13,11 +13,11 @@ from __future__ import annotations
 import os
 from dataclasses import dataclass
 
-#: The one sandbox this project runs in for this slice (see CLAUDE.md invariant 2 — ingestion is
-#: host-side; the RLM chat task still runs in the sandboxed interpreter rlm-kit builds by default).
+#: The one sandbox `AnswerQuestion` ever runs in (see CLAUDE.md invariant 9 — `from_env` below
+#: refuses any other `RN_INTERPRETER` rather than silently overriding it).
 PINNED_INTERPRETER = "pyodide"
 
-#: Default cap on the assembled corpus blob (CLAUDE.md invariant 7) — a `chars`, not `tokens`,
+#: Default cap on the assembled corpus blob (CLAUDE.md invariant 8) — a `chars`, not `tokens`,
 #: budget, matching rlm-kit's own `max_output_chars` convention. This is a memory-safety cap on the
 #: pyodide/deno sandbox, not a tuning knob; raise it only once real usage shows headroom.
 _DEFAULT_MAX_CORPUS_CHARS = 8_000_000
@@ -90,7 +90,7 @@ class NotebookConfig:
         if interpreter != PINNED_INTERPRETER:
             raise SystemExit(
                 f"RN_INTERPRETER={interpreter!r} is refused — rlm-notebook only ever runs its chat "
-                f"task in the {PINNED_INTERPRETER!r} sandbox (CLAUDE.md invariant 2). Refusing "
+                f"task in the {PINNED_INTERPRETER!r} sandbox (CLAUDE.md invariant 9). Refusing "
                 f"rather than silently ignoring what you configured."
             )
         return cls(

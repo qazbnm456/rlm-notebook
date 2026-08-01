@@ -1,6 +1,6 @@
 """A deterministic, additive prompt-injection heuristic scan over ingested source text.
 
-CLAUDE.md invariant 5: this module never gates or blocks anything. `scan_source` returns a list of
+CLAUDE.md invariant 6: this module never gates or blocks anything. `scan_source` returns a list of
 flag strings; the caller (`Source.flags`) attaches them as metadata, and the answer for a flagged
 source still returns normally with the flags surfaced alongside it. This is a transparency
 mechanism, not a filter — do not wire its output to refuse a run.
