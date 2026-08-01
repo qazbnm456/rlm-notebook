@@ -70,6 +70,53 @@ class Answer(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
+class Summary(BaseModel):
+    """`GenerateSummary`'s SUBMIT shape (`guide.py`) — the key points across a notebook's sources."""
+
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class FAQItem(BaseModel):
+    """One question-and-answer pair within a `FAQ`."""
+
+    question: str
+    answer: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class FAQ(BaseModel):
+    """`GenerateFAQ`'s SUBMIT shape (`guide.py`)."""
+
+    items: list[FAQItem] = Field(default_factory=list)
+
+
+class TimelineEvent(BaseModel):
+    """One entry in a `Timeline`. `when` is free text on purpose: an explicit date if the sources
+    give one, otherwise a descriptive position ("before the trial began", "Chapter 3") — never a
+    fabricated date standing in for one the sources don't state."""
+
+    when: str
+    description: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
+class Timeline(BaseModel):
+    """`GenerateTimeline`'s SUBMIT shape (`guide.py`). `events` may legitimately be empty — sources
+    that describe no sequence of events at all should produce an empty timeline, not a fabricated
+    one."""
+
+    events: list[TimelineEvent] = Field(default_factory=list)
+
+
+class KeyInsight(BaseModel):
+    """`GenerateKeyInsight`'s SUBMIT shape (`guide.py`) — the single most important, non-obvious
+    takeaway across a notebook's sources, in one sentence."""
+
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+
+
 class VerifiedCitation(BaseModel):
     """A `Citation` after `citations.py` has checked it against the corpus (see `verify_citations`).
     `verified=False` means the coordinate did not resolve — the citation is surfaced as unverified,

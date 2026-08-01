@@ -26,12 +26,15 @@ uv pip install -e ../rlm-kit
 
 ## Scope note
 
-Two slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, and
-now a persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one
-JSON file, no database). There is still no subprocess-per-turn execution isolation, no Notebook
-Guide (summary/FAQ/timeline), no Audio Overview, and no API/UI yet — `cli.py` drives one
-`AnswerQuestion` run in-process, synchronously, per invocation. Each of those is its own follow-up
-slice; do not assume any of them exist because an earlier design discussion mentioned them.
+Three slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
+persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one JSON
+file, no database), and now a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
+generates a whole-corpus artifact (`guide.py`). There is still no subprocess-per-turn execution
+isolation, no Audio Overview, and no API/UI yet — `cli.py` drives one RLMTask run in-process,
+synchronously, per invocation. Guide artifacts are also not cached onto a notebook or made citable
+as sources for later `ask` turns yet — each `guide` call regenerates from scratch. Each of these is
+its own follow-up slice; do not assume any of them exist because an earlier design discussion
+mentioned them.
 
 ## Invariants — do not break
 
@@ -58,15 +61,17 @@ slice; do not assume any of them exist because an earlier design discussion ment
    native/C-extension dependencies unsuited to the pyodide/deno sandbox rlm-kit builds by default —
    and untrusted parsing logic has no reason to run inside the same trust boundary as the model's
    own code anyway. `corpus.py` only ever hands the RLM a plain string, already parsed.
-4. **The corpus blob uses `[[SRC:<id>|<locator>]]` markers, and `AnswerQuestion.instructions`
-   teaches the model to treat them as opaque and echo them verbatim in `Citation`.** Without an
-   explicit rule the model has no reason to preserve an ad hoc marker format across `.find()`/slice
-   operations, and `citations.py` (invariant 5) has nothing to verify against if it doesn't. Do not
-   drop or reword that instruction block when editing `task.py`. **Residual risk, not yet
-   verified**: the offline test (`test_task.py`) drives a scripted LM whose turns are fixed dicts —
-   it proves the tool-wiring/SUBMIT chain works, not that a real model reliably copies a marker
-   verbatim out of a multi-MB string it must locate itself. Treat that as unverified until a live
-   run confirms it, not as covered.
+4. **The corpus blob uses `[[SRC:<id>|<locator>]]` markers, and EVERY citation-grounded task's
+   instructions teach the model to treat them as opaque and echo them verbatim in a `Citation`.**
+   This applies to `AnswerQuestion` (`task.py`) and all four Notebook Guide tasks (`guide.py`)
+   alike — `instructions.py`'s `CITATION_RULES` is the ONE copy of this rule, imported by both
+   modules rather than hand-duplicated (see invariant 13). Without an explicit rule the model has
+   no reason to preserve an ad hoc marker format across `.find()`/slice operations, and
+   `citations.py` (invariant 5) has nothing to verify against if it doesn't. **Residual risk, not
+   yet verified**: the offline tests (`test_task.py`, `test_guide.py`) drive a scripted LM whose
+   turns are fixed dicts — they prove the tool-wiring/SUBMIT chain works, not that a real model
+   reliably copies a marker verbatim out of a multi-MB string it must locate itself. Treat that as
+   unverified until a live run confirms it, not as covered.
 5. **`citations.py` verifies coordinate existence only — never content faithfulness.** It confirms
    a claimed `source_id` exists and its `locator` resolves to real text in the corpus; it does NOT,
    and cannot cheaply, confirm the model's surrounding prose faithfully represents that text. Never
@@ -125,5 +130,19 @@ slice; do not assume any of them exist because an earlier design discussion ment
     re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
     numbered starting from `len(notebook.sources) + 1`, so a source already cited in a saved
     `ChatTurn.answer` can never have its id silently repointed at different text on a later `ask`.
+13. **Every citation-grounded RLMTask shares its citation-marker and validate-before-submit
+    instructions from `instructions.py` (`CITATION_RULES`, `validate_before_submit_rule(...)`) —
+    not a hand-copied paragraph per task.** `AnswerQuestion` and the four Notebook Guide tasks
+    (`GenerateSummary`/`GenerateFAQ`/`GenerateTimeline`/`GenerateKeyInsight`) each compose the SAME
+    two shared pieces onto their own task-specific opening. A wording fix to either shared piece
+    must never be applied to just one task's local copy — there should be no local copy to apply
+    it to. **The task-specific opening (including its "ground only in sources" sentence) is
+    deliberately NOT unified across all five** — `AnswerQuestion`'s says so for a missing *answer*
+    to a question, the four Guide tasks' (`guide.py:_grounded_instructions`) says so for an
+    unsupported *claim* in a generated artifact — different enough failure modes that forcing one
+    shared sentence would blur one of them; don't read this invariant as claiming that opening is
+    shared too. `cli._prepare` is the same "one copy, not five" discipline applied to the
+    ingestion/notebook setup `ask` and `guide` both need before running their own task; don't
+    reintroduce a second copy of that setup either.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
