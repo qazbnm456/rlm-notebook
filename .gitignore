@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.ruff_cache/
+
+# uv / virtualenv
+.venv/
+
+# Run artifacts (traces + persisted notebooks a live run writes; not source)
+/traces/
+/notebooks/
+*.jsonl
+
+# Secrets / local env (only .env.example is tracked)
+.env
+
+# Local research/design notes that fed into CLAUDE.md/CHANGELOG.md's durable invariants and
+# decisions — not tracked, per the same reasoning as not publishing raw design-debate transcripts:
+# the resolved "what and why" belongs in CLAUDE.md/CHANGELOG.md, not the working notes that
+# produced it.
+/docs/
+
+# macOS
+.DS_Store
+
+# Claude Code local overrides (never commit)
+.claude/settings.local.json
