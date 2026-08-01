@@ -13,8 +13,8 @@ See `CLAUDE.md` for the hard invariants this project is built against.
 
 ```bash
 git clone https://github.com/qazbnm456/rlm-notebook && cd rlm-notebook
-uv sync --extra ocr           # the `ocr` extra installs the local OCR backends scanned PDFs need
-cp .env.example .env          # then fill in RLM_MAIN_MODEL / RLM_API_KEY
+uv sync                       # installs the local OCR backends scanned PDFs need too — no extra flag
+cp .env.example .env          # then fill in RN_MAIN_MODEL / RN_API_KEY
 set -a; . ./.env; set +a      # nothing auto-loads .env
 brew install deno             # the sandbox a live run executes in
 ```

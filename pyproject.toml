@@ -28,18 +28,16 @@ classifiers = [
 dependencies = [
     "rlm-kit",
     "pydantic>=2.9",
-    # Ingestion (host-side only — see CLAUDE.md invariant 1): web extraction and PDF-to-text,
-    # including pymupdf4llm's built-in hybrid OCR dispatch (see the `ocr` extra for backends).
+    # Ingestion (host-side only — see CLAUDE.md invariant 1): web extraction and PDF-to-text.
     "trafilatura>=1.12",
     "pymupdf4llm>=0.0.17",
-]
-
-[project.optional-dependencies]
-# Local OCR backends pymupdf4llm auto-detects and dispatches to for scanned/image PDF pages.
-# Without this extra, pymupdf4llm still runs — it just can't OCR a page with no text layer.
-# RapidOCR (ONNX, <20MB models, CJK-strong) is primary; Tesseract is pymupdf4llm's other
-# supported local backend. Both Apache-2.0, both CPU-only. See CLAUDE.md's OCR invariant.
-ocr = [
+    # Local OCR backends pymupdf4llm auto-detects and dispatches to for scanned/image PDF pages.
+    # CLAUDE.md invariant 6: this ships INSTALLED BY DEFAULT, not as an opt-in extra — a sibling
+    # open-source project (lfnovo/open-notebook, issue #819) shipped OCR as pluggable-but-not-
+    # installed-by-default and image sources silently failed to parse in its Docker image. RapidOCR
+    # (ONNX, <20MB models, CJK-strong) is primary; Tesseract is pymupdf4llm's other supported local
+    # backend. Both Apache-2.0, both CPU-only — the combined footprint is acceptable for a project
+    # whose whole point is ingesting arbitrary documents.
     "rapidocr-onnxruntime>=1.3",
     "pytesseract>=0.3.10",
 ]

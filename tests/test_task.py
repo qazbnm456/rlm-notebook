@@ -47,6 +47,21 @@ def test_answer_question_tools_are_repl_safe():
         assert_repl_safe(tool)
 
 
+def test_answer_question_never_exposes_a_network_capable_tool():
+    """CLAUDE.md invariant 1: no fetch/network tool is ever reachable from the chat task's REPL.
+    A regression guard, not a redundant check — the risk is someone later adding
+    `make_fetch_tool(...)` to `tools=` "just to fetch one more page on request," which every other
+    test here would keep passing right through."""
+    names = {getattr(tool, "__name__", "") for tool in AnswerQuestion.tools}
+    assert not any("fetch" in name or "http" in name or "url" in name for name in names), (
+        f"AnswerQuestion.tools contains a suspiciously network-shaped tool name: {names}"
+    )
+    assert names == {"validate_answer"}, (
+        f"AnswerQuestion.tools changed to {names} — if this is intentional, re-read CLAUDE.md "
+        f"invariant 1 before adding anything with network access."
+    )
+
+
 def test_answer_question_offline_forward_pass():
     _configure()
     interpreter = ScriptedInterpreter(

@@ -24,17 +24,41 @@ class FetchError(RuntimeError):
     """A URL was unsafe to fetch, or the fetch/extraction otherwise failed."""
 
 
-def _default_fetcher(url: str, *, timeout: float = 15.0) -> str:
+def _check_safe(url: str) -> None:
     if not is_safe_url(url):
         raise FetchError(f"refused: {url!r} is not a permitted external http(s) URL")
     parsed = urlparse(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     if not resolved_host_is_safe(parsed.hostname or "", port):
         raise FetchError(f"refused: {url!r} resolves to a disallowed address")
+
+
+class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """Re-validates EVERY redirect hop against the SSRF guard before following it.
+
+    The default opener follows a `Location` header unconditionally, which would let a single 3xx
+    response bounce an initially-safe URL to an internal/loopback/metadata target with no further
+    check — `rlm_kit.tools.fetch`'s own docstring calls this out explicitly ("call it INSIDE your
+    fetcher at connection time, and on every redirect hop"); found by an independent review of the
+    first version of this module, which fetched with the default opener and had no per-hop check.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        _check_safe(newurl)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+_opener = urllib.request.build_opener(_SafeRedirectHandler)
+
+
+def _default_fetcher(url: str, *, timeout: float = 15.0) -> str:
+    _check_safe(url)
     req = urllib.request.Request(url, headers={"User-Agent": "rlm-notebook/0.1"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _opener.open(req, timeout=timeout) as resp:
             raw = resp.read()
+    except FetchError:
+        raise
     except (urllib.error.URLError, TimeoutError) as exc:
         raise FetchError(f"fetch error for {url!r}: {exc}") from exc
     return raw.decode("utf-8", errors="replace")

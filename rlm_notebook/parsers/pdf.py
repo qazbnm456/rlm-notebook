@@ -1,11 +1,11 @@
 """PDF ingestion: per-page text via `pymupdf4llm`, with automatic hybrid OCR for scanned pages.
 
-CLAUDE.md invariant 6: `pymupdf4llm.to_markdown(path, page_chunks=True)` auto-detects a page with
+CLAUDE.md invariant 7: `pymupdf4llm.to_markdown(path, page_chunks=True)` auto-detects a page with
 no text layer and dispatches it to a locally-installed OCR backend (RapidOCR primary, Tesseract
-fallback — the `ocr` extra) with no extra wiring needed here; verified end to end against a
-real image-only PDF page before landing this. Ships enabled by default (the extra is not optional
-at the dependency-resolution level for a source of this kind — see pyproject.toml), not merely
-pluggable — the pitfall named in CLAUDE.md invariant 6.
+fallback — core `dependencies` in pyproject.toml, always installed by a plain `uv sync`, not an
+opt-in extra) with no extra wiring needed here; verified end to end against a real image-only PDF
+page, AND against a clean `uv sync` with no extra flags (the mistake an earlier draft made — see
+CLAUDE.md invariant 7), before landing this.
 """
 
 from __future__ import annotations

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from rlm_notebook.parsers.web import FetchError, parse_web
+from rlm_notebook.parsers.web import FetchError, _SafeRedirectHandler, parse_web
 
 _HTML = """\
 <html><body>
@@ -49,3 +49,27 @@ def test_default_fetcher_refuses_unsafe_url_before_any_network_call():
 def test_default_fetcher_refuses_metadata_target():
     with pytest.raises(FetchError, match="refused"):
         parse_web("http://169.254.169.254/latest/meta-data/", "s1")
+
+
+def test_redirect_to_metadata_target_is_refused():
+    """A single 3xx hop must not bypass the SSRF guard: an initially-safe-looking URL that
+    redirects to an internal/metadata target must be refused at the redirect, not silently
+    followed. Found by an independent review of an earlier version of this module that fetched
+    with urllib's default opener (which follows Location headers unconditionally, unchecked)."""
+    import urllib.request
+
+    handler = _SafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/safe-looking-page")
+    with pytest.raises(FetchError, match="refused"):
+        handler.redirect_request(
+            req, None, 302, "Found", {}, "http://169.254.169.254/latest/meta-data/"
+        )
+
+
+def test_redirect_to_loopback_is_refused():
+    import urllib.request
+
+    handler = _SafeRedirectHandler()
+    req = urllib.request.Request("http://example.com/safe-looking-page")
+    with pytest.raises(FetchError, match="refused"):
+        handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:8080/internal")

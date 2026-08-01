@@ -67,13 +67,13 @@ class NotebookConfig:
     max_output_chars: int = 10_000
     adapter: str = "json"
 
-    #: rlm-notebook-specific: the size cap on the assembled corpus blob (CLAUDE.md invariant 7).
+    #: rlm-notebook-specific: the size cap on the assembled corpus blob (CLAUDE.md invariant 8).
     max_corpus_chars: int = _DEFAULT_MAX_CORPUS_CHARS
 
     #: Which OCR backend `parsers/pdf.py` dispatches scanned/image pages to. "local" (default) uses
-    #: pymupdf4llm's built-in hybrid OCR (RapidOCR/Tesseract, the `ocr` extra). "vision_llm" is a
-    #: deferred follow-up (CLAUDE.md invariant 6) — accepted here so config validation is ready for
-    #: it, but `parsers/pdf.py` does not yet implement that branch.
+    #: pymupdf4llm's built-in hybrid OCR (RapidOCR/Tesseract — core dependencies, always installed).
+    #: "vision_llm" is a deferred follow-up (CLAUDE.md invariant 7) — accepted here so config
+    #: validation is ready for it, but `parsers/pdf.py` does not yet implement that branch.
     ocr_provider: str = "local"
 
     @classmethod
