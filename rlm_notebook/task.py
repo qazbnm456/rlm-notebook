@@ -1,9 +1,10 @@
 """`AnswerQuestion` — the RLM task this slice's `ask` command drives.
 
-A thin `RLMTask` declaration, per the sibling projects' convention: `signature` names two input
+A thin `RLMTask` declaration, per the sibling projects' convention: `signature` names three input
 fields — `sources` (the corpus blob `Corpus.blob()` assembles, injected into the sandboxed REPL as
-a plain variable per rlm-kit's native mechanic — see `corpus.py`) and `question` — and one output
-field, `answer: Answer`. Everything else (retry, sandbox selection, budget caps, tracing) is
+a plain variable per rlm-kit's native mechanic — see `corpus.py`), `history` (prior turns in this
+notebook's conversation, as plain text — see `notebook.py:history_text`), and `question` — and one
+output field, `answer: Answer`. Everything else (retry, sandbox selection, budget caps, tracing) is
 inherited from `rlm_kit.RLMTask`.
 """
 
@@ -23,6 +24,13 @@ _INSTRUCTIONS = """\
 You are answering a question grounded ONLY in the `sources` text given to you as a REPL variable —
 never your own background knowledge. If the sources don't contain an answer, say so; do not fill
 the gap from what you already know.
+
+`history` is the prior turns of this same conversation (earlier questions and your earlier
+answers), oldest first, as plain text — use it ONLY to understand what a follow-up question refers
+to (e.g. what "it" or "that" means), never as a source of facts or citations in its own right. A
+past answer is not automatically still correct: re-derive and re-verify every claim and citation in
+THIS answer from `sources` fresh, exactly as if `history` did not exist for grounding purposes. If
+this is the first question in the conversation, `history` says so plainly.
 
 `sources` is a single string containing every source in this notebook. Each citable block is
 preceded by a marker line of the EXACT form `[[SRC:<source_id>|<locator>]]`, immediately followed
@@ -46,7 +54,7 @@ ends, so getting the shape right here is what you are responsible for.
 class AnswerQuestion(RLMTask):
     """Answer one question grounded in a notebook's corpus blob, with citations."""
 
-    signature = "sources: str, question: str -> answer: Answer"
+    signature = "sources: str, history: str, question: str -> answer: Answer"
     output_field = "answer"
     output_model = Answer
     instructions = _INSTRUCTIONS

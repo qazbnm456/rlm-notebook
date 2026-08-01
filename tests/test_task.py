@@ -75,6 +75,7 @@ def test_answer_question_offline_forward_pass():
     result = asyncio.run(
         task.arun(
             sources="[[SRC:s1|page:1]]\nApples are red or green.",
+            history="(no prior turns in this conversation)",
             question="What color are apples?",
         )
     )

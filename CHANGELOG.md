@@ -66,3 +66,56 @@ questions with verifiable citations, and get a distilled research artifact out.
   for a reliable `killpg`-based cancel, no pre-warmed pool. That runner (`runner.py`/`worker.py`) is
   not implemented in this slice — `cli.py` calls `AnswerQuestion.run()` in-process — and lands with
   the API/UI slice that actually needs concurrent turns and cancellation.
+
+- **Second slice: a persistent, multi-turn `Notebook`** (`schema.Notebook`/`notebook.py`) — sources
+  and chat history now survive across `ask` invocations via `--notebook <id>`, one JSON file per
+  notebook (`notebooks/<slug(id)>.json`), no database. Without `--notebook`, `ask` is unchanged
+  from the first slice (ephemeral, nothing persisted).
+
+  **History is a third signature field, not folded into `question`.** `AnswerQuestion.signature`
+  is now `sources: str, history: str, question: str -> answer: Answer`. Kept as its own field
+  (rather than string-concatenated into the question) so `AnswerQuestion.instructions` can draw a
+  sharp line: `history` is for understanding what a follow-up question refers to, never a source
+  of facts or citations — `citations.py` verifies every citation fresh against the current
+  `sources` blob every turn regardless of what an earlier turn cited (invariant 11). A past answer
+  being wrong, or a source having been removed since, must not carry forward silently.
+
+  **No summarization or truncation of growing history yet.** `notebook.history_text` renders every
+  prior turn verbatim, oldest first. An earlier round of design discussion flagged unbounded
+  history growth as something that would compound with a since-abandoned subprocess-per-turn
+  cold-start cost; with execution still in-process (see above), that compounding doesn't currently
+  apply, so truncation/summarization is deferred until real usage shows the corpus-blob size cap
+  (invariant 8) or per-turn latency actually motivates it — not implemented preemptively.
+
+  **Extending a notebook dedupes by origin, and ids are never reassigned.** `cli._ingest_new` skips
+  any `--source` value already present as an existing source's `origin`, and numbers genuinely new
+  sources starting from `len(notebook.sources) + 1` (invariant 12) — re-passing the same source on
+  a later turn is a no-op, and a source a saved `ChatTurn.answer` already cites can never have its
+  id silently repointed at different text.
+
+  **A notebook id is sanitized before it becomes a filename** (`notebook.slug`, invariant 10) — the
+  same `[A-Za-z0-9._-]`-then-length-cap treatment ctx-distillery's `cli._slug` gives a run id,
+  since `--notebook` is user input that becomes a path component.
+
+  **`notebook.save_notebook` writes atomically** (temp file in the same directory, `fsync`, then
+  `os.replace` onto the real path) rather than writing the real path directly. An independent
+  review found the direct-write version left a truncated, unparseable JSON file behind if the
+  process was interrupted mid-write (Ctrl+C, crash, power loss), with no recovery but deleting the
+  whole conversation and starting over; verified by simulating the interruption (`os.fsync`
+  monkeypatched to raise mid-save) and confirming the original file is untouched afterward.
+  `cli._cmd_ask` also now catches a `pydantic.ValidationError` from `load_notebook` — a hand-edited
+  or otherwise externally-corrupted file — and reports it clearly instead of an uncaught traceback.
+
+  **`_ingest_new`'s dedupe also covers repeats WITHIN one invocation**, not just across separate
+  `ask` calls against the same notebook. The first version only checked the caller's static
+  `skip_origins` set, so `--source a.txt --source a.txt` in a single command ingested `a.txt`
+  twice under two different ids — a `seen` set that grows as the loop runs fixes it. A second,
+  related gap the same review found — two different path SPELLINGS of the same file (e.g. a
+  relative vs. an absolute path) aren't recognized as the same origin, since `origin` is compared
+  as a plain string with no `Path.resolve()` normalization — is NOT fixed in this slice; it's a
+  data-duplication/context-dilution issue, not a correctness or security one, and is deferred.
+
+  **`AnswerQuestion`'s sandbox pin is now a numbered invariant** (9), not just a `config.py`
+  comment — found while renumbering CLAUDE.md for this slice's additions: the pin was already
+  enforced in code and tested, just never promoted to the Invariants list the way the sibling
+  projects promote theirs.

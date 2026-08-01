@@ -30,7 +30,7 @@ def test_parse_pdf_one_block_per_page_with_page_locator(tmp_path):
 
 def test_parse_pdf_ocrs_an_image_only_page(tmp_path):
     """A page with NO text layer (rendered to an image, no embedded text) is still extracted via
-    pymupdf4llm's built-in hybrid OCR — CLAUDE.md invariant 6. Slower than the text-layer test
+    pymupdf4llm's built-in hybrid OCR — CLAUDE.md invariant 7. Slower than the text-layer test
     (loads a local OCR model), but this is the one guarantee this module exists to make."""
     text_pdf = tmp_path / "source.pdf"
     _make_text_pdf(text_pdf, ["Apples are red or green."])

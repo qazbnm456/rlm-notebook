@@ -26,12 +26,12 @@ uv pip install -e ../rlm-kit
 
 ## Scope note
 
-This is an early, single-slice build: ingestion (text / web / PDF, with local hybrid OCR) plus
-citation-grounded chat. There is no multi-turn session persistence, no subprocess-per-turn
-execution isolation, no Notebook Guide (summary/FAQ/timeline), no Audio Overview, and no
-API/UI yet — `cli.py` drives one `AnswerQuestion` run in-process, synchronously. Each of those is
-its own follow-up slice; do not assume any of them exist because an earlier design discussion
-mentioned them.
+Two slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, and
+now a persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one
+JSON file, no database). There is still no subprocess-per-turn execution isolation, no Notebook
+Guide (summary/FAQ/timeline), no Audio Overview, and no API/UI yet — `cli.py` drives one
+`AnswerQuestion` run in-process, synchronously, per invocation. Each of those is its own follow-up
+slice; do not assume any of them exist because an earlier design discussion mentioned them.
 
 ## Invariants — do not break
 
@@ -99,5 +99,31 @@ mentioned them.
    currently concatenates every source in full *before* checking the length, so the cap catches an
    oversized notebook loudly but only after paying the memory cost of assembling it once — real
    memory-safety (abort while assembling) is a follow-up, not yet done.
+9. **`AnswerQuestion` always runs in the `pyodide` sandbox; `NotebookConfig.from_env` refuses any
+   other `RN_INTERPRETER` value rather than silently overriding it.** Matches the sibling projects'
+   own pin (e.g. ctx-distillery's `PINNED_INTERPRETER`) — an operator who set `RN_INTERPRETER=local`
+   believes something about this run that would not be true if the kit quietly corrected it; refusal
+   makes the misconfiguration visible instead of teaching the wrong lesson.
+10. **A notebook id is sanitized (`notebook.slug`) before it becomes a filename.** `--notebook` is
+    user input and turns directly into `<notebooks_dir>/<slug(id)>.json`; the same
+    strip-to-`[A-Za-z0-9._-]`-then-cap-length treatment ctx-distillery's `cli._slug` gives a run id,
+    for the same reason — an unsanitized id could otherwise become a traversal segment (`..`, an
+    absolute path, a nested directory) or blow past a filesystem's path-component length limit.
+11. **`history` (prior conversation turns) is context only — it is never itself a source of facts
+    or citations.** `AnswerQuestion.instructions` says so explicitly, and nothing in `citations.py`
+    special-cases a citation just because a similar one appeared in an earlier turn: every citation
+    in every answer is verified fresh against the CURRENT `sources` blob (invariant 5), regardless
+    of what history says was cited before. A past answer being wrong, or a source having been
+    removed since, must not be inherited into a new one. **Residual risk, not yet verified** (the
+    same class as invariant 4's): the offline test drives a scripted LM with a fixed
+    `history="(no prior turns in this conversation)"` — it cannot demonstrate that a real model,
+    handed a history containing an EARLIER citation, reliably treats that citation as inert context
+    rather than something to reuse or re-cite without re-deriving it from `sources`. Treat that as
+    unverified until a live run confirms it, not as covered.
+12. **Extending an existing notebook with `--source` dedupes by origin, and never reassigns an
+    existing source's id.** `notebook.existing_origins` + `cli._ingest_new`'s `skip_origins` make
+    re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
+    numbered starting from `len(notebook.sources) + 1`, so a source already cited in a saved
+    `ChatTurn.answer` can never have its id silently repointed at different text on a later `ask`.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
