@@ -20,23 +20,27 @@ uv pip install -e ../rlm-kit
 - `uv run python -m pytest -q` — the whole suite, fully offline. The dspy-bearing test
   (`test_task.py`) drives a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
   `scripted_lm`, so the planner → tools → SUBMIT chain executes for real (`importorskip("dspy")`).
+  `test_api.py`/`tests/test_runner.py` need the `api` extra installed to be collected at all (CI's
+  `uv sync --extra api` covers this — see `pyproject.toml`); without it they're silently absent
+  from the run, not failing, so a bare local `uv sync` can look greener than CI actually is.
 - A LIVE run additionally needs real model credentials and a Deno sandbox (`brew install deno`).
   Don't run it in CI; it costs money.
 - Before claiming done, actually run both commands and paste the output.
 
 ## Scope note
 
-Four slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
+Five slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
 persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one JSON
 file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
-generates a whole-corpus artifact (`guide.py`) — and now an Audio Overview — `rlm-notebook audio`
-generates a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`). There is
-still no subprocess-per-turn execution isolation and no API/UI yet — `cli.py` drives one RLMTask
-run in-process, synchronously, per invocation. Guide/audio artifacts are also not cached onto a
-notebook or made citable as sources for later `ask` turns yet — each call regenerates from
-scratch. Each of these is its own follow-up slice; do not assume any of them exist because an
-earlier design discussion
-mentioned them.
+generates a whole-corpus artifact (`guide.py`) — an Audio Overview — `rlm-notebook audio` generates
+a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`) — and now an HTTP
+API (`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, and
+`cancel`. The API is the FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather
+than in-process; `cli.py`'s synchronous in-process invocation is unaffected and unchanged. The API
+has no `/audio` endpoint and no SSE/progress streaming yet (both deferred — see CHANGELOG), and
+Guide/Audio artifacts still aren't cached onto a notebook or made citable as sources for later
+`ask` turns. Each of these is its own follow-up slice; do not assume any of them exist because an
+earlier design discussion mentioned them.
 
 ## Invariants — do not break
 
@@ -185,5 +189,37 @@ mentioned them.
     freely-named per episode.** Keeps `Utterance.speaker` a closed enum citations/voice-mapping
     can rely on, and keeps `RN_TTS_VOICE_HOST_A`/`_B` a fixed two-variable surface rather than an
     open-ended per-episode cast configuration — a deliberate MVP scope cut, not an oversight.
+20. **`ingest.py`/`notebook.py` (`is_url`/`ingest_one`/`ingest_new`, `load_or_create`,
+    `extend_with_sources`) are shared by `cli.py` AND `api.py` — neither entry point depends on the
+    other.** `cli.py` used to own this logic outright; it was extracted here once `api.py` needed
+    the identical "get me a notebook, ingest new sources into it" step, so a fix to one entry
+    point's source-handling can't be applied to only one of the two by accident. Don't reach into
+    `cli.py` from `api.py` (or the reverse) for anything — if both need it, it belongs in a shared,
+    entry-point-agnostic module.
+21. **Every API request that runs an `RLMTask` does so in an isolated subprocess
+    (`runner.py`/`worker.py`), never in-process.** This is a SEPARATE execution model from
+    `cli.py`'s synchronous in-process one — the two coexist; `cli.py` is completely unaffected.
+    `worker.py` is the ONLY module in this project's process tree that imports `dspy`/`rlm_kit`
+    from an API request path; `api.py` itself never does, so a crash deep in the model stack takes
+    down a worker subprocess, never the API server process itself.
+22. **Cancellation works via `killpg` on the WHOLE process group (`start_new_session=True` when
+    spawning), not just the worker's own PID.** Verified with a real test
+    (`test_runner.py::test_cancel_kills_the_whole_process_group_not_just_the_leader`) that spawns
+    an actual grandchild subprocess and confirms it dies too when the run is cancelled — a stuck
+    Deno grandchild in a real run must not survive as an orphan after its parent worker is killed.
+    Don't simplify this to `process.kill()` (which only signals the worker's own PID).
+23. **`api._ACTIVE_RUNS` is a single-process, in-memory map — there is no multi-worker/
+    multi-process `uvicorn` deployment story yet.** Running `uvicorn` with more than one worker
+    process would give each its own copy of this dict, and `POST .../cancel` would only reach
+    whichever worker happens to hold the request for that notebook id. A known limitation of this
+    slice (documented, not a silent bug) — a real deployment story (shared run registry) is a
+    follow-up, not implemented here.
+24. **`api._config()` converts `NotebookConfig.from_env()`'s `SystemExit` into an HTTP 500, rather
+    than letting it escape a request handler.** `cli.py` lets the same `SystemExit` propagate and
+    exit the process, which is correct for a one-shot CLI invocation — it is NOT correct for a
+    long-running server process, where an unhandled `SystemExit` inside a request handler is a
+    crash, not a clean error response. Verified against a real running server (`curl`, not just the
+    mocked test suite) before landing this: an unset `RN_MAIN_MODEL` now returns a clean 500 with
+    the same message `cli.py` would have printed, not a broken connection.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

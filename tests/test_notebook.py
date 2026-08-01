@@ -7,10 +7,13 @@ import pytest
 from pydantic import ValidationError
 
 from rlm_notebook.notebook import (
+    EPHEMERAL_ID,
     corpus_of,
     existing_origins,
+    extend_with_sources,
     history_text,
     load_notebook,
+    load_or_create,
     notebook_path,
     save_notebook,
     slug,
@@ -163,3 +166,63 @@ def test_history_text_includes_prior_turns_in_order():
     assert text.index("first?") < text.index("second?")
     assert "first answer." in text
     assert "second answer." in text
+
+
+def test_load_or_create_loads_an_existing_notebook(tmp_path):
+    save_notebook(Notebook(id="mynb", sources=[_source("s1", "a.txt")]), base_dir=tmp_path)
+    notebook = load_or_create("mynb", base_dir=tmp_path)
+    assert notebook.id == "mynb"
+    assert notebook.sources[0].origin == "a.txt"
+
+
+def test_load_or_create_returns_a_fresh_notebook_when_id_is_missing(tmp_path):
+    notebook = load_or_create("does-not-exist-yet", base_dir=tmp_path)
+    assert notebook.id == "does-not-exist-yet"
+    assert notebook.sources == []
+    assert not notebook_path("does-not-exist-yet", base_dir=tmp_path).exists()  # not persisted
+
+
+def test_load_or_create_returns_an_ephemeral_notebook_when_no_id_given(tmp_path):
+    notebook = load_or_create(None, base_dir=tmp_path)
+    assert notebook.id == EPHEMERAL_ID
+
+
+def test_load_or_create_raises_on_a_corrupted_file(tmp_path):
+    path = notebook_path("mynb", base_dir=tmp_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"id": "mynb", "sources": [}', encoding="utf-8")
+    with pytest.raises(ValidationError):
+        load_or_create("mynb", base_dir=tmp_path)
+
+
+def test_extend_with_sources_mutates_the_notebook_in_place(tmp_path):
+    a = tmp_path / "a.txt"
+    a.write_text("hello a", encoding="utf-8")
+    notebook = Notebook(id="mynb")
+
+    new_sources = extend_with_sources(notebook, [str(a)])
+
+    assert notebook.sources == new_sources
+    assert notebook.sources[0].origin == str(a)
+    assert notebook.sources[0].id == "s1"
+
+
+def test_extend_with_sources_skips_already_present_origins(tmp_path):
+    a = tmp_path / "a.txt"
+    a.write_text("hello a", encoding="utf-8")
+    b = tmp_path / "b.txt"
+    b.write_text("hello b", encoding="utf-8")
+    notebook = Notebook(id="mynb", sources=[_source("s1", str(a))])
+
+    new_sources = extend_with_sources(notebook, [str(a), str(b)])
+
+    assert [s.origin for s in new_sources] == [str(b)]
+    assert [s.origin for s in notebook.sources] == [str(a), str(b)]
+    assert notebook.sources[1].id == "s2"  # continues numbering from the existing source, not s1
+
+
+def test_extend_with_sources_appends_nothing_when_ingestion_fails(tmp_path):
+    notebook = Notebook(id="mynb", sources=[_source("s1", "a.txt")])
+    with pytest.raises(OSError):
+        extend_with_sources(notebook, [str(tmp_path / "does-not-exist.txt")])
+    assert len(notebook.sources) == 1  # unchanged

@@ -27,7 +27,10 @@ jobs:
         with:
           enable-cache: true
       - name: Sync
-        run: uv sync --python ${{ matrix.python-version }}
+        # --extra api: so tests/test_api.py (which imports rlm_notebook.api at module scope) is
+        # actually collected and run, not silently skipped. The `api` extra is opt-in for END
+        # USERS (pyproject.toml) but CI must still exercise it.
+        run: uv sync --python ${{ matrix.python-version }} --extra api
       - name: Tests
         run: uv run --python ${{ matrix.python-version }} python -m pytest
 

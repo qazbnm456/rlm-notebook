@@ -15,9 +15,14 @@ import tempfile
 from pathlib import Path
 
 from .corpus import Corpus
-from .schema import Notebook
+from .ingest import ingest_new
+from .schema import Notebook, Source
 
 DEFAULT_NOTEBOOKS_DIR = "notebooks"
+
+#: Notebook id used when the caller (CLI/API) doesn't ask for persistence — never actually
+#: persisted, so it never collides with a real notebook file on disk regardless of this string.
+EPHEMERAL_ID = "_ephemeral"
 
 #: Cap on a slugged notebook id, matching ctx-distillery's `cli._slug`/`_RUN_ID_MAX` reasoning: the
 #: id becomes a filename, and most filesystems cap one path component at 255 bytes.
@@ -84,6 +89,33 @@ def existing_origins(notebook: Notebook) -> set[str]:
     `--source` value already in this set BEFORE parsing it, so re-passing the same source on a
     later `ask` against the same notebook is a cheap no-op rather than a duplicate re-ingestion."""
     return {s.origin for s in notebook.sources}
+
+
+def load_or_create(
+    notebook_id: str | None, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR
+) -> Notebook:
+    """Load a notebook by id, or return a fresh, unpersisted one if it doesn't exist yet (or no id
+    was given at all — an ephemeral notebook). Shared by `cli._prepare` and `api.py`'s endpoints,
+    which both need the identical "get me a notebook to work with" step. Raises
+    `pydantic.ValidationError` on a corrupted file, same as `load_notebook` — the caller decides
+    how to report that (a CLI stderr message vs. an HTTP error response)."""
+    notebook = load_notebook(notebook_id, base_dir=base_dir) if notebook_id else None
+    if notebook is None:
+        notebook = Notebook(id=notebook_id or EPHEMERAL_ID)
+    return notebook
+
+
+def extend_with_sources(notebook: Notebook, new_values: list[str]) -> list[Source]:
+    """Ingest `new_values` not already present in `notebook` (by origin — see
+    `existing_origins`), append them to `notebook.sources` IN PLACE, and return just the
+    newly-added `Source` objects (so the caller can report which, if any, are flagged). Raises
+    `parsers.web.FetchError`/`ValueError`/`OSError` on an ingestion failure, same as
+    `ingest.ingest_new` (which this wraps) — nothing is appended if it raises."""
+    new_sources = ingest_new(
+        new_values, start_index=len(notebook.sources) + 1, skip_origins=existing_origins(notebook)
+    )
+    notebook.sources.extend(new_sources)
+    return new_sources
 
 
 def history_text(notebook: Notebook) -> str:

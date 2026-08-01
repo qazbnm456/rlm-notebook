@@ -44,6 +44,19 @@ def _env_int(name: str, default: int) -> int:
     return value
 
 
+def _env_float(name: str, default: float) -> float:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = float(raw.strip())
+    except ValueError:
+        raise SystemExit(f"{name}={raw!r} is not a number") from None
+    if value <= 0:
+        raise SystemExit(f"{name}={raw!r} must be a positive number (it is a timeout)")
+    return value
+
+
 def _ocr_provider_from_env() -> str:
     raw = (os.getenv("RN_OCR_PROVIDER") or "").strip() or "local"
     if raw not in _KNOWN_OCR_PROVIDERS:
@@ -89,6 +102,13 @@ class NotebookConfig:
     tts_voice_host_a: str = _DEFAULT_TTS_VOICE_HOST_A
     tts_voice_host_b: str = _DEFAULT_TTS_VOICE_HOST_B
 
+    #: `api.py`-specific: how long `runner.wait_result` waits for a subprocess run before
+    #: cancelling it (`killpg`) and reporting a timeout — a backstop distinct from rlm-kit's own
+    #: `max_iterations`/`max_llm_calls` budget (which bounds the RLM loop's *steps*, not wall-clock
+    #: time; a slow model/network can still run long past a small iteration budget). `cli.py`'s
+    #: in-process commands don't use this at all — only the subprocess-isolated API path does.
+    run_timeout_seconds: float = 300.0
+
     @classmethod
     def from_env(cls) -> NotebookConfig:
         """Read `RN_*`. Raises `SystemExit` on a missing required var or an invalid enum value."""
@@ -122,6 +142,7 @@ class NotebookConfig:
             tts_provider=(os.getenv("RN_TTS_PROVIDER") or "edge-tts").strip(),
             tts_voice_host_a=(os.getenv("RN_TTS_VOICE_HOST_A") or _DEFAULT_TTS_VOICE_HOST_A).strip(),
             tts_voice_host_b=(os.getenv("RN_TTS_VOICE_HOST_B") or _DEFAULT_TTS_VOICE_HOST_B).strip(),
+            run_timeout_seconds=_env_float("RN_RUN_TIMEOUT_SECONDS", 300.0),
         )
 
 

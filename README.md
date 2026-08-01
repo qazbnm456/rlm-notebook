@@ -4,11 +4,13 @@
 ones) — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions
 grounded in them, with a citation you can check back against the original text yourself.
 
-**Status: four slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
+**Status: five slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
 citation-grounded chat, a persistent multi-turn notebook, a Notebook Guide (summary/FAQ/
 timeline/key-insight generation), and an Audio Overview (two-host podcast script + synthesized
-speech) are implemented and driveable from the command line. Not yet built: an API/UI. See
-`CLAUDE.md` for the hard invariants this project is built against.
+speech) are all driveable from the command line — and now also from an HTTP API (`ask`/`guide`,
+each run isolated in its own cancellable subprocess). Not yet built: a browser UI, an `/audio` API
+endpoint, and SSE/progress streaming. See `CLAUDE.md` for the hard invariants this project is
+built against.
 
 ## Install and run
 
@@ -68,8 +70,28 @@ synthesis succeeds — a TTS failure doesn't lose the script. The default TTS pr
 needs no API key; set `RN_TTS_PROVIDER`/`RN_TTS_VOICE_HOST_A`/`RN_TTS_VOICE_HOST_B` in `.env` to
 change voices (see `.env.example`).
 
+## HTTP API
+
+```bash
+uv sync --extra api                                    # installs fastapi + uvicorn
+uv run uvicorn rlm_notebook.api:app
+```
+
+```bash
+curl -X POST localhost:8000/notebooks/mynb/sources -d '{"sources": ["./paper.pdf"]}'
+curl -X POST localhost:8000/notebooks/mynb/ask -d '{"question": "what does it say about X?"}'
+curl -X POST localhost:8000/notebooks/mynb/guide/summary
+curl -X POST localhost:8000/notebooks/mynb/cancel        # cancel that notebook's in-flight run
+```
+
+Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable subprocess — unlike
+`cli.py`'s in-process invocation — so one slow or stuck request can't block another, and can be
+cancelled outright. No `/audio` endpoint yet, and no SSE/progress streaming — a request blocks
+until its subprocess finishes or `RN_RUN_TIMEOUT_SECONDS` (default 300s) elapses. See `api.py`'s
+module docstring and CLAUDE.md invariants 20-24.
+
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no provider-swappable LLM configuration
 beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
-and no web UI or API. Those are follow-up work.
+no browser UI, and no `/audio` API endpoint or progress streaming. Those are follow-up work.
