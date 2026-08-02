@@ -11,7 +11,9 @@ rather than a real network call.
 
 from __future__ import annotations
 
+import asyncio
 import base64
+import json
 
 import pytest
 
@@ -77,10 +79,19 @@ def client():
     return TestClient(api.app)
 
 
+class _FakeProcess:
+    """Just enough of `asyncio.subprocess.Process` for `_RUN_PROCESSES` bookkeeping — Phase 3
+    stashes `run.process` there, so `_FakeRun` needs one even though these tests never exercise the
+    trace-stream endpoint's liveness check that actually reads `.returncode`."""
+
+    returncode: int | None = None
+
+
 class _FakeRun:
     def __init__(self, run_id: str) -> None:
         self.run_id = run_id
         self.cancelled = False
+        self.process = _FakeProcess()
 
     def cancel(self) -> None:
         self.cancelled = True
@@ -551,3 +562,238 @@ def test_cancel_calls_cancel_on_the_active_run(client):
     assert resp.status_code == 200
     assert resp.json()["cancelled"] == "mynb-abcd1234"
     assert fake_run.cancelled is True
+
+
+# --- Phase 3: client-supplied run_id + reasoning-trace endpoints ----------------------------------
+
+
+def test_derive_run_id_uses_the_client_token_when_given():
+    assert api._derive_run_id("mynb", "abc123") == "mynb-abc123"
+
+
+def test_derive_run_id_sanitizes_the_client_token():
+    """Reuses notebook.slug()'s whitelist — a client-supplied token becomes a filename component
+    too, and an unsanitized value would be the same class of path-traversal vector invariant 10
+    already closed for notebook ids."""
+    assert api._derive_run_id("mynb", "../../etc/passwd") == "mynb-etc-passwd"
+
+
+def test_derive_run_id_falls_back_to_a_server_random_token_when_none_given():
+    run_id = api._derive_run_id("mynb", None)
+    assert run_id.startswith("mynb-")
+    assert len(run_id) == len("mynb-") + 8  # uuid4().hex[:8], byte-for-byte the old scheme
+
+
+def test_ask_persists_the_client_supplied_run_id_on_the_chat_turn(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "the answer", "citations": []})
+
+    resp = client.post("/notebooks/mynb/ask", json={"question": "what?", "run_id": "myrun"})
+
+    assert resp.status_code == 200, resp.text
+    notebook = load_notebook("mynb")
+    assert notebook.turns[0].run_id == "mynb-myrun"
+    assert (api._TRACE_DIR / "mynb-myrun.jsonl").exists()
+
+
+def test_ask_persists_a_server_generated_run_id_when_none_supplied(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "the answer", "citations": []})
+
+    client.post("/notebooks/mynb/ask", json={"question": "what?"})
+
+    notebook = load_notebook("mynb")
+    assert notebook.turns[0].run_id.startswith("mynb-")
+
+
+def test_get_notebook_echoes_the_persisted_run_id_per_turn(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "the answer", "citations": []})
+    client.post("/notebooks/mynb/ask", json={"question": "what?", "run_id": "myrun"})
+
+    resp = client.get("/notebooks/mynb")
+
+    assert resp.json()["turns"][0]["run_id"] == "mynb-myrun"
+
+
+def test_ask_reports_409_when_the_run_id_collides_with_one_already_in_use(client, monkeypatch):
+    """The exclusive-create gate must reject a reused run_id BEFORE spawning a second subprocess:
+    TraceRecorder's own lock is process-local and can't stop two independent workers from
+    appending interleaved events to one file — found during this phase's own design audit, not
+    discovered as a runtime bug."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    api._TRACE_DIR.mkdir(parents=True, exist_ok=True)
+    (api._TRACE_DIR / "mynb-dupe.jsonl").touch()  # simulates an already-in-flight (or used) run_id
+
+    resp = client.post("/notebooks/mynb/ask", json={"question": "what?", "run_id": "dupe"})
+
+    assert resp.status_code == 409
+    assert "dupe" in resp.json()["detail"]
+
+
+def test_run_isolated_cleans_up_the_reserved_trace_file_when_start_run_fails(monkeypatch, tmp_path):
+    """A failed subprocess spawn must not permanently occupy the run id — otherwise a later retry
+    of the exact same notebook+token pair gets a false 409 forever instead of the real error."""
+    monkeypatch.chdir(tmp_path)
+
+    async def _boom(run_id, trace_dir, dotted_task, kwargs):
+        raise OSError("simulated spawn failure")
+
+    monkeypatch.setattr(api.runner, "start_run", _boom)
+
+    with pytest.raises(OSError, match="simulated spawn failure"):
+        asyncio.run(
+            api._run_isolated("mynb", "some:Task", {}, api.NotebookConfig(), "mynb-willfail")
+        )
+
+    assert not (api._TRACE_DIR / "mynb-willfail.jsonl").exists()
+
+
+def test_run_isolated_tracks_and_clears_run_processes(monkeypatch, tmp_path):
+    """`_RUN_PROCESSES` (keyed by run_id, NOT notebook_id) must be populated while the run is in
+    flight and cleared afterward — the whole point of adding it separately from `_ACTIVE_RUNS` was
+    a precise per-run liveness signal for the trace-stream endpoint."""
+    monkeypatch.chdir(tmp_path)
+    _mock_runner(monkeypatch, {"ok": True})
+
+    async def _run():
+        return await api._run_isolated("mynb", "some:Task", {}, api.NotebookConfig(), "mynb-tracked")
+
+    asyncio.run(_run())
+    assert "mynb-tracked" not in api._RUN_PROCESSES  # cleared once the (fake) run finished
+
+
+def _write_trace(run_id: str, events: list[dict]) -> None:
+    api._TRACE_DIR.mkdir(parents=True, exist_ok=True)
+    path = api._TRACE_DIR / f"{run_id}.jsonl"
+    with path.open("w", encoding="utf-8") as fh:
+        for i, event in enumerate(events):
+            full = {"schema": "rlm-kit/trace/v1", "run_id": run_id, "step_id": i, "ts": 0.0, **event}
+            fh.write(json.dumps(full) + "\n")
+
+
+def test_translate_trace_event_covers_the_known_event_types():
+    assert api._translate_trace_event({"type": "main_step", "step_id": 0, "payload": {}})["kind"] == "thinking"
+    assert (
+        api._translate_trace_event({"type": "tool_call", "step_id": 1, "payload": {"tool": "read"}})["kind"]
+        == "tool"
+    )
+    assert api._translate_trace_event({"type": "sub_call", "step_id": 2, "payload": {}})["kind"] == "escalation"
+    assert (
+        api._translate_trace_event({"type": "run_end", "step_id": 3, "payload": {"ok": True}})["summary"]
+        == "finished"
+    )
+    assert (
+        api._translate_trace_event({"type": "run_end", "step_id": 4, "payload": {"ok": False}})["summary"]
+        == "finished with an error"
+    )
+
+
+def test_stream_run_replays_a_finished_trace_without_waiting(client, monkeypatch):
+    _write_trace(
+        "mynb-done",
+        [
+            {"type": "run_start", "payload": {}},
+            {"type": "main_step", "payload": {"reasoning": "thinking"}},
+            {"type": "run_end", "payload": {"ok": True}},
+        ],
+    )
+
+    resp = client.get("/notebooks/mynb/runs/mynb-done/stream")
+
+    assert resp.status_code == 200
+    body = resp.text
+    assert body.count("data: ") == 3
+    assert '"kind": "done"' in body or '"kind":"done"' in body.replace(" ", "")
+
+
+def test_stream_run_reports_not_found_after_the_grace_period_when_no_trace_ever_appears(
+    client, monkeypatch
+):
+    monkeypatch.setattr(api, "_TRACE_FILE_WAIT_GRACE", 0.05)
+    monkeypatch.setattr(api, "_TRACE_POLL_INTERVAL", 0.01)
+
+    resp = client.get("/notebooks/mynb/runs/mynb-nonexistent/stream")
+
+    assert resp.status_code == 200  # SSE has already committed headers — the error is IN the stream
+    assert "not_found" in resp.text
+
+
+def test_stream_run_synthesizes_a_terminal_event_for_a_dead_process_with_no_run_end(client, monkeypatch):
+    """A killpg-cancelled run's TraceRecorder never reaches __exit__, so no run_end is ever
+    written — the stream must still reach a terminal state instead of hanging forever."""
+    monkeypatch.setattr(api, "_TRACE_POLL_INTERVAL", 0.01)
+    _write_trace("mynb-killed", [{"type": "run_start", "payload": {}}])
+    # No entry in _RUN_PROCESSES at all == "no longer tracked as alive", the same state a
+    # finished-and-cleaned-up (or never-tracked) run would be in.
+
+    resp = client.get("/notebooks/mynb/runs/mynb-killed/stream")
+
+    assert resp.status_code == 200
+    assert "done" in resp.text
+
+
+def test_citation_turn_finds_the_first_event_containing_the_marker(client):
+    _write_trace(
+        "mynb-cit",
+        [
+            {"type": "main_step", "payload": {"reasoning": "reading around", "output": "nothing here"}},
+            {"type": "main_step", "payload": {"output": "found [[SRC:s1|whole]] right here"}},
+            {"type": "main_step", "payload": {"output": "[[SRC:s1|whole]] appears again later"}},
+        ],
+    )
+
+    resp = client.get("/notebooks/mynb/runs/mynb-cit/citation-turn?source_id=s1&locator=whole")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["step_id"] == 1  # the FIRST matching event, not the second
+
+
+def test_citation_turn_finds_the_marker_in_a_sub_call_event_not_just_main_step(client):
+    """Regression coverage for the exact bug audit round 1 found: a hardcoded
+    reasoning/code/output field list misses a sub_call event's real payload keys
+    (input/raw/processed/etc). Searching the whole serialized payload must not repeat that."""
+    _write_trace(
+        "mynb-sub",
+        [
+            {
+                "type": "sub_call",
+                "payload": {
+                    "kind": "escalation", "name": "summarize", "model": "test/model",
+                    "input": "please summarize [[SRC:s1|page:2]]", "raw": "...", "processed": "...",
+                },
+            }
+        ],
+    )
+
+    resp = client.get("/notebooks/mynb/runs/mynb-sub/citation-turn?source_id=s1&locator=page:2")
+
+    assert resp.status_code == 200
+    assert resp.json()["type"] == "sub_call"
+
+
+def test_citation_turn_404s_when_the_trace_file_does_not_exist():
+    client = TestClient(api.app)
+    resp = client.get("/notebooks/mynb/runs/mynb-never-ran/citation-turn?source_id=s1&locator=whole")
+    assert resp.status_code == 404
+
+
+def test_citation_turn_404s_when_no_event_contains_the_marker(client):
+    _write_trace("mynb-nomatch", [{"type": "main_step", "payload": {"output": "nothing relevant"}}])
+
+    resp = client.get("/notebooks/mynb/runs/mynb-nomatch/citation-turn?source_id=s1&locator=whole")
+
+    assert resp.status_code == 404
+
+
+def test_citation_turn_404s_when_run_id_does_not_belong_to_the_notebook(client):
+    _write_trace("othernb-run", [{"type": "main_step", "payload": {"output": "[[SRC:s1|whole]]"}}])
+
+    resp = client.get("/notebooks/mynb/runs/othernb-run/citation-turn?source_id=s1&locator=whole")
+
+    assert resp.status_code == 404

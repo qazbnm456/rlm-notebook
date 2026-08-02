@@ -86,10 +86,11 @@ were all considered and rejected first):
 - **Public Sans** — all UI chrome: nav, labels, buttons, form fields, the chat turns themselves. US
   Web Design System typeface, built around clarity/accessibility/trust — thematically aligned with a
   citation-verifiable-truth product. The body default (`body { font-family: "Public Sans", ... }`).
-- **JetBrains Mono** — reserved ONLY for the (currently unbuilt, blueprint §5.5) reasoning-trace
-  panel, the one deliberate callback to the sibling studios' technical identity, kept exactly where
-  the product intentionally echoes a developer-console reading and nowhere else (`.trace-face` class
-  reserved for it, unused in Phase 1).
+- **JetBrains Mono** — the one deliberate callback to the sibling studios' technical identity, kept
+  exactly where the product intentionally echoes a developer-console reading: Phase 3's reasoning
+  ticker (`.ticker-toggle`/`.ticker-detail`) and the citation-turn detail payload
+  (`.citation-detail-payload`) — nowhere else. The `.trace-face` class reserved for it in Phase 1/2
+  went unused until Phase 3 actually needed it.
 
 ## 5. Components
 
@@ -113,7 +114,9 @@ Turn history, oldest first, scrolled to bottom on append. A question renders as 
 accent-filled bubble; an answer renders left-aligned in a bordered well, with citations rendered inline
 per §2 plus a compact citation list below (source id + locator, a checkmark or an "unverified" flag).
 A pending turn (the model is still running — this is a real, potentially tens-of-seconds-long RLM
-loop, invariant 21) shows "Thinking…" in muted italic rather than a blank gap. An error surfaces
+loop, invariant 21) shows LIVE, updating copy from the Phase 3 reasoning ticker (§5.6) in place of a
+static "Thinking…" — the ticker is a secondary, opt-in layer; losing it (a dropped SSE connection)
+never blocks the request, which remains the sole source of the final answer. An error surfaces
 in-place as `(error) <message>`, never a silent disappearance of the question the user just asked.
 
 ### 5.4 Studio (right rail, ~340px)
@@ -133,7 +136,27 @@ doesn't sit fully base64-encoded in a DOM attribute for its whole lifetime) plus
 it, one `.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
 collapse-when-empty (still deferred — no phase has needed it yet).
 
-### 5.5 States
+### 5.5 Reasoning-trace ticker + citation-turn detail (Phase 3)
+
+Every `ask`/Guide-tab/podcast-generate call picks its OWN run id client-side (`crypto.randomUUID()`,
+prefixed with the notebook id — the client, never the server, since a server-generated id would
+never reach the page until the request was already over) and opens a live SSE ticker against it
+alongside the actual request. While pending, the ticker's translated `{kind, summary}` events
+replace the static "Thinking…"/"Generating…" copy with live-updating copy in the SAME slot — this
+is not a new UI element, just a livelier version of an existing one. Once the request settles, the
+ticker log (already held in memory, nothing re-fetched) collapses into a small `⌁ N steps`
+pill (`.ticker-toggle`) that expands a plain-text log (`.ticker-detail`) on click.
+
+Every citation span with a known run id becomes clickable (`.citation-clickable`): clicking it
+calls `GET .../citation-turn` and fills a single shared `.citation-detail` slot per answer (not one
+per citation — clicking a different citation replaces the previous detail rather than
+accumulating) with the raw trace-event payload, monospaced, and an explicit note that this shows
+WHERE the model read the source, never a faithfulness proof (CLAUDE.md invariant 5's limit,
+restated here rather than let the UI imply something stronger). A turn with no `run_id` (saved
+before this field existed) simply has no clickable citations — a graceful, silent degradation, not
+a broken link.
+
+### 5.6 States
 | state | what shows |
 |---|---|
 | no notebook opened | Sources: empty-note. Chat: empty-note. Studio: "pick a tab" prompt, no podcast section content. |
@@ -147,14 +170,21 @@ collapse-when-empty (still deferred — no phase has needed it yet).
 | podcast generating | Studio: "Generating script and synthesizing audio — this can take a while…" in muted italic; the Generate button is disabled. |
 | podcast script has no utterances | Studio: "(no podcast script — the sources didn't produce enough to discuss)", no player. |
 | podcast generation fails (script OR synthesis) | Studio: an inline `(error) …` line; the Generate button re-enables. |
+| a run in flight, ticker connected | The pending slot's copy updates live from translated trace events instead of staying static. |
+| a run's ticker drops (SSE error/close) | The pending slot simply stops updating — the request itself is unaffected and still resolves normally. |
+| a completed turn/tab/episode with a known run id | A `⌁ N steps` pill appears; clicking expands the plain-text event log. |
+| a citation clicked (run id known) | A shared detail slot below the answer fills with the matching trace turn's payload, or an inline `(error) …`/"not found" message. |
+| a citation clicked (no run id — a pre-Phase-3 saved turn) | Nothing — the citation simply isn't clickable, no broken affordance shown. |
 
 ## 6. Depth / motion
 
 Minimal: 1px hairline borders between surface steps, `var(--radius)` (6px) on interactive elements,
 no glassmorphism, no marketing gradients. The header uses a subtle `backdrop-filter: blur` over a
-translucent background, matching the sibling studios' sticky-header treatment. No motion beyond
-default browser focus/hover states in Phase 1 — Phase 3's live reasoning ticker (deferred, blueprint
-§5.5) is where a real motion signature belongs, not this phase's static panels.
+translucent background, matching the sibling studios' sticky-header treatment. Phase 3's ticker is
+deliberately NOT an animated signature — it's plain live-updating TEXT in an existing pending slot,
+no spinner, no pulse, no sweep. The one new interaction affordance (`.ticker-toggle`,
+`.citation-clickable`) uses only the existing hover/focus language already established for buttons
+and tabs, not a new visual language of its own.
 
 ## 7. Responsive
 
@@ -170,12 +200,14 @@ an injection-scan hit, never hide either; show every state explicitly (pending, 
 than a blank gap; keep `--accent`/`--studio-accent` non-cross-used.
 
 **Don't**: no Inter, no Fraunces, no centered marketing hero, no purple/blue gradient; don't imply a
-citation's surrounding prose is faithful to the source, only that its coordinates resolve; don't build
-the reasoning-trace/live-ticker surface here — it's deliberately deferred (blueprint §5.5) until its
-own redesign lands; don't collapse the Studio panel yet — no phase has needed it yet; don't
-auto-fetch a Guide kind on notebook open or on a bare tab switch — only first activation or an
-explicit regenerate; don't use a `data:` URI for the podcast player — a `Blob`/`ObjectURL` instead,
-revoked in the correct order (assign the new URL before revoking the old one, never the reverse).
+citation's surrounding prose is faithful to the source, only that its coordinates resolve, and don't
+let the citation-turn detail panel imply a stronger claim either — it shows WHERE the model read
+something, never that the surrounding prose is faithful to it; don't collapse the Studio panel yet
+— no phase has needed it yet; don't auto-fetch a Guide kind on notebook open or on a bare tab switch
+— only first activation or an explicit regenerate; don't use a `data:` URI for the podcast player —
+a `Blob`/`ObjectURL` instead, revoked in the correct order (assign the new URL before revoking the
+old one, never the reverse); don't let a dropped ticker connection block or alter the actual
+request's own result — the ticker is strictly secondary.
 
 ## 9. Acceptance (in a browser)
 
@@ -198,3 +230,12 @@ revoked in the correct order (assign the new URL before revoking the old one, ne
    line highlighted the same way a Chat citation is. Regenerating replaces the player without ever
    leaving two object URLs alive at once (check via a memory profiler or simply confirming the old
    `blob:` URL 404s after regenerating).
+9. Asking a question shows LIVE, updating ticker copy in the pending slot (not static "Thinking…")
+   while the run is in flight; once it settles, a `⌁ N steps` pill appears next to the answer, and
+   clicking it expands a plain-text log of what the ticker showed.
+10. Clicking a highlighted citation (in Chat, a Guide tab, or the podcast transcript) shows a
+    detail panel with the trace turn where the model read that source — clicking a SECOND citation
+    in the same answer replaces the panel rather than stacking a second one below it.
+11. Reloading the page and reopening a notebook whose history predates Phase 3 (no `run_id` on
+    those turns) shows those old turns with plain, non-clickable citations and no `⌁` pill — a
+    graceful degradation, not a broken affordance.

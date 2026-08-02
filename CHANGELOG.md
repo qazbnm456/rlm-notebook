@@ -426,3 +426,70 @@ questions with verifiable citations, and get a distilled research artifact out.
   **Deliberately NOT in this slice**: Phase 3 (the live reasoning-trace ticker) remains held back,
   same reasons as before. The full source-text viewer (and Literata, the typeface reserved for it)
   is still unbuilt.
+
+- **Eighth slice: web UI Phase 3 — reasoning-trace fusion (live ticker + citation-turn linking)**.
+  The blueprint's Phase 3 addendum was redesigned from scratch (its own two audit rounds, before
+  any code was written) to resolve the two blockers the ORIGINAL Phase 3 design was pulled over:
+  no `run_id` ever reached a client mid-run, and citation-to-trace-turn linking had no data model.
+
+  **The client picks the run id, never the server** — `ask`/`guide`/`audio` all gain an optional
+  `run_id` body field (a shared `RunOptions` model); when given, it's sanitized through the SAME
+  whitelist `notebook.slug()` already uses and always prefixed with `notebook_id`. This is the
+  toolscout-studio pattern (a previewed run id the solve call sends explicitly), not a fire-and-poll
+  rewrite of endpoints Phase 1/2 already shipped and audited — fully additive, byte-for-byte
+  unchanged behavior for any caller that doesn't supply one.
+
+  **Real concurrency bugs found and fixed before implementation, not discovered as runtime bugs.**
+  The redesign's own first pre-implementation audit found 3 blockers, all clustered around one
+  blind spot: same-notebook concurrency was never stress-tested against a client-controlled run id.
+  (1) Two concurrent requests deriving the same run id would have let two independent worker
+  subprocesses append interleaved, duplicate-`step_id` events to one trace file —
+  `TraceRecorder`'s own lock is process-local and provides zero cross-process serialization. Fixed
+  with a hard uniqueness gate: `_run_isolated` now exclusively creates the trace file
+  (`O_CREAT|O_EXCL`) before spawning anything, mapping a collision to 409. (2) The originally
+  planned cancelled-run liveness check reused `_ACTIVE_RUNS` (notebook-id-keyed, one slot per
+  invariant 23), which would misfire the moment a second concurrent request on the same notebook
+  overwrote the first's entry — fixed with a NEW, run-id-keyed `_RUN_PROCESSES` map, decoupled
+  entirely from `_ACTIVE_RUNS`'s single-slot semantics. (3) The citation-lookup search's field list
+  was verified wrong against `rlm_kit.sub_lm`'s real `sub_call` payload shape (`input`/`raw`/
+  `processed`/etc, not `reasoning`/`code`/`output`) — fixed by searching a trace event's ENTIRE
+  serialized payload rather than a hardcoded field list. A second, targeted audit round then found
+  2 more real gaps in the collision-gate fix itself (a directory-existence race with a fresh
+  checkout's very first run, and a missing cleanup path that would have permanently false-409'd a
+  retry after a failed subprocess spawn) — both fixed before implementation started.
+
+  **`GET /notebooks/{id}/runs/{run_id}/stream`** — one SSE endpoint serving both a live tail (the
+  run is still in progress) and a replay (the run already finished) from the same polling loop,
+  verified safe against `rlm_kit/trace.py`'s actual write behavior: `TraceRecorder.record()` writes
+  one complete, flushed JSON line per event under its own lock, so a reader that buffers any
+  trailing partial line can never see a torn or interleaved line. Synthesizes a terminal event for
+  a `killpg`-cancelled run whose `TraceRecorder.__exit__` never got to write `run_end`, the same fix
+  `ctx-distillery-studio` already documents for the identical failure mode.
+
+  **`GET /notebooks/{id}/runs/{run_id}/citation-turn`** — a small, separate lookup (not a reuse of
+  the live stream, which would ship a whole trace to the client just to search it) for "which trace
+  turn shows the model reading this citation's source span." A heuristic, stated as one: finding
+  the marker proves the model's REPL saw it, never that this occurrence is what the model relied
+  on — the same "coordinate, not faithfulness" limit invariant 5 already states for citation
+  verification generally. `schema.ChatTurn.run_id` (new, optional, backward-compatible) is the ONE
+  schema change needed — Guide/Audio results still aren't persisted onto a notebook at all, so
+  their citation links only need to work within the current browser session, which the client's
+  own in-memory run id already satisfies with no server round-trip or schema change.
+
+  **Frontend**: every `ask`/Guide-tab/podcast-generate call opens a live ticker alongside the
+  actual request, replacing static "Thinking…"/"Generating…" copy with live-updating copy in the
+  SAME pending slot — deliberately not a new UI element, and deliberately a SECONDARY layer: losing
+  the ticker (a dropped SSE connection) never blocks or alters the request's own result. Every
+  citation with a known run id becomes clickable, filling one shared detail slot per answer with
+  the matching trace turn. The Phase 2 Guide-tab cache's value shape widened to `{result, runId}`
+  (an earlier draft only cached the result, which would have lost the run id the moment a user
+  switched tabs and back — found and fixed during the redesign, before implementation).
+
+  **Known, stated limitations, not solved by this phase**: no trace-file retention policy exists
+  anywhere in this project — a citation's "view reasoning" link is only as durable as a file
+  nobody has committed to keeping (a missing trace degrades that ONE affordance, never the rest of
+  the page); a `sub_call` event's `input` field is truncated to 4000 characters upstream
+  (`rlm_kit.sub_lm`), a real source of false negatives in the citation-turn search. The trace
+  stream and citation-turn endpoints inherit invariant 25's no-auth posture as a materially
+  different, sharper exposure than every other endpoint (they can surface full ingested source
+  text, not just metadata/prose) — stated explicitly in CLAUDE.md, not left implicit.

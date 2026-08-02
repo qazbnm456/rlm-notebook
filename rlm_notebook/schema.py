@@ -154,6 +154,13 @@ class ChatTurn(BaseModel):
 
     question: str
     answer: Answer
+    #: The run id `api.py` used for the RLMTask that produced this turn, if any — `None` for any
+    #: turn saved before this field existed (backward-compatible: pydantic defaults it, no
+    #: migration needed) or for a turn created outside the API (e.g. `cli.py`, which has no
+    #: subprocess-per-run concept to name). Lets the web UI's Chat panel offer a "view reasoning"
+    #: link back to `traces/{run_id}.jsonl` on a re-opened notebook's history, even long after the
+    #: run finished — see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum.
+    run_id: str | None = None
 
 
 class Notebook(BaseModel):

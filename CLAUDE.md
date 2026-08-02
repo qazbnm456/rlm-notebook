@@ -34,16 +34,17 @@ persistent multi-turn `Notebook` (sources + history surviving across `ask` invoc
 file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
 generates a whole-corpus artifact (`guide.py`) — an Audio Overview — `rlm-notebook audio` generates
 a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`) — an HTTP API
-(`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, `audio`, and
-`cancel` — and a web UI (`rlm_notebook/web/`, invariant 29), Phases 1 AND 2 of a 3-phase blueprint
-now shipped: a real end-user product surface (Sources/Chat/Studio with Guide tabs and a podcast
-player), NOT a replay-only trace console like the sibling projects' `studio/`s. The API is the
-FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather than in-process; `cli.py`'s
-synchronous in-process invocation is unaffected and unchanged. The API still has no SSE/progress
-streaming (deferred — see CHANGELOG; the web UI's own Phase 3 needs exactly this, and was designed,
-audited, and found unbuildable as scoped — invariant 29), and Guide/Audio artifacts still aren't
-cached onto a notebook or made citable as sources for later `ask` turns. Each of these is its own
-follow-up slice; do not assume any of them exist because an earlier design discussion mentioned
+(`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, `audio`, `cancel`,
+and now a live reasoning-trace stream + a citation-turn lookup — and a web UI (`rlm_notebook/web/`,
+invariant 29), all 3 phases of its blueprint now shipped: a real end-user product surface
+(Sources/Chat/Studio with Guide tabs, a podcast player, and a live "what is the model doing right
+now" ticker fused with citations), NOT a replay-only trace console like the sibling projects'
+`studio/`s. The API is the FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather
+than in-process; `cli.py`'s synchronous in-process invocation is unaffected and unchanged. Guide/
+Audio artifacts still aren't cached onto a notebook or made citable as sources for later `ask`
+turns, there's still no trace-file retention policy anywhere in this project, and there's still no
+multi-worker `uvicorn` deployment story for `_ACTIVE_RUNS`/`_RUN_PROCESSES`. Each of these is its
+own follow-up slice; do not assume any of them exist because an earlier design discussion mentioned
 them.
 
 ## Invariants — do not break
@@ -315,10 +316,62 @@ them.
     already cleared this notebook's `_ACTIVE_RUNS` entry, so a stuck synthesis call blocks its
     request with no `killpg`-equivalent to reach it.
 
-    Phase 3 (a live reasoning-trace ticker fused with citations) remains a separate,
-    not-yet-scheduled slice — it was designed, independently audited, and found unbuildable as
-    originally scoped (no `run_id` ever reaches a client mid-run; citation-to-trace-turn linking has
-    no data model), so it needs its own follow-up design pass before it gets a phase number back.
-    Don't assume it exists because the blueprint discusses it.
+    **Phase 3 (a live reasoning-trace ticker fused with citations) is shipped.** Its original
+    design was pulled and redesigned before implementation — the redesign resolved all three of the
+    original blockers:
+
+    - **The client picks the run id, never the server** (`RunOptions.run_id`, a shared optional
+      body field on `ask`/`guide`/`audio`). A server-generated id never reaches a client mid-run;
+      a client-supplied one lets the caller open `GET /notebooks/{id}/runs/{run_id}/stream` before
+      or alongside the request that will populate it — the same pattern `toolscout-studio` already
+      ships (a previewed run id the solve call sends explicitly). `_derive_run_id` sanitizes a
+      given token through the SAME whitelist `notebook.slug()` uses (it becomes a filename
+      component) and always prefixes it with `notebook_id` — never the client's raw value alone.
+    - **`_run_isolated` exclusively creates `traces/{run_id}.jsonl` before spawning anything** —
+      `os.open(path, O_CREAT|O_EXCL|O_WRONLY)`, mapped to a 409 on `FileExistsError`. Not
+      optional hardening: `TraceRecorder`'s own lock (`rlm_kit/trace.py`) is process-local and
+      gives ZERO cross-process serialization, so two concurrent requests landing on the same
+      run_id — two browser tabs, a retried request, nothing in this no-auth API prevents it —
+      would otherwise have two independent worker subprocesses append interleaved,
+      duplicate-`step_id` events to one file. A collision found during this phase's own
+      pre-implementation audit, not a hypothetical. If the exclusive-create succeeds but
+      `runner.start_run` then fails to spawn, the just-reserved (still-empty) file is unlinked
+      before the error propagates — otherwise a failed spawn permanently occupies that run id and
+      a legitimate retry gets a false 409 forever.
+    - **`_RUN_PROCESSES` (run-id-keyed) is a SEPARATE map from `_ACTIVE_RUNS` (notebook-id-keyed),
+      deliberately not reused.** An earlier draft of this phase's own design planned to reuse
+      `_ACTIVE_RUNS` to detect a cancelled/dead run for the trace stream's termination logic — a
+      second audit round found this misfires under ordinary same-notebook concurrency: invariant
+      23's single slot per notebook id means a second concurrent request overwrites the first's
+      entry, which would make the FIRST run's stream falsely conclude it was cancelled the moment
+      a second one starts. `_RUN_PROCESSES` is keyed by the actual (now-guaranteed-unique) run id
+      instead, so two concurrent runs on one notebook get two independent, non-colliding entries.
+    - **Citation-to-turn linking is a separate, small lookup endpoint**
+      (`GET /notebooks/{id}/runs/{run_id}/citation-turn?source_id=&locator=`), not a reuse of the
+      live stream — searches a trace's events in step order for the first one whose ENTIRE
+      serialized payload (`json.dumps(event["payload"])`, not a fixed field list) contains the
+      literal marker `[[SRC:<source_id>|<locator>]]`. Searching the whole payload rather than named
+      fields is itself a fix: an earlier draft hardcoded `reasoning`/`code`/`output`, which a
+      second audit round found is simply the WRONG field list for a `sub_call` event
+      (`rlm_kit.sub_lm`'s real keys are `kind`/`name`/`model`/`attempt`/`input`/`raw`/`processed`/
+      `error`) — a citation whose marker only appears in a sub-LM escalation would have silently
+      404'd. `schema.ChatTurn.run_id` (new, optional, backward-compatible) is the ONE schema
+      change this needed — Guide/Audio results still aren't persisted onto a notebook at all
+      (unchanged scope), so their citation links only need to work within the current browser
+      session, which the client's own already-in-memory run id already satisfies with no server
+      round-trip.
+
+    **Known, stated limitations, not solved by this phase**: no trace-file retention policy exists
+    anywhere in this project (a citation's "view reasoning" link is only as durable as a file
+    nobody has committed to keeping — a missing trace degrades that ONE affordance, never the rest
+    of the page); the marker-search endpoint is a heuristic (finding the marker text proves the
+    model's REPL saw it, never that this occurrence is what the model relied on — the same
+    "coordinate, not faithfulness" limit invariant 5 already states for citation verification
+    generally), and a `sub_call` event's `input` field is truncated to 4000 characters upstream
+    (`rlm_kit.sub_lm`), a real (if partial) source of false negatives. The trace stream and
+    citation-turn endpoints are a MATERIALLY DIFFERENT exposure than every other endpoint in this
+    API — unlike metadata-only or model-authored-prose responses, a trace can contain full ingested
+    source text the model echoed while reading it; both inherit invariant 25's no-auth posture as a
+    sharper version of the same accepted risk, not a new category of it.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
