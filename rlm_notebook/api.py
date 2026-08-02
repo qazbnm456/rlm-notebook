@@ -4,13 +4,18 @@ rather than in-process, so concurrent requests can't block each other and a long
 request can be reliably cancelled (`killpg` on the whole process group) — see CLAUDE.md's
 execution-model invariant. `cli.py`'s synchronous in-process invocation is completely unaffected.
 
-Endpoints: `POST /notebooks/{id}/sources` (create/extend), `GET /notebooks/{id}`,
-`POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`, `POST /notebooks/{id}/cancel`.
-No `/audio` endpoint yet (deferred — see CHANGELOG): Audio Overview synthesis is slower and
-heavier than the others, and wiring its own subprocess-run bookkeeping through this same
-`_run_isolated` path deserved its own slice rather than being rushed into this one. No SSE/progress
-streaming either — a request blocks until its subprocess finishes or the configured timeout hits;
-also deferred (see CHANGELOG).
+Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend),
+`GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
+`POST /notebooks/{id}/cancel`. No `/audio` endpoint yet (deferred — see CHANGELOG): Audio Overview
+synthesis is slower and heavier than the others, and wiring its own subprocess-run bookkeeping
+through this same `_run_isolated` path deserved its own slice rather than being rushed into this
+one. No SSE/progress streaming either — a request blocks until its subprocess finishes or the
+configured timeout hits; also deferred (see CHANGELOG; see also
+`docs/design/web-ui-blueprint.md`'s §5.5 for why a reasoning-trace SSE endpoint was deliberately
+NOT added this slice — it was designed, audited, and found unbuildable as scoped).
+
+This module also serves the web UI (`rlm_notebook/web/`, a zero-build static HTML/CSS/JS app) at
+`/`, mounted AFTER every API route below so the API always wins on a path collision.
 
 **This API has NO authentication or authorization of any kind** (CLAUDE.md invariant 25) — any
 caller can create/extend/query/ask/cancel any `notebook_id`. It is meant for local/trusted-network
@@ -26,6 +31,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import runner
@@ -38,6 +44,7 @@ from .notebook import (
     corpus_of,
     extend_with_sources,
     history_text,
+    list_notebook_summaries,
     load_notebook,
     load_or_create,
     save_notebook,
@@ -121,24 +128,94 @@ def _load_notebook_or_404(notebook_id: str) -> Notebook:
     return notebook
 
 
+class CitationResponse(BaseModel):
+    source_id: str
+    locator: str
+    quote: str
+    verified: bool
+    reason: str | None = None
+
+
+def _citation_responses(citations: list[Citation], corpus) -> list[CitationResponse]:
+    return [
+        CitationResponse(
+            source_id=v.citation.source_id,
+            locator=v.citation.locator,
+            quote=v.citation.quote,
+            verified=v.verified,
+            reason=v.reason,
+        )
+        for v in verify_citations(citations, corpus)
+    ]
+
+
+class NotebookSummary(BaseModel):
+    id: str
+    source_count: int
+    turn_count: int
+
+
+class NotebookListResponse(BaseModel):
+    notebooks: list[NotebookSummary]
+    unreadable: list[str] = []
+
+
+@app.get("/notebooks", response_model=NotebookListResponse)
+async def list_notebooks() -> NotebookListResponse:
+    """Every notebook that exists, for the web UI's notebook switcher. Reads the same
+    `notebook.DEFAULT_NOTEBOOKS_DIR` constant every other notebook operation already uses — there is
+    no separate config surface for this (checked: `NotebookConfig` has no notebooks-directory field
+    at all; see `docs/design/web-ui-blueprint.md`'s audit note). Reports each notebook's own `id`
+    field, never the slugged filename stem (`notebook.slug()` is lossy, so the two can differ for
+    the same file). A corrupted notebook file is listed under `unreadable` by its filename stem
+    rather than silently dropped or breaking the whole listing."""
+    notebooks, unreadable = list_notebook_summaries()
+    return NotebookListResponse(
+        notebooks=[
+            NotebookSummary(id=nb.id, source_count=len(nb.sources), turn_count=len(nb.turns))
+            for nb in notebooks
+        ],
+        unreadable=unreadable,
+    )
+
+
 class SourcesRequest(BaseModel):
     sources: list[str] = []
+
+
+class ChatTurnResponse(BaseModel):
+    question: str
+    answer: str
+    citations: list[CitationResponse]
 
 
 class NotebookResponse(BaseModel):
     id: str
     sources: list[dict]
-    turn_count: int
+    turns: list[ChatTurnResponse]
 
 
 def _notebook_response(notebook: Notebook) -> NotebookResponse:
+    """Includes full turn history, not just a count — the web UI's Chat panel (blueprint §1) needs
+    to render a re-opened notebook's past turns, not just ones asked during the current session.
+    Every historical turn's citations are re-verified against the CURRENT corpus at read time, same
+    as a brand-new answer (CLAUDE.md invariant 11: history is never itself a trusted source of
+    facts, and a citation is verified fresh every time regardless of what a past turn recorded)."""
+    corpus = corpus_of(notebook)
     return NotebookResponse(
         id=notebook.id,
         sources=[
             {"id": s.id, "kind": s.kind, "origin": s.origin, "flags": s.flags}
             for s in notebook.sources
         ],
-        turn_count=len(notebook.turns),
+        turns=[
+            ChatTurnResponse(
+                question=t.question,
+                answer=t.answer.text,
+                citations=_citation_responses(t.answer.citations, corpus),
+            )
+            for t in notebook.turns
+        ],
     )
 
 
@@ -192,30 +269,9 @@ class AskRequest(BaseModel):
     question: str
 
 
-class CitationResponse(BaseModel):
-    source_id: str
-    locator: str
-    quote: str
-    verified: bool
-    reason: str | None = None
-
-
 class AskResponse(BaseModel):
     text: str
     citations: list[CitationResponse]
-
-
-def _citation_responses(citations: list[Citation], corpus) -> list[CitationResponse]:
-    return [
-        CitationResponse(
-            source_id=v.citation.source_id,
-            locator=v.citation.locator,
-            quote=v.citation.quote,
-            verified=v.verified,
-            reason=v.reason,
-        )
-        for v in verify_citations(citations, corpus)
-    ]
 
 
 async def _run_isolated(notebook_id: str, dotted_task: str, kwargs: dict, config: NotebookConfig) -> dict:
@@ -309,3 +365,14 @@ async def cancel(notebook_id: str) -> dict:
         raise HTTPException(404, f"no in-flight run for notebook {notebook_id!r}")
     run.cancel()
     return {"cancelled": run.run_id}
+
+
+#: The web UI, mounted LAST so every explicit API route above wins a path collision — Starlette
+#: matches routes in registration order, and a `Mount` is just another route in that same sequence.
+#: `html=True` serves `index.html` for `/` and any other directory-shaped request, matching how a
+#: single-page static app is normally served. Resolved relative to the INSTALLED PACKAGE directory
+#: (`Path(__file__).parent`), not the process's current working directory — the same reasoning
+#: `docs/design/web-ui-blueprint.md`'s audit note gives for why these assets live under
+#: `rlm_notebook/web/` rather than a top-level `web/`: a wheel installed elsewhere on disk must still
+#: find them.
+app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="web")

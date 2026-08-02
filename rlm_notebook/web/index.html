@@ -1,0 +1,78 @@
+<title>rlm-notebook</title>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="stylesheet" href="/style.css" />
+
+<div class="layout">
+  <header class="header">
+    <div class="wordmark">rlm-notebook</div>
+
+    <div class="notebook-switch">
+      <input
+        id="notebook-input"
+        class="notebook-input"
+        list="notebook-list"
+        placeholder="notebook id…"
+        autocomplete="off"
+      />
+      <datalist id="notebook-list"></datalist>
+      <button id="notebook-open" class="btn btn-primary">Open</button>
+    </div>
+
+    <button id="theme-toggle" class="theme-toggle" title="Toggle Paper / Study theme" aria-label="Toggle theme">
+      ☀
+    </button>
+  </header>
+
+  <main class="cols" id="cols">
+    <section class="col col-sources" id="col-sources">
+      <div class="panel-head">Sources</div>
+
+      <form id="add-source-form" class="add-source">
+        <div class="tabs" id="source-kind-tabs">
+          <button type="button" class="tab is-active" data-kind="url">URL</button>
+          <button type="button" class="tab" data-kind="text">Paste text</button>
+          <button type="button" class="tab" data-kind="file">File</button>
+        </div>
+
+        <div class="tab-body" data-kind-body="url">
+          <input type="url" id="source-url" placeholder="https://…" />
+        </div>
+        <div class="tab-body" data-kind-body="text" hidden>
+          <textarea id="source-text" rows="4" placeholder="Paste text to ingest…"></textarea>
+        </div>
+        <div class="tab-body" data-kind-body="file" hidden>
+          <input type="file" id="source-file" />
+          <p class="hint">File upload isn't wired to the API yet — see the source-kind
+            extensibility note in the blueprint. This tab exists so the layout doesn't need
+            reworking once it is.</p>
+        </div>
+
+        <button type="submit" class="btn btn-primary btn-block">Add source</button>
+      </form>
+
+      <ul class="source-list" id="source-list"></ul>
+      <p class="empty-note" id="sources-empty">No sources yet. Add one above.</p>
+    </section>
+
+    <section class="col col-chat" id="col-chat">
+      <div class="panel-head">Chat</div>
+
+      <div class="chat-history" id="chat-history">
+        <p class="empty-note" id="chat-empty">Ask a question once you've added a source.</p>
+      </div>
+
+      <form id="ask-form" class="ask-form">
+        <textarea id="ask-input" rows="2" placeholder="Ask a grounded question…"></textarea>
+        <button type="submit" class="btn btn-primary" id="ask-submit">Ask</button>
+      </form>
+    </section>
+
+    <section class="col col-studio" id="col-studio">
+      <div class="panel-head">Studio</div>
+      <p class="empty-note">Guide artifacts and the podcast player land here in Phase 2.</p>
+    </section>
+  </main>
+</div>
+
+<script src="/app.js"></script>

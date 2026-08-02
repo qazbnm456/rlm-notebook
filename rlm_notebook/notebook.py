@@ -14,6 +14,8 @@ import re
 import tempfile
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from .corpus import Corpus
 from .ingest import ingest_new
 from .schema import Notebook, Source
@@ -116,6 +118,31 @@ def extend_with_sources(notebook: Notebook, new_values: list[str]) -> list[Sourc
     )
     notebook.sources.extend(new_sources)
     return new_sources
+
+
+def list_notebook_summaries(
+    *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR
+) -> tuple[list[Notebook], list[str]]:
+    """Every notebook file under `base_dir`, for the web UI's notebook switcher — there is no other
+    way to discover what notebooks exist than listing the directory, since a notebook's `id` (what a
+    caller would look it up by) is only known once its file has already been parsed. Returns
+    `(notebooks, unreadable)`: `unreadable` holds the filename STEM of any file that fails to parse
+    as a `Notebook`, so one corrupted file is flagged rather than either silently dropped or breaking
+    every other notebook's listing (the same "flag, never silently drop" discipline invariants 5/6
+    already use elsewhere). Each returned `Notebook.id` is the value stored INSIDE the file, never
+    the slugged filename stem — `slug()` is lossy, so the two can read back differently for the same
+    file (see `notebook_path`'s docstring)."""
+    base = Path(base_dir)
+    if not base.exists():
+        return [], []
+    notebooks: list[Notebook] = []
+    unreadable: list[str] = []
+    for path in sorted(base.glob("*.json")):
+        try:
+            notebooks.append(Notebook.model_validate_json(path.read_text(encoding="utf-8")))
+        except ValidationError:
+            unreadable.append(path.stem)
+    return notebooks, unreadable
 
 
 def history_text(notebook: Notebook) -> str:

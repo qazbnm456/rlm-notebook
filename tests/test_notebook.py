@@ -12,6 +12,7 @@ from rlm_notebook.notebook import (
     existing_origins,
     extend_with_sources,
     history_text,
+    list_notebook_summaries,
     load_notebook,
     load_or_create,
     notebook_path,
@@ -226,3 +227,29 @@ def test_extend_with_sources_appends_nothing_when_ingestion_fails(tmp_path):
     with pytest.raises(OSError):
         extend_with_sources(notebook, [str(tmp_path / "does-not-exist.txt")])
     assert len(notebook.sources) == 1  # unchanged
+
+
+def test_list_notebook_summaries_empty_dir_that_does_not_exist_yet(tmp_path):
+    assert list_notebook_summaries(base_dir=tmp_path / "does-not-exist") == ([], [])
+
+
+def test_list_notebook_summaries_reports_the_stored_id_not_the_slugged_filename(tmp_path):
+    """A notebook id with characters outside the slug whitelist is folded before becoming a
+    filename — the listing must report the `id` stored INSIDE the file, not derive one from the
+    filename stem, or the two could read back differently for the same file."""
+    save_notebook(Notebook(id="My Notebook!", sources=[_source("s1", "a.txt")]), base_dir=tmp_path)
+
+    notebooks, unreadable = list_notebook_summaries(base_dir=tmp_path)
+
+    assert unreadable == []
+    assert [nb.id for nb in notebooks] == ["My Notebook!"]
+
+
+def test_list_notebook_summaries_flags_a_corrupted_file_without_breaking_the_rest(tmp_path):
+    save_notebook(Notebook(id="good"), base_dir=tmp_path)
+    (tmp_path / "broken.json").write_text('{"id": "broken", "sources": [}', encoding="utf-8")
+
+    notebooks, unreadable = list_notebook_summaries(base_dir=tmp_path)
+
+    assert [nb.id for nb in notebooks] == ["good"]
+    assert unreadable == ["broken"]

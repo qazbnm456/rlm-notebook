@@ -74,6 +74,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["rlm_notebook"]
+# The web UI's static assets (rlm_notebook/web/*.html/*.css/*.js) live INSIDE this package
+# deliberately, not in a top-level web/ directory — a top-level directory has no packaging entry
+# here and would work from a git checkout but silently vanish from an installed wheel (found during
+# the web UI's pre-implementation design audit). hatchling's default VCS-based file selection
+# already includes every git-tracked file under a declared package's directory, non-.py files
+# included, so no separate `artifacts`/`force-include` entry is needed on top of the line above —
+# verified by building a wheel and confirming `rlm_notebook/web/index.html` is actually inside it.
 
 [tool.ruff]
 line-length = 110
