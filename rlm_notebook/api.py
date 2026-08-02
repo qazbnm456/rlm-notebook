@@ -6,13 +6,16 @@ execution-model invariant. `cli.py`'s synchronous in-process invocation is compl
 
 Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend),
 `GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
-`POST /notebooks/{id}/cancel`. No `/audio` endpoint yet (deferred — see CHANGELOG): Audio Overview
-synthesis is slower and heavier than the others, and wiring its own subprocess-run bookkeeping
-through this same `_run_isolated` path deserved its own slice rather than being rushed into this
-one. No SSE/progress streaming either — a request blocks until its subprocess finishes or the
-configured timeout hits; also deferred (see CHANGELOG; see also
-`docs/design/web-ui-blueprint.md`'s §5.5 for why a reasoning-trace SSE endpoint was deliberately
-NOT added this slice — it was designed, audited, and found unbuildable as scoped).
+`POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`. `/audio` is two host-side steps, not
+one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use, and TTS
+synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see `audio()`'s own
+docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
+(`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). No audio is ever
+persisted to disk past one request — no file-serving endpoint, no retention policy needed. No
+SSE/progress streaming either — a request blocks until its subprocess finishes or the configured
+timeout hits; also deferred (see CHANGELOG; see also `docs/design/web-ui-blueprint.md`'s §5.5 for
+why a reasoning-trace SSE endpoint was deliberately NOT added this slice — it was designed, audited,
+and found unbuildable as scoped).
 
 This module also serves the web UI (`rlm_notebook/web/`, a zero-build static HTML/CSS/JS app) at
 `/`, mounted AFTER every API route below so the API always wins on a path collision.
@@ -27,6 +30,10 @@ Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --e
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import os
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -35,6 +42,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
 from . import runner
+from .audio import GeneratePodcastScript
 from .citations import verify_citations
 from .config import NotebookConfig
 from .corpus import CorpusTooLargeError
@@ -50,8 +58,19 @@ from .notebook import (
     save_notebook,
 )
 from .parsers.web import FetchError
-from .schema import FAQ, Answer, ChatTurn, Citation, KeyInsight, Notebook, Summary, Timeline
+from .schema import (
+    FAQ,
+    Answer,
+    ChatTurn,
+    Citation,
+    KeyInsight,
+    Notebook,
+    PodcastScript,
+    Summary,
+    Timeline,
+)
 from .task import AnswerQuestion
+from .tts import TTSError, get_tts_provider
 
 #: Same registry `cli.py` keeps (`_GUIDE_TASKS`) — kept as a SEPARATE copy rather than imported
 #: from `cli.py`, since `api.py` must not depend on `cli.py` (see `ingest.py`'s docstring for why
@@ -95,6 +114,18 @@ def _config() -> NotebookConfig:
     try:
         return NotebookConfig.from_env()
     except SystemExit as exc:
+        raise HTTPException(500, f"server misconfigured: {exc}") from exc
+
+
+def _tts_provider(config: NotebookConfig):
+    """Mirrors `_config()`'s `SystemExit`-to-500 shape for the analogous `TTSError` case: an
+    unknown/misconfigured `RN_TTS_PROVIDER` is a SERVER misconfiguration (the value comes from the
+    environment, not the request body), resolved BEFORE `audio()` runs the expensive model call,
+    not after — the same ordering CLAUDE.md invariant 19 already requires of `cli._cmd_audio`, after
+    an earlier independent review found the reverse order wasted a real model call on a bad value."""
+    try:
+        return get_tts_provider(config.tts_provider)
+    except TTSError as exc:
         raise HTTPException(500, f"server misconfigured: {exc}") from exc
 
 
@@ -356,6 +387,94 @@ async def guide(notebook_id: str, kind: str) -> dict:
             for event in parsed.events
         ]
     }
+
+
+class AudioUtteranceResponse(BaseModel):
+    speaker: str
+    text: str
+    citations: list[CitationResponse]
+
+
+class AudioResponse(BaseModel):
+    utterances: list[AudioUtteranceResponse]
+    audio_base64: str | None = None
+
+
+@app.post("/notebooks/{notebook_id}/audio", response_model=AudioResponse)
+async def audio(notebook_id: str) -> AudioResponse:
+    """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
+    audio. Two host-side steps, not one (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum):
+    `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
+    only step that touches `dspy`/`rlm_kit`, and the only one cancellable via
+    `POST .../cancel` — then TTS synthesis (`tts.py`) runs AFTER that subprocess returns, IN-PROCESS
+    here, since `tts.py` imports neither `dspy` nor `rlm_kit` (same precedent as `api.py` already
+    importing the Guide/`AnswerQuestion` RLMTask classes at module load, purely for `_dotted()`'s
+    introspection — never calling `.arun()` on them itself; only `worker.py` does).
+
+    `EdgeTTSProvider.synthesize()` is a SYNC method that internally calls `asyncio.run(...)`, which
+    raises if invoked from a running event loop — this handler's own. Dispatched through
+    `asyncio.to_thread` instead (a fresh OS thread has no event loop of its own, so `asyncio.run()`
+    inside it never collides with this handler's loop) — `tts.py`'s own docstring already flagged
+    this exact scenario as the CALLER's responsibility to route around, not something `synthesize()`
+    itself should change.
+
+    No audio is ever persisted past this one request — synthesis writes to a temp file, the bytes
+    are read back and base64-encoded into the response, and the temp file is deleted whether
+    synthesis succeeded or failed (the `try`/`finally` wraps the `synthesize()` call itself, not
+    just the read-back — a synthesis failure after the file already exists on disk must not leak
+    it). There is deliberately no `GET .../audio/{run_id}.mp3`-style file-serving endpoint and no
+    retention policy to get right, unlike the reasoning-trace files Phase 3 left unresolved.
+
+    **Known, stated limitation**: only the script-generation step is cancellable through
+    `POST .../cancel` — `_run_isolated`'s `finally` clears this notebook's `_ACTIVE_RUNS` entry the
+    moment the subprocess returns, so by the time synthesis begins there is nothing left to cancel.
+    A stuck or slow synthesis call blocks this request until it finishes or the client gives up;
+    `cli._cmd_audio` has no cancellation story for this phase either, so this isn't a regression,
+    but it IS new that an API request's total latency now includes a real network TTS call
+    serialized after an RLM run."""
+    notebook = _load_notebook_or_404(notebook_id)
+    corpus = corpus_of(notebook)
+    config = _config()
+    try:
+        blob = corpus.blob(max_chars=config.max_corpus_chars)
+    except CorpusTooLargeError as exc:
+        raise HTTPException(413, str(exc)) from exc
+
+    provider = _tts_provider(config)
+
+    result = await _run_isolated(notebook_id, _dotted(GeneratePodcastScript), {"sources": blob}, config)
+    script = PodcastScript.model_validate(result)
+
+    utterances = [
+        AudioUtteranceResponse(
+            speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus)
+        )
+        for u in script.utterances
+    ]
+
+    if not script.utterances:
+        # A source with nothing worth discussing is a legitimate output (audio.py's instructions
+        # explicitly allow it) — same "don't try to synthesize silence" handling cli._cmd_audio
+        # already has, rather than calling synthesize() and getting a TTSError for an empty script.
+        return AudioResponse(utterances=[], audio_base64=None)
+
+    voice_map = {"host_a": config.tts_voice_host_a, "host_b": config.tts_voice_host_b}
+    fd, tmp_name = tempfile.mkstemp(suffix=".mp3")
+    os.close(fd)
+    tmp_path = Path(tmp_name)
+    try:
+        await asyncio.to_thread(provider.synthesize, script, voice_map, tmp_path)
+        audio_bytes = tmp_path.read_bytes()
+    except TTSError as exc:
+        raise HTTPException(
+            502, f"podcast script generated, but audio synthesis failed: {exc}"
+        ) from exc
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return AudioResponse(
+        utterances=utterances, audio_base64=base64.b64encode(audio_bytes).decode("ascii")
+    )
 
 
 @app.post("/notebooks/{notebook_id}/cancel")

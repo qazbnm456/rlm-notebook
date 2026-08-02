@@ -367,3 +367,62 @@ questions with verifiable citations, and get a distilled research artifact out.
   separate, not-yet-scheduled slices. Paste-text and file-upload source ingestion in the UI are
   visible tabs that say plainly they aren't wired to the API yet, rather than silently failing or
   pretending to work — the API itself still only accepts http(s) URLs (invariant 26).
+
+- **Seventh slice: web UI Phase 2 — Studio panel (Guide tabs + podcast player)**. Adds
+  `POST /notebooks/{id}/audio` and wires the Studio panel Phase 1 left as a placeholder.
+
+  **`/audio` is two host-side steps, not one, and deliberately doesn't touch `worker.py`/
+  `runner.py` at all.** `GeneratePodcastScript` runs in the exact same isolated subprocess `ask`/
+  `guide` already use — the only step that touches `dspy`/`rlm_kit`, and the only one cancellable
+  via `POST .../cancel`. TTS synthesis (`tts.py`) then runs AFTER that subprocess returns,
+  IN-PROCESS inside `api.py` itself: `tts.py` imports neither `dspy` nor `rlm_kit`, so this doesn't
+  reopen invariant 21, and it's the same precedent `api.py` already sets by importing the Guide/
+  `AnswerQuestion` RLMTask classes at module load purely for introspection, never calling `.arun()`
+  on them itself.
+
+  **`EdgeTTSProvider.synthesize()`'s own previously-flagged residual risk finally landed for real,
+  and got its predicted fix.** Its docstring already said a future async caller would need to
+  route around its internal `asyncio.run()` call rather than changing `synthesize()` itself — this
+  slice is that caller, dispatching through `asyncio.to_thread` (a fresh OS thread has no event
+  loop of its own, so `asyncio.run()` inside it never collides with the request handler's own
+  running loop). `tts.py` is unmodified; `cli.py`'s existing synchronous call site is unaffected.
+
+  **No audio is ever persisted past one request** — synthesis writes to a temp file, the bytes are
+  read back and base64-encoded into the JSON response, and the temp file is deleted whether
+  synthesis succeeded or failed. Deliberately no `GET .../audio/{run_id}.mp3`-style file-serving
+  endpoint and no retention policy to get right, unlike the reasoning-trace files Phase 3 left
+  unresolved.
+
+  **Went through the same pre-implementation independent design audit Phase 1 established**
+  (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum) before any code was written. Found 2
+  blockers, both fixed before implementation started: the ordering list omitted the notebook-load/
+  corpus/blob-size steps every other endpoint performs first, which as originally written would
+  have surfaced a 500 (bad `RN_TTS_PROVIDER`) ahead of a 404/413 whenever both conditions held,
+  inverting `cli._cmd_audio`'s real precedence; and the temp-file cleanup plan only covered the
+  success path, which would have leaked a `.mp3` per failed synthesis (`tts.py`'s `synthesize()`
+  has two real `TTSError` raise sites that fire after the file already exists on disk). Two
+  non-blocking fixes folded in too: the Guide-tab cache now invalidates on a source being added,
+  not just on a notebook switch; and the podcast player's object-URL revocation order is now
+  explicit (assign the new URL before revoking the old one, so a previous episode being played
+  when "regenerate" is clicked is never yanked out from under a live `<audio>` element).
+
+  **Studio panel**: four Guide tabs (`Summary`/`FAQ`/`Timeline`/`Insight`), each fetched only on
+  first activation or an explicit `↻ Regenerate` click — never automatically, including on
+  notebook open, since a guide run is a real RLM loop and auto-fetching on open would burn a model
+  call for nothing (a mistake caught and fixed during this slice's own implementation, before it
+  ever shipped, not by the audit). Results are cached client-side per notebook and invalidated on a
+  source being added. A `Generate podcast` button below produces a `Blob`/`ObjectURL`-backed
+  `<audio controls>` player (not a `data:` URI, which would keep a multi-MB episode's whole
+  base64 string live in a DOM attribute) plus a transcript, reusing Phase 1's citation-highlighter
+  rendering verbatim.
+
+  **Known, accepted limitation, stated explicitly (invariant 29)**: only `/audio`'s script-
+  generation half is cancellable — by the time synthesis begins, `_run_isolated`'s `finally` has
+  already cleared this notebook's `_ACTIVE_RUNS` entry, so a stuck synthesis call blocks its
+  request with no `killpg`-equivalent to reach it. Not a regression (`cli._cmd_audio` has no
+  cancellation story for this phase either), but new: an API request's total latency can now
+  include a real network TTS call serialized after an RLM run.
+
+  **Deliberately NOT in this slice**: Phase 3 (the live reasoning-trace ticker) remains held back,
+  same reasons as before. The full source-text viewer (and Literata, the typeface reserved for it)
+  is still unbuilt.

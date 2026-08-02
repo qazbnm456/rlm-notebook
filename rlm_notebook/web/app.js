@@ -365,9 +365,217 @@ function initChatPanel() {
   });
 }
 
+// --- Studio panel: Guide tabs -----------------------------------------------------------------
+
+// Fetched ONLY on first tab activation or an explicit regenerate click, never on every tab
+// switch — a guide run is a real RLM loop (same latency class as `ask`), so re-running it on every
+// idle click would burn a model call for nothing. Cached per notebook, keyed by kind; cleared on
+// BOTH a notebook switch AND a source being added — a cached result is stale the moment the corpus
+// it was computed from changes, not just when the notebook itself changes.
+function renderGuideContent(kind, data) {
+  const container = document.createElement("div");
+  container.className = "guide-prose";
+
+  if (kind === "summary" || kind === "insight") {
+    container.appendChild(renderAnswerWithCitations(data.text, data.citations || []));
+    return container;
+  }
+
+  if (kind === "faq") {
+    if (!data.items || !data.items.length) {
+      container.textContent = "(no FAQ items — the sources didn't produce enough to ask about)";
+      return container;
+    }
+    data.items.forEach((item) => {
+      const div = document.createElement("div");
+      div.className = "guide-item";
+      const head = document.createElement("div");
+      head.className = "guide-item-head";
+      head.textContent = item.question;
+      div.appendChild(head);
+      div.appendChild(renderAnswerWithCitations(item.answer, item.citations || []));
+      container.appendChild(div);
+    });
+    return container;
+  }
+
+  // "timeline"
+  if (!data.events || !data.events.length) {
+    container.textContent = "(no timeline events — the sources didn't produce enough to place in time)";
+    return container;
+  }
+  data.events.forEach((event) => {
+    const div = document.createElement("div");
+    div.className = "guide-item";
+    const when = document.createElement("div");
+    when.className = "guide-item-when";
+    when.textContent = event.when;
+    div.appendChild(when);
+    div.appendChild(renderAnswerWithCitations(event.description, event.citations || []));
+    container.appendChild(div);
+  });
+  return container;
+}
+
+function initStudioPanel() {
+  const tabs = document.querySelectorAll("#guide-tabs .tab");
+  const body = document.getElementById("guide-body");
+  const regenerateBtn = document.getElementById("guide-regenerate");
+  const cache = new Map();
+  let activeKind = "summary";
+
+  function setActiveKind(kind) {
+    activeKind = kind;
+    tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.guideKind === kind));
+  }
+
+  async function fetchKind(kind) {
+    if (!state.notebookId) {
+      body.innerHTML = "";
+      body.classList.remove("is-pending");
+      const note = document.createElement("p");
+      note.className = "empty-note";
+      note.textContent = "Open a notebook with sources, then pick a tab to generate it.";
+      body.appendChild(note);
+      return;
+    }
+    body.classList.add("is-pending");
+    body.textContent = "Generating…";
+    try {
+      const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/guide/${kind}`, {
+        method: "POST",
+      });
+      cache.set(kind, data);
+      body.classList.remove("is-pending");
+      body.innerHTML = "";
+      body.appendChild(renderGuideContent(kind, data));
+    } catch (err) {
+      body.classList.remove("is-pending");
+      body.textContent = `(error) ${err.message}`;
+    }
+  }
+
+  function showKind(kind) {
+    setActiveKind(kind);
+    if (cache.has(kind)) {
+      body.innerHTML = "";
+      body.appendChild(renderGuideContent(kind, cache.get(kind)));
+      return;
+    }
+    fetchKind(kind);
+  }
+
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => showKind(tab.dataset.guideKind));
+  });
+
+  regenerateBtn.addEventListener("click", () => {
+    cache.delete(activeKind);
+    fetchKind(activeKind);
+  });
+
+  function invalidateCache() {
+    cache.clear();
+  }
+
+  // Opening a notebook does NOT auto-fetch a Guide kind — that would burn a model call just from
+  // opening a notebook, contradicting the "fetched only on first activation or explicit
+  // regenerate" rule above. It only resets to a neutral state; the first real fetch happens when
+  // the user actually clicks a tab (including re-clicking the already-active default one).
+  store.on("notebook:switched", () => {
+    invalidateCache();
+    setActiveKind("summary");
+    body.innerHTML = "";
+    const note = document.createElement("p");
+    note.className = "empty-note";
+    note.textContent = "Pick a tab above to generate it.";
+    body.appendChild(note);
+  });
+  store.on("sources:changed", invalidateCache);
+}
+
+// --- Studio panel: podcast player ------------------------------------------------------------
+
+function renderPodcastUtterance(utterance) {
+  const div = document.createElement("div");
+  div.className = "podcast-utterance";
+  const speaker = document.createElement("div");
+  speaker.className = "podcast-speaker";
+  speaker.textContent = utterance.speaker === "host_a" ? "Host A" : "Host B";
+  div.appendChild(speaker);
+  div.appendChild(renderAnswerWithCitations(utterance.text, utterance.citations || []));
+  return div;
+}
+
+function initPodcastPlayer() {
+  const generateBtn = document.getElementById("podcast-generate");
+  const body = document.getElementById("podcast-body");
+  let currentObjectUrl = null;
+
+  function clearPlayer() {
+    body.innerHTML = "";
+    // Revoke only after nothing in the DOM still references it — the caller always assigns a new
+    // src (or clears the body) before this runs, so a previous episode mid-playback is never
+    // yanked out from under a live <audio> element (blueprint P2.6's revocation-order fix).
+    if (currentObjectUrl) {
+      URL.revokeObjectURL(currentObjectUrl);
+      currentObjectUrl = null;
+    }
+  }
+
+  generateBtn.addEventListener("click", async () => {
+    if (!state.notebookId) {
+      alert("Open or name a notebook first.");
+      return;
+    }
+    generateBtn.disabled = true;
+    body.classList.add("is-pending");
+    body.textContent = "Generating script and synthesizing audio — this can take a while…";
+    try {
+      const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
+        method: "POST",
+      });
+      body.classList.remove("is-pending");
+      body.innerHTML = "";
+
+      if (!data.utterances.length) {
+        body.textContent = "(no podcast script — the sources didn't produce enough to discuss)";
+        return;
+      }
+
+      const bytes = Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0));
+      const blob = new Blob([bytes], { type: "audio/mpeg" });
+      const newUrl = URL.createObjectURL(blob);
+      const oldUrl = currentObjectUrl;
+
+      const player = document.createElement("audio");
+      player.controls = true;
+      player.src = newUrl; // assign the NEW url first...
+      body.appendChild(player);
+      currentObjectUrl = newUrl;
+      if (oldUrl) URL.revokeObjectURL(oldUrl); // ...then revoke the OLD one, never the reverse
+
+      const transcript = document.createElement("div");
+      transcript.className = "podcast-transcript";
+      data.utterances.forEach((utterance) => transcript.appendChild(renderPodcastUtterance(utterance)));
+      body.appendChild(transcript);
+    } catch (err) {
+      body.classList.remove("is-pending");
+      body.innerHTML = "";
+      body.textContent = `(error) ${err.message}`;
+    } finally {
+      generateBtn.disabled = false;
+    }
+  });
+
+  store.on("notebook:switched", clearPlayer);
+}
+
 // --- Boot -------------------------------------------------------------------------------------
 
 initTheme();
 initNotebookSwitch();
 initSourcesPanel();
 initChatPanel();
+initStudioPanel();
+initPodcastPlayer();

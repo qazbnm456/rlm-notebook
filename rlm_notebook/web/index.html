@@ -70,7 +70,25 @@
 
     <section class="col col-studio" id="col-studio">
       <div class="panel-head">Studio</div>
-      <p class="empty-note">Guide artifacts and the podcast player land here in Phase 2.</p>
+
+      <div class="guide-tabs" id="guide-tabs">
+        <button type="button" class="tab is-active" data-guide-kind="summary">Summary</button>
+        <button type="button" class="tab" data-guide-kind="faq">FAQ</button>
+        <button type="button" class="tab" data-guide-kind="timeline">Timeline</button>
+        <button type="button" class="tab" data-guide-kind="insight">Insight</button>
+      </div>
+      <button type="button" class="btn guide-regenerate" id="guide-regenerate">↻ Regenerate</button>
+      <div class="guide-body" id="guide-body">
+        <p class="empty-note">Open a notebook with sources, then pick a tab to generate it.</p>
+      </div>
+
+      <div class="podcast-section">
+        <div class="panel-head">Audio Overview</div>
+        <button type="button" class="btn btn-primary btn-block" id="podcast-generate">
+          Generate podcast
+        </button>
+        <div class="podcast-body" id="podcast-body"></div>
+      </div>
     </section>
   </main>
 </div>

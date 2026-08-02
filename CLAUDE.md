@@ -34,16 +34,17 @@ persistent multi-turn `Notebook` (sources + history surviving across `ask` invoc
 file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
 generates a whole-corpus artifact (`guide.py`) — an Audio Overview — `rlm-notebook audio` generates
 a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`) — an HTTP API
-(`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, and `cancel` —
-and now a web UI (`rlm_notebook/web/`, invariant 29), Phase 1 of a 3-phase blueprint: a real
-end-user product surface (Sources/Chat, `GET /notebooks` listing), NOT a replay-only trace console
-like the sibling projects' `studio/`s. The API is the FIRST place a run is subprocess-isolated
-(`runner.py`/`worker.py`) rather than in-process; `cli.py`'s synchronous in-process invocation is
-unaffected and unchanged. The API has no `/audio` endpoint and no SSE/progress streaming yet (both
-deferred — see CHANGELOG; the web UI's own Phase 2/3 need exactly these), and Guide/Audio artifacts
-still aren't cached onto a notebook or made citable as sources for later `ask` turns. Each of these
-is its own follow-up slice; do not assume any of them exist because an earlier design discussion
-mentioned them.
+(`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, `audio`, and
+`cancel` — and a web UI (`rlm_notebook/web/`, invariant 29), Phases 1 AND 2 of a 3-phase blueprint
+now shipped: a real end-user product surface (Sources/Chat/Studio with Guide tabs and a podcast
+player), NOT a replay-only trace console like the sibling projects' `studio/`s. The API is the
+FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather than in-process; `cli.py`'s
+synchronous in-process invocation is unaffected and unchanged. The API still has no SSE/progress
+streaming (deferred — see CHANGELOG; the web UI's own Phase 3 needs exactly this, and was designed,
+audited, and found unbuildable as scoped — invariant 29), and Guide/Audio artifacts still aren't
+cached onto a notebook or made citable as sources for later `ask` turns. Each of these is its own
+follow-up slice; do not assume any of them exist because an earlier design discussion mentioned
+them.
 
 ## Invariants — do not break
 
@@ -295,13 +296,29 @@ mentioned them.
     sibling studios' own `app.js` files already enforce, for the identical reason.
 
     A full three-phase blueprint exists (`docs/design/`, gitignored, same convention as
-    `docs/research/`) — this invariant covers Phase 1 only (web shell, Sources, Chat,
-    `GET /notebooks`, `GET /notebooks/{id}` now returning full turn history instead of a count).
-    Phase 2 (Guide tabs + podcast player, needs a new `/audio` endpoint) and Phase 3 (a live
-    reasoning-trace ticker fused with citations) are separate, not-yet-scheduled slices — Phase 3 in
-    particular was designed, independently audited, and found unbuildable as originally scoped (no
-    `run_id` ever reaches a client mid-run; citation-to-trace-turn linking has no data model), so it
-    needs its own follow-up design pass before it gets a phase number back. Don't assume either
-    exists because the blueprint discusses them.
+    `docs/research/`). Phase 1 (web shell, Sources, Chat, `GET /notebooks`,
+    `GET /notebooks/{id}` now returning full turn history instead of a count) and Phase 2 (Guide
+    tabs + podcast player) are both shipped. Phase 2 added `POST /notebooks/{id}/audio`, split into
+    TWO host-side steps rather than one: `GeneratePodcastScript` runs in the same isolated
+    subprocess `ask`/`guide` already use (the only step that's cancellable via
+    `POST .../cancel`); TTS synthesis then runs AFTER that subprocess returns, IN-PROCESS inside
+    `api.py` itself, dispatched through `asyncio.to_thread` specifically because
+    `EdgeTTSProvider.synthesize()` internally calls `asyncio.run(...)`, which raises if invoked from
+    a running event loop (this handler's own) — `tts.py`'s own docstring had already flagged this
+    exact scenario as the caller's responsibility to route around, not something `synthesize()`
+    itself should change. No audio is ever persisted past one request (a temp file, deleted in a
+    `finally` that covers BOTH the success and the synthesis-failure path, not just the former —
+    caught and fixed by this phase's own pre-implementation audit before it was ever code); the
+    response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
+    uniform with every other endpoint. Known, accepted limitation: only the script-generation half
+    of `/audio` is cancellable — by the time synthesis begins, `_run_isolated`'s `finally` has
+    already cleared this notebook's `_ACTIVE_RUNS` entry, so a stuck synthesis call blocks its
+    request with no `killpg`-equivalent to reach it.
+
+    Phase 3 (a live reasoning-trace ticker fused with citations) remains a separate,
+    not-yet-scheduled slice — it was designed, independently audited, and found unbuildable as
+    originally scoped (no `run_id` ever reaches a client mid-run; citation-to-trace-turn linking has
+    no data model), so it needs its own follow-up design pass before it gets a phase number back.
+    Don't assume it exists because the blueprint discusses it.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
