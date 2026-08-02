@@ -46,6 +46,16 @@ dependencies = [
     "edge-tts>=7.2.8",
 ]
 
+[project.optional-dependencies]
+# The HTTP API (api.py) is an ADDITIONAL surface, not the core CLI use case every `rlm-notebook
+# ask` user needs — unlike OCR/TTS (invariants 7/15: those ship in `dependencies` because they're
+# needed for the CORE product to work at all), running a web server is opt-in. Mirrors
+# ctx-distillery's own precedent (its `cli` extra) for a usage-mode-specific dependency.
+api = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

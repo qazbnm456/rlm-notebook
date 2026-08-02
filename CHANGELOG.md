@@ -236,3 +236,83 @@ questions with verifiable citations, and get a distilled research artifact out.
   tripwire test pinning that `cli._SPEAKER_LABELS` covers every `schema.Speaker` value, since
   nothing in this project's CI (ruff + pytest, no type checker) would otherwise catch the two
   drifting apart.
+
+- **Fifth slice: an HTTP API** (`api.py`, the `api` extra: `uv sync --extra api`) —
+  `POST/GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
+  `POST /notebooks/{id}/cancel`. This is the first place a run is isolated in its own subprocess
+  rather than executed in-process; `cli.py` is completely unaffected and unchanged in behavior.
+
+  **The subprocess-per-run execution model an earlier design round sketched and then deferred is
+  now implemented**: `worker.py` is the subprocess entrypoint (resolves an RLMTask by dotted
+  `module:ClassName`, runs it, records a full trace, prints exactly one JSON line as its result);
+  `runner.py` is the host-side launcher (`start_new_session=True` so the worker is its own process
+  group leader, `killpg` on cancel/timeout so a stuck Deno grandchild dies with it rather than
+  becoming an orphan). Verified with a real test that spawns an actual grandchild subprocess and
+  confirms it dies on cancellation, not just the worker's own PID (invariant 22) — this was the
+  exact failure mode an earlier design round worried an over-eager `process.kill()` would miss.
+
+  **`api.py` never imports `dspy`/`rlm_kit` itself** (invariant 21) — only `worker.py`, inside the
+  subprocess, does. A crash deep in the model stack takes down a worker subprocess, never the API
+  server process.
+
+  **Extracted `ingest.py` and two new `notebook.py` functions (`load_or_create`,
+  `extend_with_sources`) out of `cli.py`**, so `api.py` doesn't have to import from `cli.py` (or
+  vice versa) to reuse the identical "get me a notebook, ingest new sources into it" step
+  (invariant 20). `cli._prepare` is now a thin argparse-`Namespace`-shaped wrapper around the same
+  shared functions `api.py` calls directly. Existing `_is_url`/`_ingest_one`/`_ingest_new` tests
+  moved to `tests/test_ingest.py` unchanged in substance, just relocated with the code.
+
+  **`api._config()` converts `NotebookConfig.from_env()`'s `SystemExit` into an HTTP 500** rather
+  than letting it escape a request handler (invariant 24) — `cli.py` legitimately lets the same
+  `SystemExit` exit the process, which is wrong for a server. Verified against a REAL running
+  server with `curl` (not just the mocked test suite): an unset `RN_MAIN_MODEL` now returns a
+  clean 500 with `cli.py`'s own error message, not a broken connection or a raw traceback. The
+  rest of the API was also smoke-tested end to end against a real running server this way —
+  `add_sources` (including that re-adding the same source is a no-op, not a duplicate),
+  `get_notebook`, 404s on a missing notebook, and 404 on `cancel` with no in-flight run.
+
+  **`_ACTIVE_RUNS` is single-process, in-memory, keyed by notebook id** (invariant 23) — a known,
+  documented limitation (no multi-worker `uvicorn` deployment story yet), not a silent gap:
+  running more than one `uvicorn` worker would split this dict across processes and `cancel` would
+  only reach whichever worker happens to hold a given notebook's in-flight run.
+
+  **Deliberately NOT in this slice** (deferred, not forgotten): an `/audio` endpoint (Audio
+  Overview synthesis is slower/heavier than `ask`/`guide` and deserved its own wiring rather than
+  being rushed in here), SSE/progress streaming (a request currently blocks until its subprocess
+  finishes or `RN_RUN_TIMEOUT_SECONDS` — default 300s, a NEW config field distinct from
+  `RN_MAX_ITERATIONS`/`RN_MAX_LLM_CALLS`, which bound loop steps, not wall-clock time — elapses),
+  and any browser UI at all.
+
+- **An independent review of `feat/api` found and reproduced two real security/robustness issues
+  before merging, both fixed:**
+
+  **`add_sources` was an unauthenticated arbitrary-file-read vector (invariants 25, 26).**
+  `ingest.ingest_one` treats any non-URL string as a local file path with no allowlist — correct
+  for `cli.py`, where the operator already trusts their own machine, and a vulnerability the moment
+  the exact same function sat behind an unauthenticated HTTP endpoint. The review reproduced the
+  full chain: `POST {"sources": ["/etc/passwd"]}` read the file, and a mocked `ask` echoed its
+  contents back through a citation that passed coordinate verification. Fixed by rejecting any
+  non-URL value in `add_sources` before it reaches ingestion. This also surfaced that the API has
+  NO authentication at all (invariant 25) — now stated explicitly in `api.py`'s module docstring
+  and README, not left implicit.
+
+  **Four id-taking endpoints crashed with a raw 500 on a notebook id that reduces to an empty
+  slug** (invariant 27) — e.g. `GET /notebooks/!!!`. `_load_notebook_or_404`/`add_sources` only
+  caught `pydantic.ValidationError` (a corrupted file), not the `ValueError` `notebook.notebook_path`
+  raises for an empty slug; reproduced on `GET`, `sources`, `ask`, and `guide/{kind}` with nothing
+  more exotic than a notebook id made of punctuation. Fixed by catching `ValueError` too (→ 400).
+  The review also checked route-level path-traversal payloads (`../../../tmp/evil`) and confirmed
+  they never reach this code at all — Starlette's path converter refuses a literal `/` inside one
+  `{notebook_id}` segment, so those 404 at the routing layer first; a real finding, but not a bug.
+
+  **Verified the `_ACTIVE_RUNS` single-slot-per-notebook-id design is a capacity limitation, not a
+  race**, with an `asyncio`-interleaved test: the `finally` block's `is run` identity check
+  correctly lets only the request that OWNS an entry clear it, even when a second concurrent
+  request for the same notebook id has already overwritten the slot. Documented this more
+  precisely (invariant 23) — the previous wording only mentioned the multi-worker-process
+  limitation, not this same-process one.
+
+  **Added a tripwire test for `cli._GUIDE_TASKS`/`api._GUIDE_TASKS` staying in sync** (invariant
+  28) — the same class of gap the PREVIOUS slice's own `_SPEAKER_LABELS` drift was found to have,
+  applied proactively here instead of waiting for a fourth review to find the fourth instance of
+  the same lesson.

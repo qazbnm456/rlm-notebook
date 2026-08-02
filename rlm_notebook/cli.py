@@ -30,12 +30,9 @@ from .citations import verify_citations
 from .config import NotebookConfig, setup
 from .corpus import Corpus, CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
-from .injection_scan import scan_source
-from .notebook import corpus_of, existing_origins, history_text, load_notebook, save_notebook
-from .parsers.pdf import parse_pdf
-from .parsers.text import parse_text
-from .parsers.web import FetchError, parse_web
-from .schema import ChatTurn, Citation, Notebook, Source
+from .notebook import corpus_of, extend_with_sources, history_text, load_or_create, save_notebook
+from .parsers.web import FetchError
+from .schema import ChatTurn, Citation, Notebook
 from .task import AnswerQuestion
 from .tts import TTSError, get_tts_provider
 
@@ -65,10 +62,6 @@ deno) for a live run. `audio` additionally needs network access to the TTS provi
 default — free, no API key).
 """
 
-#: Notebook id used when `--notebook` is omitted — never persisted (see `_prepare`), so it never
-#: collides with a real notebook file on disk regardless of what this string is.
-_EPHEMERAL_ID = "_ephemeral"
-
 #: `guide <kind>` -> the RLMTask that produces it. Shared by `build_parser` (as `choices`) and
 #: `_cmd_guide` (to look up which task to run) so the two can never drift apart.
 _GUIDE_TASKS: dict[str, type] = {
@@ -79,53 +72,17 @@ _GUIDE_TASKS: dict[str, type] = {
 }
 
 
-def _is_url(value: str) -> bool:
-    return value.startswith(("http://", "https://"))
-
-
-def _ingest_one(value: str, source_id: str) -> Source:
-    if _is_url(value):
-        return parse_web(value, source_id)
-    path = Path(value)
-    if path.suffix.lower() == ".pdf":
-        return parse_pdf(str(path), source_id)
-    return parse_text(path.read_text(encoding="utf-8"), source_id, origin=str(path))
-
-
-def _ingest_new(values: list[str], *, start_index: int, skip_origins: set[str]) -> list[Source]:
-    """Ingest `values` not already in `skip_origins` (a notebook's existing source origins — see
-    `notebook.existing_origins`), numbering ids from `start_index` so they never collide with a
-    notebook's existing sources. Re-passing the same `--source` on a later turn against the same
-    notebook is therefore a cheap no-op, not a duplicate ingestion — and so is repeating one
-    WITHIN the same `--source ... --source ...` list on a single invocation: `seen` starts as a
-    copy of `skip_origins` and grows as this loop runs, so `--source a.txt --source a.txt` ingests
-    `a.txt` once, not twice (found by an independent review: the first version only checked the
-    caller's static set, so a duplicate value in the SAME invocation sailed through unfiltered)."""
-    sources: list[Source] = []
-    seen = set(skip_origins)
-    next_index = start_index
-    for value in values:
-        if value in seen:
-            continue
-        seen.add(value)
-        source = _ingest_one(value, source_id=f"s{next_index}")
-        flags = sorted({flag for block in source.blocks for flag in scan_source(block.text)})
-        if flags:
-            source = source.model_copy(update={"flags": flags})
-        sources.append(source)
-        next_index += 1
-    return sources
-
-
 def _prepare(args) -> tuple[Notebook, Corpus] | None:
-    """Load-or-create the notebook named by `args.notebook` (or an ephemeral one), ingest and
-    merge any new `args.source` values, print prompt-injection flag warnings, and return
-    `(notebook, corpus)` — shared by `_cmd_ask` and `_cmd_guide`, which both need identical
-    sources-in-hand setup before running their own RLMTask. Returns `None` (an error already
-    printed to stderr) if loading or ingestion failed, or if there are no sources at all; the
-    caller should return 1 in that case."""
+    """Load-or-create the notebook named by `args.notebook` (or an ephemeral one — see
+    `notebook.load_or_create`), ingest and merge any new `args.source` values
+    (`notebook.extend_with_sources`), print prompt-injection flag warnings, and return
+    `(notebook, corpus)` — shared by `_cmd_ask`/`_cmd_guide`/`_cmd_audio`, which all need
+    identical sources-in-hand setup before running their own RLMTask. Returns `None` (an error
+    already printed to stderr) if loading or ingestion failed, or if there are no sources at all;
+    the caller should return 1 in that case. `api.py` uses the same two `notebook.py` functions
+    directly rather than this argparse-`Namespace`-shaped wrapper."""
     try:
-        notebook = load_notebook(args.notebook) if args.notebook else None
+        notebook = load_or_create(args.notebook)
     except ValidationError as exc:
         # `save_notebook` writes atomically (temp file + os.replace), so this should only happen
         # to a file this tool never wrote — hand-edited, or corrupted by something outside this
@@ -137,8 +94,6 @@ def _prepare(args) -> tuple[Notebook, Corpus] | None:
             file=sys.stderr,
         )
         return None
-    if notebook is None:
-        notebook = Notebook(id=args.notebook or _EPHEMERAL_ID)
 
     if not args.source and not notebook.sources:
         print(
@@ -149,15 +104,10 @@ def _prepare(args) -> tuple[Notebook, Corpus] | None:
         return None
 
     try:
-        new_sources = _ingest_new(
-            args.source or [],
-            start_index=len(notebook.sources) + 1,
-            skip_origins=existing_origins(notebook),
-        )
+        extend_with_sources(notebook, args.source or [])
     except (FetchError, ValueError, OSError) as exc:
         print(f"could not ingest a source: {type(exc).__name__}: {exc}", file=sys.stderr)
         return None
-    notebook.sources.extend(new_sources)
 
     # Every source currently in the notebook, not just ones just added — a flag stays visible on
     # every subsequent turn, not only the turn that ingested the flagged source (CLAUDE.md's
