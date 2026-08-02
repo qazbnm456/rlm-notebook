@@ -12,6 +12,11 @@ heavier than the others, and wiring its own subprocess-run bookkeeping through t
 streaming either — a request blocks until its subprocess finishes or the configured timeout hits;
 also deferred (see CHANGELOG).
 
+**This API has NO authentication or authorization of any kind** (CLAUDE.md invariant 25) — any
+caller can create/extend/query/ask/cancel any `notebook_id`. It is meant for local/trusted-network
+use only (the same posture ctx-distillery's studio takes); do not expose it to an untrusted network
+without adding auth first, which this slice does not attempt.
+
 Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --extra api`).
 """
 
@@ -28,6 +33,7 @@ from .citations import verify_citations
 from .config import NotebookConfig
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
+from .ingest import is_url
 from .notebook import (
     corpus_of,
     extend_with_sources,
@@ -56,10 +62,17 @@ _TRACE_DIR = Path("traces")
 
 app = FastAPI(title="rlm-notebook API", description=__doc__)
 
-#: In-flight runs, keyed by notebook id — a SINGLE-PROCESS in-memory map. CLAUDE.md's Scope note:
-#: no multi-worker/multi-process deployment story yet; running `uvicorn` with more than one worker
-#: would give each worker its own copy of this dict, and `/cancel` would only reach whichever
-#: worker happens to hold the request — a known limitation of this slice, not a silent bug.
+#: In-flight runs, keyed by notebook id — a SINGLE-PROCESS in-memory map, and ONE SLOT per
+#: notebook id. Two known, documented limitations (CLAUDE.md invariant 23), neither a silent bug:
+#: (1) running `uvicorn` with more than one worker process gives each its own copy of this dict,
+#: so `/cancel` only reaches whichever worker happens to hold the request; (2) two concurrent
+#: requests against the SAME notebook id share one slot — the second overwrites the first's entry,
+#: so `/cancel` can only ever reach the MOST RECENT of the two, and the first can't be cancelled
+#: through this API at all (it still finishes or times out on its own). Verified this is not a
+#: race in the overwrite/cleanup itself — each request's `finally` only clears its OWN entry (the
+#: `is run` identity check below) — the limitation is purely "one cancellable slot per notebook
+#: id," not a corruption risk. A per-run-id (rather than per-notebook-id) registry would remove
+#: this limitation; deferred, not implemented here.
 _ACTIVE_RUNS: dict[str, runner.Run] = {}
 
 
@@ -78,6 +91,17 @@ def _config() -> NotebookConfig:
         raise HTTPException(500, f"server misconfigured: {exc}") from exc
 
 
+def _invalid_notebook_id(notebook_id: str, exc: ValueError) -> HTTPException:
+    """`notebook.notebook_path` raises `ValueError` when `slug(notebook_id)` reduces to an empty
+    token (e.g. `notebook_id` is all punctuation, like `"!!!"`) — a client input error, not a
+    missing-notebook 404 or a corrupted-file 409. Found by an independent review: every endpoint
+    that reaches `load_notebook`/`load_or_create` used to catch `ValidationError` only, so this
+    `ValueError` escaped as an unhandled 500 instead of a clean 4xx — reproduced against a live
+    `TestClient` request (`POST /notebooks/!!!/ask` etc.) before this fix, on all four endpoints
+    that touch a notebook by id."""
+    return HTTPException(400, f"invalid notebook id {notebook_id!r}: {exc}")
+
+
 def _load_notebook_or_404(notebook_id: str) -> Notebook:
     """`ask`/`guide` operate on an EXISTING notebook only — unlike `add_sources`, which creates one
     on demand, there's nothing useful to run a question or a guide artifact against until sources
@@ -90,6 +114,8 @@ def _load_notebook_or_404(notebook_id: str) -> Notebook:
             f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
             f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
         ) from exc
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
     if notebook is None:
         raise HTTPException(404, f"no notebook {notebook_id!r} — POST sources to it first")
     return notebook
@@ -121,7 +147,23 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
     """Create `notebook_id` if it doesn't exist yet, and ingest+merge `body.sources` into it
     (deduped by origin — see `notebook.extend_with_sources`). Always persists, unlike `cli.py`'s
     ephemeral-by-default `ask`/`guide`/`audio`: an API caller has no other way to keep a notebook
-    around between requests."""
+    around between requests.
+
+    **Only http(s) URLs are accepted here — NOT local file paths**, unlike `cli.py`'s `--source`
+    (CLAUDE.md invariant 26). `ingest.ingest_one` treats any non-URL string as a path on the
+    machine running this process and reads it with no allowlist or directory boundary — correct
+    for a CLI whose operator already trusts their own machine, an arbitrary-file-read
+    vulnerability for an unauthenticated network endpoint (found and reproduced by an independent
+    review: `POST {"sources": ["/etc/passwd"]}` read the file and a mocked `ask` echoed its
+    contents back through a citation that passed verification). Local files still only reach a
+    notebook through the CLI."""
+    non_urls = [s for s in body.sources if not is_url(s)]
+    if non_urls:
+        raise HTTPException(
+            422,
+            f"the API only accepts http(s) URLs as sources, not local file paths — rejected: "
+            f"{non_urls!r}. Use the CLI (`rlm-notebook ask --source <path>`) to add a local file.",
+        )
     try:
         notebook = load_or_create(notebook_id)
     except ValidationError as exc:
@@ -130,6 +172,8 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
             f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
             f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
         ) from exc
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
     try:
         extend_with_sources(notebook, body.sources)
     except (FetchError, ValueError, OSError) as exc:

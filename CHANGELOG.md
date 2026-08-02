@@ -282,3 +282,37 @@ questions with verifiable citations, and get a distilled research artifact out.
   finishes or `RN_RUN_TIMEOUT_SECONDS` — default 300s, a NEW config field distinct from
   `RN_MAX_ITERATIONS`/`RN_MAX_LLM_CALLS`, which bound loop steps, not wall-clock time — elapses),
   and any browser UI at all.
+
+- **An independent review of `feat/api` found and reproduced two real security/robustness issues
+  before merging, both fixed:**
+
+  **`add_sources` was an unauthenticated arbitrary-file-read vector (invariants 25, 26).**
+  `ingest.ingest_one` treats any non-URL string as a local file path with no allowlist — correct
+  for `cli.py`, where the operator already trusts their own machine, and a vulnerability the moment
+  the exact same function sat behind an unauthenticated HTTP endpoint. The review reproduced the
+  full chain: `POST {"sources": ["/etc/passwd"]}` read the file, and a mocked `ask` echoed its
+  contents back through a citation that passed coordinate verification. Fixed by rejecting any
+  non-URL value in `add_sources` before it reaches ingestion. This also surfaced that the API has
+  NO authentication at all (invariant 25) — now stated explicitly in `api.py`'s module docstring
+  and README, not left implicit.
+
+  **Four id-taking endpoints crashed with a raw 500 on a notebook id that reduces to an empty
+  slug** (invariant 27) — e.g. `GET /notebooks/!!!`. `_load_notebook_or_404`/`add_sources` only
+  caught `pydantic.ValidationError` (a corrupted file), not the `ValueError` `notebook.notebook_path`
+  raises for an empty slug; reproduced on `GET`, `sources`, `ask`, and `guide/{kind}` with nothing
+  more exotic than a notebook id made of punctuation. Fixed by catching `ValueError` too (→ 400).
+  The review also checked route-level path-traversal payloads (`../../../tmp/evil`) and confirmed
+  they never reach this code at all — Starlette's path converter refuses a literal `/` inside one
+  `{notebook_id}` segment, so those 404 at the routing layer first; a real finding, but not a bug.
+
+  **Verified the `_ACTIVE_RUNS` single-slot-per-notebook-id design is a capacity limitation, not a
+  race**, with an `asyncio`-interleaved test: the `finally` block's `is run` identity check
+  correctly lets only the request that OWNS an entry clear it, even when a second concurrent
+  request for the same notebook id has already overwritten the slot. Documented this more
+  precisely (invariant 23) — the previous wording only mentioned the multi-worker-process
+  limitation, not this same-process one.
+
+  **Added a tripwire test for `cli._GUIDE_TASKS`/`api._GUIDE_TASKS` staying in sync** (invariant
+  28) — the same class of gap the PREVIOUS slice's own `_SPEAKER_LABELS` drift was found to have,
+  applied proactively here instead of waiting for a fourth review to find the fourth instance of
+  the same lesson.

@@ -72,13 +72,19 @@ change voices (see `.env.example`).
 
 ## HTTP API
 
+**No authentication of any kind.** Any caller that can reach this API can create/read/ask/cancel
+against ANY notebook id — there is no concept of an owner. Run it only on `localhost` or an
+otherwise fully-trusted network; do not expose it to the internet or a shared network as-is.
+
 ```bash
 uv sync --extra api                                    # installs fastapi + uvicorn
 uv run uvicorn rlm_notebook.api:app
 ```
 
 ```bash
-curl -X POST localhost:8000/notebooks/mynb/sources -d '{"sources": ["./paper.pdf"]}'
+# --source accepts URLs only here (not local paths — see CLAUDE.md invariant 26); use the CLI
+# above for a local file.
+curl -X POST localhost:8000/notebooks/mynb/sources -d '{"sources": ["https://example.com/article"]}'
 curl -X POST localhost:8000/notebooks/mynb/ask -d '{"question": "what does it say about X?"}'
 curl -X POST localhost:8000/notebooks/mynb/guide/summary
 curl -X POST localhost:8000/notebooks/mynb/cancel        # cancel that notebook's in-flight run
@@ -88,7 +94,7 @@ Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable sub
 `cli.py`'s in-process invocation — so one slow or stuck request can't block another, and can be
 cancelled outright. No `/audio` endpoint yet, and no SSE/progress streaming — a request blocks
 until its subprocess finishes or `RN_RUN_TIMEOUT_SECONDS` (default 300s) elapses. See `api.py`'s
-module docstring and CLAUDE.md invariants 20-24.
+module docstring and CLAUDE.md invariants 20-28.
 
 ## What this is not (yet)
 

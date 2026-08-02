@@ -2,6 +2,11 @@
 `runner.wait_result` are monkeypatched to a fake in every test — this suite never spawns a real
 subprocess or needs model credentials; `test_runner.py` covers the real subprocess mechanics, and
 this project's "LIVE run" caveat (CLAUDE.md's Verify section) applies here too.
+
+The API only accepts http(s) URLs as sources (CLAUDE.md invariant 26 — local file paths were an
+unauthenticated arbitrary-file-read vector, found and fixed after an independent review), so every
+test that needs a notebook with sources uses a fake `parse_web` (`_fake_web_ingestion` below)
+rather than a real network call.
 """
 
 from __future__ import annotations
@@ -12,9 +17,21 @@ fastapi = pytest.importorskip("fastapi")
 
 from fastapi.testclient import TestClient
 
-from rlm_notebook import api
+from rlm_notebook import api, cli
 from rlm_notebook.notebook import load_notebook
 from rlm_notebook.schema import FAQ, KeyInsight, Summary, Timeline
+
+_FAIL_URL = "https://example.com/fails-to-fetch"
+
+
+def test_guide_task_registries_stay_in_sync_between_cli_and_api():
+    """`cli._GUIDE_TASKS` and `api._GUIDE_TASKS` are two independent dicts (api.py must not import
+    cli.py — see CLAUDE.md invariant 20), kept manually in sync. Found by an independent review:
+    the sibling project's `_SPEAKER_LABELS` drift tripwire (added the previous slice, after an
+    earlier review found the SAME class of gap) had no counterpart here yet."""
+    assert set(cli._GUIDE_TASKS) == set(api._GUIDE_TASKS)
+    for kind, task_cls in cli._GUIDE_TASKS.items():
+        assert api._GUIDE_TASKS[kind][0] is task_cls
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +49,25 @@ def _clear_active_runs():
     api._ACTIVE_RUNS.clear()
     yield
     api._ACTIVE_RUNS.clear()
+
+
+@pytest.fixture(autouse=True)
+def _fake_web_ingestion(monkeypatch):
+    """Fakes `ingest.parse_web` so every test that adds a `https://...` source never makes a real
+    network call. `_FAIL_URL` is a sentinel the fake treats as a real ingestion failure, for the
+    one test that needs to exercise `add_sources`'s error path."""
+    from rlm_notebook.parsers.web import FetchError
+    from rlm_notebook.schema import Source, SourceBlock
+
+    def _fake_parse_web(url, source_id):
+        if url == _FAIL_URL:
+            raise FetchError(f"simulated fetch failure for {url}")
+        return Source(
+            id=source_id, kind="web", origin=url,
+            blocks=[SourceBlock(locator="whole", text=f"content of {url}")],
+        )
+
+    monkeypatch.setattr("rlm_notebook.ingest.parse_web", _fake_parse_web)
 
 
 @pytest.fixture
@@ -70,14 +106,16 @@ def _live_env(monkeypatch) -> None:
     monkeypatch.delenv("RN_INTERPRETER", raising=False)
 
 
+def _add_a_source(client) -> None:
+    resp = client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert resp.status_code == 200, resp.text
+
+
 # --- /notebooks/{id}/sources & GET /notebooks/{id} ----------------------------------------------
 
 
-def test_add_sources_creates_and_persists_a_notebook(client, tmp_path):
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-
-    resp = client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+def test_add_sources_creates_and_persists_a_notebook(client):
+    resp = client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
 
     assert resp.status_code == 200
     body = resp.json()
@@ -86,21 +124,34 @@ def test_add_sources_creates_and_persists_a_notebook(client, tmp_path):
     assert load_notebook("mynb") is not None  # actually persisted, not just returned
 
 
-def test_add_sources_extends_without_duplicating(client, tmp_path):
-    a = tmp_path / "a.txt"
-    a.write_text("hello a", encoding="utf-8")
-    b = tmp_path / "b.txt"
-    b.write_text("hello b", encoding="utf-8")
-
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
-    resp = client.post("/notebooks/mynb/sources", json={"sources": [str(a), str(b)]})
+def test_add_sources_extends_without_duplicating(client):
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    resp = client.post(
+        "/notebooks/mynb/sources",
+        json={"sources": ["https://example.com/a", "https://example.com/b"]},
+    )
 
     assert resp.status_code == 200
-    assert [s["origin"] for s in resp.json()["sources"]] == [str(a), str(b)]
+    origins = [s["origin"] for s in resp.json()["sources"]]
+    assert origins == ["https://example.com/a", "https://example.com/b"]
 
 
-def test_add_sources_reports_422_on_ingestion_failure(client, tmp_path):
-    resp = client.post("/notebooks/mynb/sources", json={"sources": [str(tmp_path / "nope.txt")]})
+def test_add_sources_rejects_local_file_paths(client, tmp_path):
+    """The core LFI fix: unlike `cli.py`'s `--source`, the API must never read an arbitrary local
+    path off the machine it runs on — found and reproduced by an independent review (a mocked
+    `/etc/passwd` read whose contents then came back through a citation)."""
+    secret = tmp_path / "secret.txt"
+    secret.write_text("TOP SECRET CONTENTS", encoding="utf-8")
+
+    resp = client.post("/notebooks/mynb/sources", json={"sources": [str(secret)]})
+
+    assert resp.status_code == 422
+    assert "secret.txt" not in resp.text or "TOP SECRET" not in resp.text  # never echoes file contents
+    assert load_notebook("mynb") is None  # nothing was created, let alone populated
+
+
+def test_add_sources_reports_422_on_a_real_ingestion_failure(client):
+    resp = client.post("/notebooks/mynb/sources", json={"sources": [_FAIL_URL]})
     assert resp.status_code == 422
 
 
@@ -113,15 +164,31 @@ def test_add_sources_reports_409_on_a_corrupted_notebook_file(client, tmp_path):
     assert resp.status_code == 409
 
 
+@pytest.mark.parametrize("bad_id", ["!!!", "...", "---"])
+def test_endpoints_report_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_slug(
+    client, monkeypatch, bad_id
+):
+    """`notebook.slug(bad_id)` reduces to an empty token, and `notebook_path` raises `ValueError` —
+    found by an independent review: every endpoint reaching `load_notebook`/`load_or_create` used
+    to catch `pydantic.ValidationError` only, so this `ValueError` escaped as an unhandled 500
+    instead of a clean 4xx. Checks all four endpoints that take a notebook id, not just one.
+    (`"////"` is deliberately NOT in this list: Starlette's default path converter doesn't match a
+    literal `/` inside a single path segment, so that payload 404s at the ROUTING layer before
+    ever reaching a handler — a different, already-safe code path, not this one.)"""
+    _live_env(monkeypatch)
+    assert client.get(f"/notebooks/{bad_id}").status_code == 400
+    assert client.post(f"/notebooks/{bad_id}/sources", json={"sources": []}).status_code == 400
+    assert client.post(f"/notebooks/{bad_id}/ask", json={"question": "x"}).status_code == 400
+    assert client.post(f"/notebooks/{bad_id}/guide/summary").status_code == 400
+
+
 def test_get_notebook_404_when_missing(client):
     resp = client.get("/notebooks/does-not-exist")
     assert resp.status_code == 404
 
 
-def test_get_notebook_returns_sources_and_turn_count(client, tmp_path):
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+def test_get_notebook_returns_sources_and_turn_count(client):
+    _add_a_source(client)
 
     resp = client.get("/notebooks/mynb")
 
@@ -141,11 +208,9 @@ def test_ask_404_when_notebook_missing(client, monkeypatch):
     assert resp.status_code == 404
 
 
-def test_ask_runs_isolated_and_returns_verified_citations(client, monkeypatch, tmp_path):
+def test_ask_runs_isolated_and_returns_verified_citations(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
 
     dotted_tasks: list[str] = []
     _mock_runner(
@@ -170,11 +235,9 @@ def test_ask_runs_isolated_and_returns_verified_citations(client, monkeypatch, t
     assert dotted_tasks == ["rlm_notebook.task:AnswerQuestion"]
 
 
-def test_ask_persists_the_turn_to_the_notebook(client, monkeypatch, tmp_path):
+def test_ask_persists_the_turn_to_the_notebook(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
     _mock_runner(monkeypatch, {"text": "the answer", "citations": []})
 
     client.post("/notebooks/mynb/ask", json={"question": "what?"})
@@ -185,11 +248,9 @@ def test_ask_persists_the_turn_to_the_notebook(client, monkeypatch, tmp_path):
     assert notebook.turns[0].answer.text == "the answer"
 
 
-def test_ask_translates_a_run_error_into_502(client, monkeypatch, tmp_path):
+def test_ask_translates_a_run_error_into_502(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
 
     async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
         return _FakeRun(run_id)
@@ -205,13 +266,11 @@ def test_ask_translates_a_run_error_into_502(client, monkeypatch, tmp_path):
     assert "simulated crash" in resp.json()["detail"]
 
 
-def test_ask_reports_a_clean_500_when_the_server_is_misconfigured(client, monkeypatch, tmp_path):
+def test_ask_reports_a_clean_500_when_the_server_is_misconfigured(client, monkeypatch):
     """`NotebookConfig.from_env()` raises SystemExit when RN_MAIN_MODEL is unset — `_config()` must
     convert that into an HTTP response, not let SystemExit escape the request handler."""
     monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
 
     resp = client.post("/notebooks/mynb/ask", json={"question": "what?"})
     assert resp.status_code == 500
@@ -221,21 +280,17 @@ def test_ask_reports_a_clean_500_when_the_server_is_misconfigured(client, monkey
 # --- /notebooks/{id}/guide/{kind} ----------------------------------------------------------------
 
 
-def test_guide_404_on_unknown_kind(client, monkeypatch, tmp_path):
+def test_guide_404_on_unknown_kind(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
 
     resp = client.post("/notebooks/mynb/guide/not-a-real-kind")
     assert resp.status_code == 404
 
 
-def test_guide_summary(client, monkeypatch, tmp_path):
+def test_guide_summary(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
     _mock_runner(monkeypatch, Summary(text="a summary", citations=[]).model_dump())
 
     resp = client.post("/notebooks/mynb/guide/summary")
@@ -244,11 +299,9 @@ def test_guide_summary(client, monkeypatch, tmp_path):
     assert resp.json()["text"] == "a summary"
 
 
-def test_guide_faq(client, monkeypatch, tmp_path):
+def test_guide_faq(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
     faq = FAQ(items=[{"question": "q?", "answer": "a.", "citations": []}])
     _mock_runner(monkeypatch, faq.model_dump())
 
@@ -258,11 +311,9 @@ def test_guide_faq(client, monkeypatch, tmp_path):
     assert resp.json()["items"][0]["question"] == "q?"
 
 
-def test_guide_timeline(client, monkeypatch, tmp_path):
+def test_guide_timeline(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
     timeline = Timeline(events=[{"when": "ch.1", "description": "it happens", "citations": []}])
     _mock_runner(monkeypatch, timeline.model_dump())
 
@@ -272,11 +323,9 @@ def test_guide_timeline(client, monkeypatch, tmp_path):
     assert resp.json()["events"][0]["when"] == "ch.1"
 
 
-def test_guide_insight(client, monkeypatch, tmp_path):
+def test_guide_insight(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
     _mock_runner(monkeypatch, KeyInsight(text="the one thing", citations=[]).model_dump())
 
     resp = client.post("/notebooks/mynb/guide/insight")
@@ -285,11 +334,9 @@ def test_guide_insight(client, monkeypatch, tmp_path):
     assert resp.json()["text"] == "the one thing"
 
 
-def test_guide_dispatches_the_correct_task_per_kind(client, monkeypatch, tmp_path):
+def test_guide_dispatches_the_correct_task_per_kind(client, monkeypatch):
     _live_env(monkeypatch)
-    a = tmp_path / "a.txt"
-    a.write_text("hello", encoding="utf-8")
-    client.post("/notebooks/mynb/sources", json={"sources": [str(a)]})
+    _add_a_source(client)
 
     dotted_tasks: list[str] = []
     _mock_runner(monkeypatch, Summary(text="x", citations=[]).model_dump(), dotted_tasks=dotted_tasks)

@@ -208,18 +208,64 @@ earlier design discussion mentioned them.
     an actual grandchild subprocess and confirms it dies too when the run is cancelled — a stuck
     Deno grandchild in a real run must not survive as an orphan after its parent worker is killed.
     Don't simplify this to `process.kill()` (which only signals the worker's own PID).
-23. **`api._ACTIVE_RUNS` is a single-process, in-memory map — there is no multi-worker/
-    multi-process `uvicorn` deployment story yet.** Running `uvicorn` with more than one worker
-    process would give each its own copy of this dict, and `POST .../cancel` would only reach
-    whichever worker happens to hold the request for that notebook id. A known limitation of this
-    slice (documented, not a silent bug) — a real deployment story (shared run registry) is a
-    follow-up, not implemented here.
+23. **`api._ACTIVE_RUNS` is a single-process, in-memory map with ONE SLOT PER NOTEBOOK ID — two
+    distinct, documented limitations, neither a silent bug.** (a) There is no multi-worker/
+    multi-process `uvicorn` deployment story: running more than one worker process gives each its
+    own copy of this dict, and `POST .../cancel` only reaches whichever worker happens to hold the
+    request. (b) Two concurrent requests against the SAME notebook id share one slot: the second
+    overwrites the first's entry, so `/cancel` can only ever reach the MOST RECENT of the two — the
+    first still finishes or times out on its own, just not cancellable through this API. An
+    independent review verified (b) is a capacity limitation, not a race: each request's `finally`
+    only clears its OWN entry (an `is run` identity check), confirmed with an interleaved-`asyncio`
+    test, so the overwrite/cleanup itself never corrupts state. A per-run-id (rather than
+    per-notebook-id) registry would remove limitation (b); deferred, not implemented here.
 24. **`api._config()` converts `NotebookConfig.from_env()`'s `SystemExit` into an HTTP 500, rather
     than letting it escape a request handler.** `cli.py` lets the same `SystemExit` propagate and
     exit the process, which is correct for a one-shot CLI invocation — it is NOT correct for a
     long-running server process, where an unhandled `SystemExit` inside a request handler is a
     crash, not a clean error response. Verified against a real running server (`curl`, not just the
     mocked test suite) before landing this: an unset `RN_MAIN_MODEL` now returns a clean 500 with
-    the same message `cli.py` would have printed, not a broken connection.
+    the same message `cli.py` would have printed, not a broken connection. Every `SystemExit`
+    source in `config.py` (`from_env`'s own checks, `_env_int`/`_env_float`/`_ocr_provider_from_env`)
+    is reachable only through `from_env()`, and every `api.py` call site uses `_config()`, never
+    `NotebookConfig.from_env()` directly — confirmed by an independent review; don't add a new
+    direct call that bypasses this wrapper.
+25. **This API has NO authentication or authorization of any kind.** Any caller can create,
+    extend, query, `ask`/`guide` against, or cancel a run for ANY `notebook_id` — there is no
+    concept of an owner. It is meant for local or otherwise fully-trusted-network use only (the
+    same posture ctx-distillery's studio takes for its own reasons); do not expose it to an
+    untrusted network without adding auth first, which this slice does not attempt. Both `api.py`'s
+    module docstring and `README.md` say so explicitly — don't let that warning quietly disappear
+    in a later edit.
+26. **`add_sources` accepts ONLY http(s) URLs, never a local file path — unlike `cli.py`'s
+    `--source`.** `ingest.ingest_one` treats any non-URL string as a path on the machine running
+    the process and reads it with no allowlist or directory boundary; that is a reasonable design
+    for a CLI whose operator already trusts their own machine (invariant 3's ingestion model was
+    built for that trust boundary), and an unauthenticated arbitrary-file-read vulnerability the
+    moment the same function is reachable over an unauthenticated HTTP endpoint (invariant 25 — no
+    auth at all). An independent review reproduced the full attack end to end: `POST
+    {"sources": ["/etc/passwd"]}` read the file, and a mocked `ask` echoed its contents back through
+    a citation that passed coordinate verification. Fixed by rejecting any non-URL value in
+    `add_sources` before it ever reaches `extend_with_sources`. Local files still only ever reach a
+    notebook through the CLI, which has a different, legitimate trust boundary. If a later slice
+    wants the API to accept file uploads, that needs its own explicit multipart-upload design — not
+    quietly re-widening this check back to accept arbitrary paths.
+27. **Every endpoint that resolves a notebook by id catches BOTH `pydantic.ValidationError` (a
+    corrupted notebook file → 409) AND `ValueError` (an invalid id that `notebook.slug` reduces to
+    an empty token, e.g. `"!!!"` → 400) — not just the first.** An independent review reproduced an
+    unhandled `ValueError` escaping as a raw 500 on all four id-taking endpoints
+    (`GET /notebooks/{id}`, `sources`, `ask`, `guide/{kind}`) before this fix, using nothing more
+    exotic than a notebook id made entirely of punctuation. `cancel` is unaffected (it never calls
+    `load_notebook`/`load_or_create`). Route path-traversal payloads (e.g. `../../../tmp/evil`) were
+    checked too and do NOT reach this code path at all — Starlette's default path converter refuses
+    to match a literal `/` inside a single `{notebook_id}` segment, so those 404 at the routing
+    layer before any handler runs; don't assume that protection is this project's own code, though —
+    it's a framework default, worth re-checking if the route ever changes shape.
+28. **`cli._GUIDE_TASKS` and `api._GUIDE_TASKS` are two independent registries, kept in sync by a
+    tripwire test (`test_api.py::test_guide_task_registries_stay_in_sync_between_cli_and_api`), not
+    by sharing code** (invariant 20 already explains why `api.py` doesn't import from `cli.py`).
+    Add a new `guide` kind to BOTH dicts, or the tripwire fails immediately rather than the two
+    silently drifting — the same class of gap an earlier review found in `cli._SPEAKER_LABELS`
+    before this slice added the analogous test here proactively.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
