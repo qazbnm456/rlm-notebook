@@ -75,6 +75,113 @@ async function api(path, options) {
   return resp.status === 204 ? null : resp.json();
 }
 
+// --- Reasoning-trace ticker (Phase 3) --------------------------------------------------------
+//
+// `ask`, each Guide-tab fetch, and the podcast generate call all pick their OWN run id
+// client-side (never trust a server-generated one — it would never reach us until the request
+// was already over) and open a live SSE ticker against it before/alongside firing the actual
+// request. Reasoning-trace fusion is deliberately a SECONDARY, opt-in layer: the request's own
+// response remains the sole source of the final answer/result (unchanged from Phase 1/2) — the
+// ticker only replaces static "Thinking…"/"Generating…" copy with live-updating copy, and adds a
+// small "view reasoning" affordance afterward. Losing the ticker (a network hiccup, the SSE
+// connection dropping) never blocks or breaks the actual request.
+
+//: One client-side log per run id, kept for the lifetime of the page (not just while a stream is
+//: open) so a "⌁ N steps" affordance can expand instantly without re-fetching. Shared across
+//: Chat/Guide/Podcast rather than three separate caches.
+const tickerLogs = new Map();
+
+function openTicker(notebookId, runId, onEvent) {
+  const events = [];
+  tickerLogs.set(runId, events);
+  return new Promise((resolve) => {
+    let source;
+    try {
+      source = new EventSource(
+        `/notebooks/${encodeURIComponent(notebookId)}/runs/${encodeURIComponent(runId)}/stream`
+      );
+    } catch {
+      resolve(events);
+      return;
+    }
+    source.onmessage = (message) => {
+      let event;
+      try {
+        event = JSON.parse(message.data);
+      } catch {
+        return;
+      }
+      events.push(event);
+      onEvent(event);
+      if (event.kind === "done" || event.kind === "not_found") {
+        source.close();
+        resolve(events);
+      }
+    };
+    source.onerror = () => {
+      // A dropped connection ends the TICKER, never the request itself — the POST this ticker is
+      // attached to keeps running and its own response is still authoritative.
+      source.close();
+      resolve(events);
+    };
+  });
+}
+
+function renderTickerAffordance(runId) {
+  const events = tickerLogs.get(runId) || [];
+  const wrapper = document.createElement("div");
+  wrapper.className = "ticker-affordance";
+
+  const toggle = document.createElement("button");
+  toggle.type = "button";
+  toggle.className = "ticker-toggle";
+  toggle.textContent = `⌁ ${events.length} step${events.length === 1 ? "" : "s"}`;
+
+  const detail = document.createElement("div");
+  detail.className = "ticker-detail";
+  detail.hidden = true;
+  events.forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "ticker-row";
+    row.textContent = event.summary || event.kind || "event";
+    detail.appendChild(row);
+  });
+
+  toggle.addEventListener("click", () => {
+    detail.hidden = !detail.hidden;
+  });
+
+  wrapper.appendChild(toggle);
+  wrapper.appendChild(detail);
+  return wrapper;
+}
+
+// Which trace turn (if any) shows the model reading this citation's source span — a heuristic
+// lookup (blueprint P3.3), never a faithfulness proof. `detailArea` is a shared slot inside the
+// SAME renderAnswerWithCitations() call the clicked span belongs to, so only one detail shows at
+// a time per answer rather than accumulating unboundedly.
+async function showCitationTurn(runId, citation, detailArea) {
+  detailArea.hidden = false;
+  detailArea.textContent = "Loading…";
+  try {
+    const params = new URLSearchParams({ source_id: citation.source_id, locator: citation.locator });
+    const data = await api(
+      `/notebooks/${encodeURIComponent(state.notebookId)}/runs/${encodeURIComponent(runId)}/citation-turn?${params}`
+    );
+    detailArea.textContent = "";
+    const note = document.createElement("div");
+    note.className = "citation-detail-note";
+    note.textContent = "Where the model read this source (not proof the surrounding prose is faithful):";
+    detailArea.appendChild(note);
+    const pre = document.createElement("pre");
+    pre.className = "citation-detail-payload";
+    pre.textContent = JSON.stringify(data.payload, null, 2);
+    detailArea.appendChild(pre);
+  } catch (err) {
+    detailArea.textContent = `(error) ${err.message}`;
+  }
+}
+
 // --- Notebook switcher ---------------------------------------------------------------------------
 
 async function refreshNotebookList() {
@@ -229,7 +336,10 @@ function initSourcesPanel() {
 // `"` character inside `source_id`/`locator` could have broken out of; rewritten before this was
 // ever shipped once that was noticed. Same discipline the sibling studios' own `app.js` files
 // already enforce for exactly this reason (see rlm_notebook/web/DESIGN.md's Do/Don't).
-function renderAnswerWithCitations(text, citations) {
+// `runId` is optional (Phase 1/2 call sites that predate the trace fusion, or a loaded turn saved
+// before `ChatTurn.run_id` existed, pass nothing) — when given, each citation span becomes
+// clickable, calling `showCitationTurn` against a shared detail slot appended once per answer.
+function renderAnswerWithCitations(text, citations, runId) {
   const container = document.createElement("div");
 
   // Locate each citation's quote as a literal substring of the RAW answer text (never
@@ -244,6 +354,10 @@ function renderAnswerWithCitations(text, citations) {
   });
   matches.sort((a, b) => a.start - b.start);
 
+  const detailArea = document.createElement("div");
+  detailArea.className = "citation-detail";
+  detailArea.hidden = true;
+
   let cursor = 0;
   matches.forEach((match) => {
     if (match.start < cursor) return; // overlapping quotes — keep the first, skip the rest
@@ -254,6 +368,10 @@ function renderAnswerWithCitations(text, citations) {
     span.className = match.citation.verified ? "citation" : "citation is-unverified";
     span.title = `${match.citation.source_id} · ${match.citation.locator}`;
     span.textContent = text.slice(match.start, match.end);
+    if (runId) {
+      span.classList.add("citation-clickable");
+      span.addEventListener("click", () => showCitationTurn(runId, match.citation, detailArea));
+    }
     container.appendChild(span);
     cursor = match.end;
   });
@@ -273,6 +391,7 @@ function renderAnswerWithCitations(text, citations) {
     });
     container.appendChild(list);
   }
+  if (runId) container.appendChild(detailArea);
   return container;
 }
 
@@ -287,11 +406,17 @@ function renderTurn(turn) {
 
   const answer = document.createElement("div");
   answer.className = "turn-answer";
+  if (turn.run_id) answer.dataset.runId = turn.run_id;
   if (turn.pending) {
     answer.classList.add("is-pending");
     answer.textContent = "Thinking…";
   } else {
-    answer.appendChild(renderAnswerWithCitations(turn.answer, turn.citations || []));
+    answer.appendChild(renderAnswerWithCitations(turn.answer, turn.citations || [], turn.run_id));
+    // `turn.run_id` is `None`/absent for any turn saved before this field existed — degrades
+    // gracefully to no affordance rather than a broken link (schema.ChatTurn.run_id's own doc).
+    if (turn.run_id && tickerLogs.has(turn.run_id)) {
+      answer.appendChild(renderTickerAffordance(turn.run_id));
+    }
   }
   wrapper.appendChild(answer);
 
@@ -330,16 +455,26 @@ function initChatPanel() {
     const question = input.value.trim();
     if (!question) return;
 
-    const pendingTurn = { question, pending: true };
+    // The CLIENT picks the run id (blueprint P3.1) — a server-generated one would never reach us
+    // until the request was already over, too late to open a live ticker against it.
+    const token = crypto.randomUUID();
+    const runId = `${state.notebookId}-${token}`;
+
+    const pendingTurn = { question, pending: true, run_id: runId };
     store.emit("chat:turnAdded", { turn: pendingTurn });
     store.emit("chat:pending", { pending: true });
     input.value = "";
+
+    openTicker(state.notebookId, runId, (evt) => {
+      const el = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
+      if (el && el.classList.contains("is-pending")) el.textContent = evt.summary || "Thinking…";
+    });
 
     try {
       const result = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question }),
+        body: JSON.stringify({ question, run_id: token }),
       });
       // Re-render the whole history from the server's own record rather than mutating the
       // pending row in place — the server is the source of truth for what actually got persisted.
@@ -372,12 +507,12 @@ function initChatPanel() {
 // idle click would burn a model call for nothing. Cached per notebook, keyed by kind; cleared on
 // BOTH a notebook switch AND a source being added — a cached result is stale the moment the corpus
 // it was computed from changes, not just when the notebook itself changes.
-function renderGuideContent(kind, data) {
+function renderGuideContent(kind, data, runId) {
   const container = document.createElement("div");
   container.className = "guide-prose";
 
   if (kind === "summary" || kind === "insight") {
-    container.appendChild(renderAnswerWithCitations(data.text, data.citations || []));
+    container.appendChild(renderAnswerWithCitations(data.text, data.citations || [], runId));
     return container;
   }
 
@@ -393,7 +528,7 @@ function renderGuideContent(kind, data) {
       head.className = "guide-item-head";
       head.textContent = item.question;
       div.appendChild(head);
-      div.appendChild(renderAnswerWithCitations(item.answer, item.citations || []));
+      div.appendChild(renderAnswerWithCitations(item.answer, item.citations || [], runId));
       container.appendChild(div);
     });
     return container;
@@ -411,7 +546,7 @@ function renderGuideContent(kind, data) {
     when.className = "guide-item-when";
     when.textContent = event.when;
     div.appendChild(when);
-    div.appendChild(renderAnswerWithCitations(event.description, event.citations || []));
+    div.appendChild(renderAnswerWithCitations(event.description, event.citations || [], runId));
     container.appendChild(div);
   });
   return container;
@@ -421,12 +556,21 @@ function initStudioPanel() {
   const tabs = document.querySelectorAll("#guide-tabs .tab");
   const body = document.getElementById("guide-body");
   const regenerateBtn = document.getElementById("guide-regenerate");
+  // Cache VALUE widened to {result, runId} — storing the result alone (an earlier draft's shape)
+  // would lose the run id the moment a user switches tabs and back, breaking citation-turn lookup
+  // for a tab already left (found during this phase's own pre-implementation audit).
   const cache = new Map();
   let activeKind = "summary";
 
   function setActiveKind(kind) {
     activeKind = kind;
     tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.guideKind === kind));
+  }
+
+  function renderCached(kind, cached) {
+    body.innerHTML = "";
+    body.appendChild(renderGuideContent(kind, cached.result, cached.runId));
+    body.appendChild(renderTickerAffordance(cached.runId));
   }
 
   async function fetchKind(kind) {
@@ -439,16 +583,22 @@ function initStudioPanel() {
       body.appendChild(note);
       return;
     }
+    const token = crypto.randomUUID();
+    const runId = `${state.notebookId}-${token}`;
     body.classList.add("is-pending");
     body.textContent = "Generating…";
+    openTicker(state.notebookId, runId, (evt) => {
+      if (body.classList.contains("is-pending")) body.textContent = evt.summary || "Generating…";
+    });
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/guide/${kind}`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: token }),
       });
-      cache.set(kind, data);
+      cache.set(kind, { result: data, runId });
       body.classList.remove("is-pending");
-      body.innerHTML = "";
-      body.appendChild(renderGuideContent(kind, data));
+      renderCached(kind, cache.get(kind));
     } catch (err) {
       body.classList.remove("is-pending");
       body.textContent = `(error) ${err.message}`;
@@ -458,8 +608,7 @@ function initStudioPanel() {
   function showKind(kind) {
     setActiveKind(kind);
     if (cache.has(kind)) {
-      body.innerHTML = "";
-      body.appendChild(renderGuideContent(kind, cache.get(kind)));
+      renderCached(kind, cache.get(kind));
       return;
     }
     fetchKind(kind);
@@ -496,14 +645,14 @@ function initStudioPanel() {
 
 // --- Studio panel: podcast player ------------------------------------------------------------
 
-function renderPodcastUtterance(utterance) {
+function renderPodcastUtterance(utterance, runId) {
   const div = document.createElement("div");
   div.className = "podcast-utterance";
   const speaker = document.createElement("div");
   speaker.className = "podcast-speaker";
   speaker.textContent = utterance.speaker === "host_a" ? "Host A" : "Host B";
   div.appendChild(speaker);
-  div.appendChild(renderAnswerWithCitations(utterance.text, utterance.citations || []));
+  div.appendChild(renderAnswerWithCitations(utterance.text, utterance.citations || [], runId));
   return div;
 }
 
@@ -529,11 +678,20 @@ function initPodcastPlayer() {
       return;
     }
     generateBtn.disabled = true;
+    const token = crypto.randomUUID();
+    const runId = `${state.notebookId}-${token}`;
     body.classList.add("is-pending");
     body.textContent = "Generating script and synthesizing audio — this can take a while…";
+    openTicker(state.notebookId, runId, (evt) => {
+      if (body.classList.contains("is-pending")) {
+        body.textContent = evt.summary || "Generating script and synthesizing audio…";
+      }
+    });
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ run_id: token }),
       });
       body.classList.remove("is-pending");
       body.innerHTML = "";
@@ -554,10 +712,13 @@ function initPodcastPlayer() {
       body.appendChild(player);
       currentObjectUrl = newUrl;
       if (oldUrl) URL.revokeObjectURL(oldUrl); // ...then revoke the OLD one, never the reverse
+      body.appendChild(renderTickerAffordance(runId));
 
       const transcript = document.createElement("div");
       transcript.className = "podcast-transcript";
-      data.utterances.forEach((utterance) => transcript.appendChild(renderPodcastUtterance(utterance)));
+      data.utterances.forEach((utterance) =>
+        transcript.appendChild(renderPodcastUtterance(utterance, runId))
+      );
       body.appendChild(transcript);
     } catch (err) {
       body.classList.remove("is-pending");

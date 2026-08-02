@@ -410,6 +410,42 @@ input:focus {
   border-bottom-color: var(--bad);
 }
 
+.citation-clickable {
+  cursor: pointer;
+}
+
+.citation-clickable:hover {
+  filter: brightness(0.95);
+}
+
+/* Where the model read this citation's source (Phase 3) — a heuristic lookup, never a
+   faithfulness proof (see CLAUDE.md invariant 5 and the citation-turn endpoint's own docstring).
+   One shared slot per answer, not one per citation, so clicking a different citation replaces the
+   previous detail rather than accumulating unboundedly. */
+.citation-detail {
+  margin-top: 0.5rem;
+  border: 1px solid var(--border);
+  background: var(--surface-3);
+  border-radius: var(--radius);
+  padding: 0.5em 0.7em;
+  font-size: 0.78rem;
+}
+
+.citation-detail-note {
+  color: var(--text-faint);
+  margin-bottom: 0.4rem;
+}
+
+.citation-detail-payload {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 240px;
+  overflow-y: auto;
+  margin: 0;
+}
+
 .citation-list {
   margin-top: 0.5rem;
   display: flex;
@@ -525,6 +561,37 @@ input:focus {
   letter-spacing: 0.03em;
   color: var(--studio-accent);
   margin-bottom: 0.25rem;
+}
+
+/* --- Reasoning-trace ticker (Phase 3) --- */
+
+.ticker-toggle {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 0.15em 0.6em;
+  color: var(--text-faint);
+  cursor: pointer;
+  margin-top: 0.5rem;
+}
+
+.ticker-toggle:hover {
+  border-color: var(--accent-dim);
+  color: var(--text-dim);
+}
+
+.ticker-detail {
+  margin-top: 0.4rem;
+  border-left: 2px solid var(--border-strong);
+  padding-left: 0.6rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.72rem;
+  color: var(--text-faint);
 }
 
 /* --- Responsive --- */

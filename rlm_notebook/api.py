@@ -6,16 +6,22 @@ execution-model invariant. `cli.py`'s synchronous in-process invocation is compl
 
 Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend),
 `GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
-`POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`. `/audio` is two host-side steps, not
-one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use, and TTS
-synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see `audio()`'s own
-docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
+`POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
+`GET /notebooks/{id}/runs/{run_id}/stream` (live reasoning-trace SSE), and
+`GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup). `/audio` is two
+host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
+already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
+`audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
 (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). No audio is ever
-persisted to disk past one request — no file-serving endpoint, no retention policy needed. No
-SSE/progress streaming either — a request blocks until its subprocess finishes or the configured
-timeout hits; also deferred (see CHANGELOG; see also `docs/design/web-ui-blueprint.md`'s §5.5 for
-why a reasoning-trace SSE endpoint was deliberately NOT added this slice — it was designed, audited,
-and found unbuildable as scoped).
+persisted to disk past one request — no file-serving endpoint, no retention policy needed.
+
+`ask`/`guide`/`audio` all accept an optional client-supplied `run_id` (a `RunOptions` body field) —
+the CLIENT picks the run id, not the server, so it can open the trace stream before/alongside firing
+the request that will populate it. `_run_isolated` exclusively creates the trace file before
+spawning the subprocess (a hard uniqueness gate, mapped to a 409 on collision — see
+`docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.1 for why this is a real, not merely
+unlikely, concern once a client partly controls the id). See CLAUDE.md invariant 29 for why a
+reasoning-trace SSE endpoint was originally deferred as unbuildable, and what changed.
 
 This module also serves the web UI (`rlm_notebook/web/`, a zero-build static HTML/CSS/JS app) at
 `/`, mounted AFTER every API route below so the API always wins on a path collision.
@@ -23,7 +29,13 @@ This module also serves the web UI (`rlm_notebook/web/`, a zero-build static HTM
 **This API has NO authentication or authorization of any kind** (CLAUDE.md invariant 25) — any
 caller can create/extend/query/ask/cancel any `notebook_id`. It is meant for local/trusted-network
 use only (the same posture ctx-distillery's studio takes); do not expose it to an untrusted network
-without adding auth first, which this slice does not attempt.
+without adding auth first, which this slice does not attempt. The trace stream and citation-turn
+lookup endpoints are a MATERIALLY DIFFERENT exposure than every other endpoint here — unlike
+`GET /notebooks/{id}` (metadata only) or `ask`/`guide` (model-authored prose and short citation
+quotes), a trace can contain full ingested source text the model echoed while reading it. Treat
+this as a sharper version of the same no-auth posture, not a new category of risk this project
+hasn't already accepted, but never let documentation imply the trace endpoints are as low-exposure
+as the rest.
 
 Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --extra api`).
 """
@@ -32,12 +44,14 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import os
 import tempfile
 import uuid
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
@@ -56,6 +70,7 @@ from .notebook import (
     load_notebook,
     load_or_create,
     save_notebook,
+    slug,
 )
 from .parsers.web import FetchError
 from .schema import (
@@ -100,6 +115,19 @@ app = FastAPI(title="rlm-notebook API", description=__doc__)
 #: id," not a corruption risk. A per-run-id (rather than per-notebook-id) registry would remove
 #: this limitation; deferred, not implemented here.
 _ACTIVE_RUNS: dict[str, runner.Run] = {}
+
+#: A SEPARATE, run-id-keyed map of in-flight subprocesses — deliberately NOT reused from
+#: `_ACTIVE_RUNS` above. `stream_run`'s cancelled-run liveness check needs a per-RUN signal, and
+#: `_ACTIVE_RUNS`'s single-slot-per-NOTEBOOK-id semantics would misfire: a second concurrent
+#: request on the same notebook overwrites `_ACTIVE_RUNS`'s entry, which would make the FIRST run's
+#: stream falsely conclude it was cancelled the moment a second one starts (found during this
+#: phase's own pre-implementation audit). Keyed by the run id itself, which `_run_isolated`'s own
+#: exclusive-create gate (below) guarantees is unique — two entries here can never collide.
+_RUN_PROCESSES: dict[str, asyncio.subprocess.Process] = {}
+
+#: How the trace-stream endpoint paces itself — see `_tail_trace_events`.
+_TRACE_POLL_INTERVAL = 0.2
+_TRACE_FILE_WAIT_GRACE = 5.0
 
 
 def _dotted(cls: type) -> str:
@@ -218,6 +246,7 @@ class ChatTurnResponse(BaseModel):
     question: str
     answer: str
     citations: list[CitationResponse]
+    run_id: str | None = None
 
 
 class NotebookResponse(BaseModel):
@@ -244,6 +273,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
                 question=t.question,
                 answer=t.answer.text,
                 citations=_citation_responses(t.answer.citations, corpus),
+                run_id=t.run_id,
             )
             for t in notebook.turns
         ],
@@ -296,7 +326,25 @@ async def get_notebook(notebook_id: str) -> NotebookResponse:
     return _notebook_response(notebook)
 
 
-class AskRequest(BaseModel):
+class RunOptions(BaseModel):
+    """Shared optional body for every endpoint that runs an isolated RLMTask — a CLIENT-supplied
+    run id, so the caller can open `GET .../runs/{run_id}/stream` before or alongside firing the
+    request that will populate it (see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.1).
+    `None` (the default — an absent body binds to this) reproduces today's exact behavior: a
+    server-generated id, invisible to the caller until the response arrives."""
+
+    run_id: str | None = None
+
+
+#: A single shared default instance, rather than `= RunOptions()` inline at each call site —
+#: `guide`/`audio` never had a body before this phase, and a fresh literal default expression in
+#: every function signature is flagged (correctly, in general) as a mutable-default footgun; this
+#: is read-only in practice (nothing here ever mutates `body`), but naming one module-level
+#: instance is the idiomatic way to say so.
+_NO_RUN_OPTIONS = RunOptions()
+
+
+class AskRequest(RunOptions):
     question: str
 
 
@@ -305,13 +353,56 @@ class AskResponse(BaseModel):
     citations: list[CitationResponse]
 
 
-async def _run_isolated(notebook_id: str, dotted_task: str, kwargs: dict, config: NotebookConfig) -> dict:
-    """Start an isolated subprocess run for `notebook_id`, track it in `_ACTIVE_RUNS` so
-    `POST .../cancel` can reach it, and wait for its result — translating `runner.RunError` into a
-    502 (the run failed/crashed/timed out) rather than an uncaught exception."""
-    run_id = f"{notebook_id}-{uuid.uuid4().hex[:8]}"
-    run = await runner.start_run(run_id, _TRACE_DIR, dotted_task, kwargs)
+def _derive_run_id(notebook_id: str, client_token: str | None) -> str:
+    """The run id THIS call will use. A client-supplied token is sanitized through the same
+    whitelist `notebook.slug()` already uses for notebook ids (it becomes a filename component too)
+    and prefixed with `notebook_id` — never the client's raw value alone, so two different
+    notebooks' clients can never collide on a shared `traces/` directory. When no token is given,
+    falls back to today's server-random scheme unchanged. Either way, `_run_isolated`'s own
+    exclusive-create gate is what actually ENFORCES uniqueness — this function only picks the
+    candidate id, it doesn't guarantee it's free."""
+    token = slug(client_token) if client_token else uuid.uuid4().hex[:8]
+    return f"{notebook_id}-{token}"
+
+
+async def _run_isolated(
+    notebook_id: str, dotted_task: str, kwargs: dict, config: NotebookConfig, run_id: str
+) -> dict:
+    """Start an isolated subprocess run for `notebook_id` under the given `run_id`, track it in
+    `_ACTIVE_RUNS`/`_RUN_PROCESSES` so `POST .../cancel` and `GET .../stream` can each reach it, and
+    wait for its result — translating `runner.RunError` into a 502 (the run failed/crashed/timed
+    out) rather than an uncaught exception.
+
+    **Exclusive-create gate, added for Phase 3**: `run_id` may now be partly client-chosen
+    (`_derive_run_id`), so this opens `traces/{run_id}.jsonl` EXCLUSIVELY before spawning anything —
+    `TraceRecorder`'s own lock is process-local and provides NO cross-process serialization, so two
+    concurrent requests landing on the same run_id (two browser tabs, a retried request — nothing
+    prevents this, invariant 25) would otherwise have two independent subprocesses append
+    interleaved, duplicate-`step_id` events to one file. A collision raises `FileExistsError`,
+    mapped to 409, telling the client to pick a fresh token. `_TRACE_DIR.mkdir` happens HERE, before
+    the gate — `runner.start_run` also creates the directory, but only after the point this gate
+    needs it to already exist, so relying on that would raise `FileNotFoundError` (a different,
+    unhandled case) on a fresh checkout's very first run. If `runner.start_run` itself then fails
+    AFTER the gate already succeeded, the just-reserved (still-empty) file is unlinked before the
+    original error propagates — otherwise a failed spawn would permanently occupy that run id, and
+    the client's natural retry of the same notebook+token pair would get a false 409 forever
+    instead of the real underlying error."""
+    _TRACE_DIR.mkdir(parents=True, exist_ok=True)
+    trace_path = _TRACE_DIR / f"{run_id}.jsonl"
+    try:
+        fd = os.open(trace_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        raise HTTPException(409, f"run id {run_id!r} is already in use — retry with a fresh run_id") from None
+
+    try:
+        run = await runner.start_run(run_id, _TRACE_DIR, dotted_task, kwargs)
+    except Exception:
+        trace_path.unlink(missing_ok=True)
+        raise
+
     _ACTIVE_RUNS[notebook_id] = run
+    _RUN_PROCESSES[run_id] = run.process
     try:
         return await runner.wait_result(run, timeout=config.run_timeout_seconds)
     except runner.RunError as exc:
@@ -321,6 +412,7 @@ async def _run_isolated(notebook_id: str, dotted_task: str, kwargs: dict, config
         # that already replaced this one in _ACTIVE_RUNS for the same notebook_id.
         if _ACTIVE_RUNS.get(notebook_id) is run:
             del _ACTIVE_RUNS[notebook_id]
+        _RUN_PROCESSES.pop(run_id, None)
 
 
 @app.post("/notebooks/{notebook_id}/ask", response_model=AskResponse)
@@ -333,22 +425,24 @@ async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
     except CorpusTooLargeError as exc:
         raise HTTPException(413, str(exc)) from exc
 
+    run_id = _derive_run_id(notebook_id, body.run_id)
     result = await _run_isolated(
         notebook_id,
         _dotted(AnswerQuestion),
         {"sources": blob, "history": history_text(notebook), "question": body.question},
         config,
+        run_id,
     )
     answer = Answer.model_validate(result)
 
-    notebook.turns.append(ChatTurn(question=body.question, answer=answer))
+    notebook.turns.append(ChatTurn(question=body.question, answer=answer, run_id=run_id))
     save_notebook(notebook)
 
     return AskResponse(text=answer.text, citations=_citation_responses(answer.citations, corpus))
 
 
 @app.post("/notebooks/{notebook_id}/guide/{kind}")
-async def guide(notebook_id: str, kind: str) -> dict:
+async def guide(notebook_id: str, kind: str, body: RunOptions = _NO_RUN_OPTIONS) -> dict:
     if kind not in _GUIDE_TASKS:
         raise HTTPException(404, f"unknown guide kind {kind!r}; known: {sorted(_GUIDE_TASKS)}")
     notebook = _load_notebook_or_404(notebook_id)
@@ -360,7 +454,8 @@ async def guide(notebook_id: str, kind: str) -> dict:
         raise HTTPException(413, str(exc)) from exc
 
     task_cls, output_model = _GUIDE_TASKS[kind]
-    result = await _run_isolated(notebook_id, _dotted(task_cls), {"sources": blob}, config)
+    run_id = _derive_run_id(notebook_id, body.run_id)
+    result = await _run_isolated(notebook_id, _dotted(task_cls), {"sources": blob}, config, run_id)
     parsed = output_model.model_validate(result)
 
     if kind in ("summary", "insight"):
@@ -401,7 +496,7 @@ class AudioResponse(BaseModel):
 
 
 @app.post("/notebooks/{notebook_id}/audio", response_model=AudioResponse)
-async def audio(notebook_id: str) -> AudioResponse:
+async def audio(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> AudioResponse:
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
     audio. Two host-side steps, not one (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum):
     `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
@@ -442,7 +537,10 @@ async def audio(notebook_id: str) -> AudioResponse:
 
     provider = _tts_provider(config)
 
-    result = await _run_isolated(notebook_id, _dotted(GeneratePodcastScript), {"sources": blob}, config)
+    run_id = _derive_run_id(notebook_id, body.run_id)
+    result = await _run_isolated(
+        notebook_id, _dotted(GeneratePodcastScript), {"sources": blob}, config, run_id
+    )
     script = PodcastScript.model_validate(result)
 
     utterances = [
@@ -484,6 +582,140 @@ async def cancel(notebook_id: str) -> dict:
         raise HTTPException(404, f"no in-flight run for notebook {notebook_id!r}")
     run.cancel()
     return {"cancelled": run.run_id}
+
+
+def _translate_trace_event(event: dict) -> dict:
+    """Raw `trace/v1` event -> a small, stable, product-facing shape for the web UI's live ticker.
+    Kept in ONE function, the same discipline the sibling studios' own `mapper.to_event` already
+    uses, so the raw-to-product translation lives in one place rather than being duplicated at
+    every call site. Deliberately terse — the frontend owns presentation, this just names what
+    kind of thing happened."""
+    etype = event.get("type")
+    payload = event.get("payload") or {}
+    step = event.get("step_id")
+    if etype == "main_step":
+        return {"step": step, "kind": "thinking", "summary": "reasoning about the next step"}
+    if etype == "tool_call":
+        return {"step": step, "kind": "tool", "summary": f"calling {payload.get('tool', 'a tool')}"}
+    if etype == "sub_call":
+        return {"step": step, "kind": "escalation", "summary": "consulting a sub-model"}
+    if etype == "run_end":
+        ok = payload.get("ok")
+        return {"step": step, "kind": "done", "summary": "finished" if ok else "finished with an error"}
+    return {"step": step, "kind": "other", "summary": etype or "event"}
+
+
+async def _tail_trace_events(run_id: str):
+    """Yields translated event dicts as they appear in `traces/{run_id}.jsonl` — safe to poll while
+    a worker subprocess is actively writing it: `TraceRecorder.record()` (rlm-kit) writes exactly
+    one complete `json.dumps(event) + "\\n"` per call, flushed immediately, serialized under its
+    own lock — verified directly against `rlm_kit/trace.py` during this phase's own
+    pre-implementation audit, not assumed. Buffers any trailing partial line so a read that catches
+    a write mid-flight never yields a torn line.
+
+    One loop serves BOTH modes: **live tail** (the file is still growing — poll, forward each new
+    event, stop at `run_end`) and **replay** (the file already has a `run_end` when this starts —
+    the same loop just drains it immediately with no artificial pacing, since pacing-to-feel-live is
+    only for a genuinely in-progress run).
+
+    Cancelled-run detection deliberately does NOT reuse `_ACTIVE_RUNS` (see the module-level
+    `_RUN_PROCESSES` docstring for why that would misfire under ordinary same-notebook
+    concurrency) — it checks `_RUN_PROCESSES` instead, keyed by this exact `run_id`, which
+    `_run_isolated`'s own exclusive-create gate guarantees is unique."""
+    trace_path = _TRACE_DIR / f"{run_id}.jsonl"
+
+    waited = 0.0
+    while not trace_path.exists():
+        if waited >= _TRACE_FILE_WAIT_GRACE:
+            yield {"step": None, "kind": "not_found", "summary": f"no run {run_id!r} found"}
+            return
+        await asyncio.sleep(_TRACE_POLL_INTERVAL)
+        waited += _TRACE_POLL_INTERVAL
+
+    buffer = ""
+    with trace_path.open("r", encoding="utf-8") as fh:
+        while True:
+            chunk = fh.read()
+            if chunk:
+                buffer += chunk
+                *complete_lines, buffer = buffer.split("\n")
+                for line in complete_lines:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    event = json.loads(line)
+                    yield _translate_trace_event(event)
+                    if event.get("type") == "run_end":
+                        return
+                continue
+
+            process = _RUN_PROCESSES.get(run_id)
+            if process is None or process.returncode is not None:
+                # The process that was writing this trace has exited (or was never tracked at
+                # all) and no `run_end` ever arrived — a `killpg`-cancelled or crashed run.
+                # Synthesize a terminal event so the stream reaches "done" instead of hanging,
+                # the same fix `ctx-distillery-studio` already documents for the identical
+                # failure mode (a hard-killed run whose recorder never reached `__exit__`).
+                yield {"step": None, "kind": "done", "summary": "run ended without a final event"}
+                return
+            await asyncio.sleep(_TRACE_POLL_INTERVAL)
+
+
+@app.get("/notebooks/{notebook_id}/runs/{run_id}/stream")
+async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
+    """Live reasoning-trace ticker (see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.2).
+    `run_id` already encodes `notebook_id`, by construction (`_derive_run_id`) — checked explicitly
+    here too (mirroring `citation_turn`'s same check) rather than silently trusting the caller
+    passed a matching pair, so a mismatched `notebook_id` can't be used to stream a trace that
+    belongs to a different notebook."""
+
+    async def _events():
+        if not run_id.startswith(f"{notebook_id}-"):
+            yield f"data: {json.dumps({'step': None, 'kind': 'not_found', 'summary': f'run {run_id!r} does not belong to notebook {notebook_id!r}'})}\n\n"
+            return
+        async for event in _tail_trace_events(run_id):
+            yield f"data: {json.dumps(event)}\n\n"
+
+    return StreamingResponse(_events(), media_type="text/event-stream")
+
+
+@app.get("/notebooks/{notebook_id}/runs/{run_id}/citation-turn")
+async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: str) -> dict:
+    """Which trace turn (if any) shows the model reading a specific citation's source span (see
+    `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.3). Searches the ENTIRE serialized
+    payload of each event, in step order, for the first one containing the literal marker
+    `[[SRC:<source_id>|<locator>]]` — not a fixed field list, which audit round 1 found misses real
+    marker occurrences in a `sub_call` event's `input`/`raw`/`processed` fields (a hardcoded
+    `reasoning`/`code`/`output` list, right for `main_step`, is simply wrong for `sub_call`).
+
+    **This is a heuristic, not a faithfulness proof** (invariant 5 already establishes citation
+    verification cannot make that stronger claim): finding the marker text proves the model's REPL
+    saw it at some point, never that this specific occurrence is what the model relied on for the
+    citation. A `sub_call`'s `input` field is also truncated to 4000 characters upstream
+    (`rlm_kit.sub_lm`) — a marker beyond that point in a long escalation prompt won't be found in
+    THAT event, though it may still turn up in another one.
+
+    404s (never crashes) when the trace file doesn't exist at all — `traces/` has no retention
+    policy anywhere in this project, so a citation's "view reasoning" link is only as durable as a
+    file nobody has committed to keeping; a missing trace degrades this ONE affordance, not the
+    rest of the page."""
+    if not run_id.startswith(f"{notebook_id}-"):
+        raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
+    trace_path = _TRACE_DIR / f"{run_id}.jsonl"
+    if not trace_path.exists():
+        raise HTTPException(404, f"no trace found for run {run_id!r}")
+
+    marker = f"[[SRC:{source_id}|{locator}]]"
+    with trace_path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            event = json.loads(line)
+            payload = event.get("payload") or {}
+            if marker in json.dumps(payload, ensure_ascii=False):
+                return {"step_id": event.get("step_id"), "type": event.get("type"), "payload": payload}
+    raise HTTPException(404, f"marker for source {source_id!r} locator {locator!r} not found in this trace")
 
 
 #: The web UI, mounted LAST so every explicit API route above wins a path collision — Starlette
