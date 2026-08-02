@@ -96,8 +96,18 @@ cancelled outright. No `/audio` endpoint yet, and no SSE/progress streaming — 
 until its subprocess finishes or `RN_RUN_TIMEOUT_SECONDS` (default 300s) elapses. See `api.py`'s
 module docstring and CLAUDE.md invariants 20-28.
 
+## Web UI
+
+Once the server above is running, open `http://localhost:8000/` in a browser: a real end-user
+product surface (source management, citation-grounded chat), not a developer trace console. Zero
+build step — it's served directly out of `rlm_notebook/web/` by the same FastAPI app. Guide
+artifacts and the podcast player aren't wired into it yet (a separate follow-up slice); paste-text
+and file-upload source ingestion are visible but say plainly they're not connected to the API yet,
+rather than silently failing. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariant 29.
+
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no provider-swappable LLM configuration
 beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
-no browser UI, and no `/audio` API endpoint or progress streaming. Those are follow-up work.
+no Guide/Audio panel in the web UI yet, no `/audio` API endpoint, and no progress streaming or a
+live view into a run's reasoning. Those are follow-up work.

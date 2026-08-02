@@ -29,18 +29,21 @@ uv pip install -e ../rlm-kit
 
 ## Scope note
 
-Five slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
+Six slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
 persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one JSON
 file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
 generates a whole-corpus artifact (`guide.py`) — an Audio Overview — `rlm-notebook audio` generates
-a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`) — and now an HTTP
-API (`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, and
-`cancel`. The API is the FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather
-than in-process; `cli.py`'s synchronous in-process invocation is unaffected and unchanged. The API
-has no `/audio` endpoint and no SSE/progress streaming yet (both deferred — see CHANGELOG), and
-Guide/Audio artifacts still aren't cached onto a notebook or made citable as sources for later
-`ask` turns. Each of these is its own follow-up slice; do not assume any of them exist because an
-earlier design discussion mentioned them.
+a two-host podcast script (`audio.py`) and synthesizes it to an MP3 (`tts.py`) — an HTTP API
+(`api.py`, the `api` extra) over `POST/GET /notebooks/...`, `ask`, `guide/{kind}`, and `cancel` —
+and now a web UI (`rlm_notebook/web/`, invariant 29), Phase 1 of a 3-phase blueprint: a real
+end-user product surface (Sources/Chat, `GET /notebooks` listing), NOT a replay-only trace console
+like the sibling projects' `studio/`s. The API is the FIRST place a run is subprocess-isolated
+(`runner.py`/`worker.py`) rather than in-process; `cli.py`'s synchronous in-process invocation is
+unaffected and unchanged. The API has no `/audio` endpoint and no SSE/progress streaming yet (both
+deferred — see CHANGELOG; the web UI's own Phase 2/3 need exactly these), and Guide/Audio artifacts
+still aren't cached onto a notebook or made citable as sources for later `ask` turns. Each of these
+is its own follow-up slice; do not assume any of them exist because an earlier design discussion
+mentioned them.
 
 ## Invariants — do not break
 
@@ -236,7 +239,10 @@ earlier design discussion mentioned them.
     same posture ctx-distillery's studio takes for its own reasons); do not expose it to an
     untrusted network without adding auth first, which this slice does not attempt. Both `api.py`'s
     module docstring and `README.md` say so explicitly — don't let that warning quietly disappear
-    in a later edit.
+    in a later edit. `GET /notebooks` (invariant 29) extends this posture from "any id is reachable
+    if you know it" to "every id is enumerable without knowing it" — reviewed and accepted as part
+    of that slice, since the response is metadata only (ids, source counts, turn counts — never
+    source text or answers), not a new category of exposure.
 26. **`add_sources` accepts ONLY http(s) URLs, never a local file path — unlike `cli.py`'s
     `--source`.** `ingest.ingest_one` treats any non-URL string as a path on the machine running
     the process and reads it with no allowlist or directory boundary; that is a reasonable design
@@ -267,5 +273,35 @@ earlier design discussion mentioned them.
     Add a new `guide` kind to BOTH dicts, or the tripwire fails immediately rather than the two
     silently drifting — the same class of gap an earlier review found in `cli._SPEAKER_LABELS`
     before this slice added the analogous test here proactively.
+
+29. **The web UI (`rlm_notebook/web/`) is a real end-user product surface, not another instance of
+    the sibling projects' replay-only trace console.** `ctx-distillery`/`cve-reverser`/`diff-sentry`/
+    `toolscout` each ship a `studio/` that is a single-verdict security/review console (one input,
+    one derived-state card, a Trajectory replay drawer); this project's persistent, multi-notebook,
+    multi-turn knowledge workspace is structurally different, and the divergence is a recorded
+    design decision (`docs/design/web-ui-blueprint.md`'s §0), not an oversight. Zero-build vanilla
+    HTML/CSS/JS, same family convention as the siblings' own `studio/` stacks — no framework, no
+    build step. Assets live under `rlm_notebook/web/`, NOT a top-level `web/` — a top-level directory
+    has no entry in `pyproject.toml`'s `[tool.hatch.build.targets.wheel] packages` list and would
+    silently vanish from an installed wheel (caught by an independent pre-implementation design
+    audit, verified fixed by actually building a wheel and confirming the assets are inside it, not
+    by trusting the fix's own commit message). `app.js` builds every DOM node that could carry
+    model- or source-derived content (citation spans, source list rows) via `createElement`/
+    `textContent`/`element.title` — NEVER `innerHTML` with an interpolated string — because a
+    citation's `source_id`/`locator`/`quote` could in principle echo attacker-supplied text from a
+    prompt-injected source (invariant 6: injection-scan flags are advisory, not a filter); an
+    earlier version of this file built a citation's `title` attribute via string concatenation,
+    found and fixed before it ever shipped. This is the same "textContent only" discipline the
+    sibling studios' own `app.js` files already enforce, for the identical reason.
+
+    A full three-phase blueprint exists (`docs/design/`, gitignored, same convention as
+    `docs/research/`) — this invariant covers Phase 1 only (web shell, Sources, Chat,
+    `GET /notebooks`, `GET /notebooks/{id}` now returning full turn history instead of a count).
+    Phase 2 (Guide tabs + podcast player, needs a new `/audio` endpoint) and Phase 3 (a live
+    reasoning-trace ticker fused with citations) are separate, not-yet-scheduled slices — Phase 3 in
+    particular was designed, independently audited, and found unbuildable as originally scoped (no
+    `run_id` ever reaches a client mid-run; citation-to-trace-turn linking has no data model), so it
+    needs its own follow-up design pass before it gets a phase number back. Don't assume either
+    exists because the blueprint discusses them.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
