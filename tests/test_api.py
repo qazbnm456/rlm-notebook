@@ -711,6 +711,18 @@ def test_stream_run_replays_a_finished_trace_without_waiting(client, monkeypatch
     assert '"kind": "done"' in body or '"kind":"done"' in body.replace(" ", "")
 
 
+def test_stream_run_reports_not_found_when_run_id_does_not_belong_to_the_notebook(client):
+    """Mirrors citation_turn's same ownership check — a mismatched notebook_id must not stream a
+    trace that belongs to a different notebook, found as a non-blocking gap during this phase's
+    own completion check (citation_turn already had this check, stream_run didn't yet)."""
+    _write_trace("othernb-run", [{"type": "run_start", "payload": {}}])
+
+    resp = client.get("/notebooks/mynb/runs/othernb-run/stream")
+
+    assert resp.status_code == 200  # SSE has already committed headers
+    assert "not_found" in resp.text
+
+
 def test_stream_run_reports_not_found_after_the_grace_period_when_no_trace_ever_appears(
     client, monkeypatch
 ):

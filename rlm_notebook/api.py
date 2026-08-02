@@ -664,11 +664,15 @@ async def _tail_trace_events(run_id: str):
 @app.get("/notebooks/{notebook_id}/runs/{run_id}/stream")
 async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
     """Live reasoning-trace ticker (see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.2).
-    `notebook_id` is accepted for URL consistency with every other endpoint here but isn't used to
-    compute the trace path — `run_id` alone already encodes it, by construction
-    (`_derive_run_id`)."""
+    `run_id` already encodes `notebook_id`, by construction (`_derive_run_id`) — checked explicitly
+    here too (mirroring `citation_turn`'s same check) rather than silently trusting the caller
+    passed a matching pair, so a mismatched `notebook_id` can't be used to stream a trace that
+    belongs to a different notebook."""
 
     async def _events():
+        if not run_id.startswith(f"{notebook_id}-"):
+            yield f"data: {json.dumps({'step': None, 'kind': 'not_found', 'summary': f'run {run_id!r} does not belong to notebook {notebook_id!r}'})}\n\n"
+            return
         async for event in _tail_trace_events(run_id):
             yield f"data: {json.dumps(event)}\n\n"
 
