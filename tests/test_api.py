@@ -11,6 +11,8 @@ rather than a real network call.
 
 from __future__ import annotations
 
+import base64
+
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
@@ -407,6 +409,129 @@ def test_guide_dispatches_the_correct_task_per_kind(client, monkeypatch):
     _mock_runner(monkeypatch, Summary(text="x", citations=[]).model_dump(), dotted_tasks=dotted_tasks)
     client.post("/notebooks/mynb/guide/summary")
     assert dotted_tasks == ["rlm_notebook.guide:GenerateSummary"]
+
+
+# --- /notebooks/{id}/audio -----------------------------------------------------------------------
+
+
+class _FakeTTSProvider:
+    """A `TTSProvider` double: writes fixed bytes to `out_path` (or raises `TTSError`, if
+    `boom` is set), so these tests never touch the real `edge-tts` network service — the same
+    seam `test_tts.py` uses at a lower level (an injectable `_communicate_factory`), just faked one
+    layer up since `api.py` only ever calls `provider.synthesize(...)`, never `edge-tts` directly."""
+
+    def __init__(self, *, boom: str | None = None, payload: bytes = b"fake-mp3-bytes") -> None:
+        self.boom = boom
+        self.payload = payload
+        self.calls: list[tuple] = []
+
+    def synthesize(self, script, voice_map, out_path):
+        self.calls.append((script, voice_map, out_path))
+        if self.boom:
+            raise api.TTSError(self.boom)
+        out_path.write_bytes(self.payload)
+
+
+def _fake_tts_provider(monkeypatch, provider: _FakeTTSProvider) -> None:
+    monkeypatch.setattr(api, "get_tts_provider", lambda name: provider)
+
+
+def _podcast_script_result(utterances: list[dict] | None = None) -> dict:
+    return {"utterances": utterances or []}
+
+
+def test_audio_404_when_notebook_missing(client, monkeypatch):
+    _live_env(monkeypatch)
+    resp = client.post("/notebooks/does-not-exist/audio")
+    assert resp.status_code == 404
+
+
+def test_audio_runs_isolated_and_returns_base64_encoded_audio(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    dotted_tasks: list[str] = []
+    _mock_runner(
+        monkeypatch,
+        _podcast_script_result(
+            [{"speaker": "host_a", "text": "hello", "citations": [
+                {"source_id": "s1", "locator": "whole", "quote": "hello"}
+            ]}]
+        ),
+        dotted_tasks=dotted_tasks,
+    )
+    provider = _FakeTTSProvider(payload=b"real-mp3-payload")
+    _fake_tts_provider(monkeypatch, provider)
+
+    resp = client.post("/notebooks/mynb/audio")
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert dotted_tasks == ["rlm_notebook.audio:GeneratePodcastScript"]
+    assert len(body["utterances"]) == 1
+    assert body["utterances"][0]["speaker"] == "host_a"
+    assert body["utterances"][0]["citations"][0]["verified"] is True
+    assert base64.b64decode(body["audio_base64"]) == b"real-mp3-payload"
+    # The temp file synthesize() wrote to must not survive the request.
+    tmp_path = provider.calls[0][2]
+    assert not tmp_path.exists()
+
+
+def test_audio_returns_null_audio_when_script_has_no_utterances(client, monkeypatch):
+    """A source with nothing worth discussing is a legitimate output (audio.py's instructions
+    allow it) — must not call synthesize() on an empty script (EdgeTTSProvider raises TTSError for
+    exactly that), and must not leave the frontend guessing with a missing field."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, _podcast_script_result([]))
+    provider = _FakeTTSProvider()
+    _fake_tts_provider(monkeypatch, provider)
+
+    resp = client.post("/notebooks/mynb/audio")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"utterances": [], "audio_base64": None}
+    assert provider.calls == []  # synthesize() never called for an empty script
+
+
+def test_audio_reports_a_clean_500_when_tts_provider_misconfigured_before_running_the_model(
+    client, monkeypatch
+):
+    """The TTS provider must be resolved BEFORE the expensive model call, not after — CLAUDE.md
+    invariant 19's ordering, extended to the API. Asserts BOTH the status code and that the
+    subprocess was never started, so a bad RN_TTS_PROVIDER never wastes a real model call."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    monkeypatch.setenv("RN_TTS_PROVIDER", "not-a-real-provider")
+    dotted_tasks: list[str] = []
+    _mock_runner(monkeypatch, _podcast_script_result([]), dotted_tasks=dotted_tasks)
+
+    resp = client.post("/notebooks/mynb/audio")
+
+    assert resp.status_code == 500
+    assert "not-a-real-provider" in resp.json()["detail"]
+    assert dotted_tasks == []  # the model was never run
+
+
+def test_audio_translates_a_synthesis_failure_into_502_and_cleans_up_the_temp_file(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        _podcast_script_result([{"speaker": "host_a", "text": "hi", "citations": []}]),
+    )
+    provider = _FakeTTSProvider(boom="simulated network failure")
+    _fake_tts_provider(monkeypatch, provider)
+
+    resp = client.post("/notebooks/mynb/audio")
+
+    assert resp.status_code == 502
+    assert "audio synthesis failed" in resp.json()["detail"]
+    assert "simulated network failure" in resp.json()["detail"]
+    # The temp file created before synthesize() raised must not survive the failed request either
+    # (audit round 2's fix: the finally must cover the failure path, not just the success path).
+    tmp_path = provider.calls[0][2]
+    assert not tmp_path.exists()
 
 
 # --- /notebooks/{id}/cancel -----------------------------------------------------------------------

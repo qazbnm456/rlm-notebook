@@ -20,7 +20,7 @@ warmth in Study (dark) — never the siblings' cool blue-slate security-console 
 legible, unhurried. Not playful, not corporate, not a terminal.
 
 Utility mode (no marketing hero): orient (header + notebook switcher) → sources (rail) → converse
-(chat, center) → produce (Studio panel, right — placeholder until Phase 2).
+(chat, center) → produce (Studio panel, right — Guide tabs + podcast player as of Phase 2).
 
 ## 2. The signature: citation as highlighter stroke
 
@@ -76,11 +76,13 @@ panels touching.
 Font-selection procedure run explicitly (not a reflex pick — Fraunces/Inter/JetBrains-Mono-everywhere
 were all considered and rejected first):
 
-- **Literata** — content meant to be read at length: Guide artifact titles and full text (Phase 2),
-  podcast titles (Phase 2), the full source-text viewer. Commissioned by Google originally for
-  on-screen long-form reading (Google Play Books); the one typeface actually designed for what this
-  product asks a reader to do. Not used anywhere in Phase 1's shipped surface yet (`.reading-face`
-  class reserved for it).
+- **Literata** — content meant to be read at length: the full source-text viewer (still not built —
+  see the deferred items below). Reserved via the `.reading-face` class; NOT yet applied to Guide/
+  podcast content either, since Phase 2 reused `renderAnswerWithCitations`'s existing Public Sans
+  treatment for consistency with Chat rather than introducing a font switch mid-panel — worth
+  reconsidering once a dedicated long-form reading surface exists. Commissioned by Google originally
+  for on-screen long-form reading (Google Play Books); the one typeface actually designed for what
+  this product asks a reader to do, once something actually uses it.
 - **Public Sans** — all UI chrome: nav, labels, buttons, form fields, the chat turns themselves. US
   Web Design System typeface, built around clarity/accessibility/trust — thematically aligned with a
   citation-verifiable-truth product. The body default (`body { font-family: "Public Sans", ... }`).
@@ -115,18 +117,36 @@ loop, invariant 21) shows "Thinking…" in muted italic rather than a blank gap.
 in-place as `(error) <message>`, never a silent disappearance of the question the user just asked.
 
 ### 5.4 Studio (right rail, ~340px)
-Placeholder in Phase 1 ("Guide artifacts and the podcast player land here in Phase 2"). Does not yet
-collapse-when-empty (that discipline is Phase 2's concern, once there's real content to gate the
-collapse on) — deliberately visible now so the three-pane shape reads correctly from the first screen.
+Two sections, Phase 2: Guide tabs (`Summary | FAQ | Timeline | Insight`, matching `guide/{kind}`'s
+four kinds) above a fixed "Audio Overview" section below. A tab's content is fetched ONLY on first
+activation or an explicit `↻ Regenerate` click — never automatically, including on notebook open —
+since a guide run is a real RLM loop and re-running it for free would burn a model call for
+nothing; results are cached client-side per notebook, invalidated on both a notebook switch AND a
+source being added (a cached Guide result is stale the instant the corpus it was computed from
+changes). `summary`/`insight` reuse `renderAnswerWithCitations` verbatim (same citation-highlighter
+treatment as Chat); `faq` renders one `.guide-item` block per Q/A pair; `timeline` renders one
+`.guide-item` per `{when, description}` event. Below: a `Generate podcast` button — `POST
+.../audio` runs a real RLM script-generation loop THEN a real network TTS call in series, so this
+is now the single slowest action in the product, with its own pending copy saying so — producing an
+`<audio controls>` element (backed by a `Blob`/`ObjectURL`, not a `data:` URI, so a multi-MB episode
+doesn't sit fully base64-encoded in a DOM attribute for its whole lifetime) plus a transcript below
+it, one `.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
+collapse-when-empty (still deferred — no phase has needed it yet).
 
 ### 5.5 States
 | state | what shows |
 |---|---|
-| no notebook opened | Sources: empty-note. Chat: empty-note. Studio: placeholder. |
+| no notebook opened | Sources: empty-note. Chat: empty-note. Studio: "pick a tab" prompt, no podcast section content. |
 | notebook opened, no sources | Sources: empty-note under the add-source form. Chat: empty-note. |
 | notebook opened, sources but no turns | Sources: list. Chat: empty-note ("ask a question…"). |
 | a question in flight | Chat: the question bubble + a "Thinking…" pending answer; ask form disabled. |
 | ask fails | Chat: the question bubble + an inline `(error) …` line; ask form re-enabled. |
+| a Guide tab generating | Studio: "Generating…" in muted italic where the content will render. |
+| a Guide tab's sources produced nothing (empty FAQ/timeline) | Studio: an explicit "(no … — the sources didn't produce enough to …)" message, never a blank body. |
+| a Guide fetch fails | Studio: an inline `(error) …` line in the tab body. |
+| podcast generating | Studio: "Generating script and synthesizing audio — this can take a while…" in muted italic; the Generate button is disabled. |
+| podcast script has no utterances | Studio: "(no podcast script — the sources didn't produce enough to discuss)", no player. |
+| podcast generation fails (script OR synthesis) | Studio: an inline `(error) …` line; the Generate button re-enables. |
 
 ## 6. Depth / motion
 
@@ -152,7 +172,10 @@ than a blank gap; keep `--accent`/`--studio-accent` non-cross-used.
 **Don't**: no Inter, no Fraunces, no centered marketing hero, no purple/blue gradient; don't imply a
 citation's surrounding prose is faithful to the source, only that its coordinates resolve; don't build
 the reasoning-trace/live-ticker surface here — it's deliberately deferred (blueprint §5.5) until its
-own redesign lands; don't collapse the Studio panel yet — Phase 1 has nothing to gate that on.
+own redesign lands; don't collapse the Studio panel yet — no phase has needed it yet; don't
+auto-fetch a Guide kind on notebook open or on a bare tab switch — only first activation or an
+explicit regenerate; don't use a `data:` URI for the podcast player — a `Blob`/`ObjectURL` instead,
+revoked in the correct order (assign the new URL before revoking the old one, never the reverse).
 
 ## 9. Acceptance (in a browser)
 
@@ -167,3 +190,11 @@ own redesign lands; don't collapse the Studio panel yet — Phase 1 has nothing 
    near-invisible text against any surface step it's used on.
 6. No horizontal overflow at 375px; below 640px the three columns stack in Sources → Chat → Studio
    order.
+7. Clicking a Studio Guide tab for the first time shows "Generating…" then real content with
+   inline citations; clicking a DIFFERENT tab and back shows the FIRST tab's content instantly (no
+   second model call) until `↻ Regenerate` is clicked or a source is added.
+8. Clicking `Generate podcast` on a notebook with substantive sources shows the "this can take a
+   while" pending copy, then a working `<audio controls>` player plus a transcript below it, each
+   line highlighted the same way a Chat citation is. Regenerating replaces the player without ever
+   leaving two object URLs alive at once (check via a memory profiler or simply confirming the old
+   `blob:` URL 404s after regenerating).
