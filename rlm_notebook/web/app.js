@@ -126,17 +126,31 @@ function initNotebookSwitch() {
 
 // --- Sources panel --------------------------------------------------------------------------------
 
+// Built with createElement/textContent throughout, never innerHTML — `source.origin` is an
+// ingested URL/path and, in principle, `source.flags` could one day carry excerpted source text
+// (today's injection_scan.py flags don't, but nothing enforces that staying true), so nothing here
+// assumes any of it is safe to treat as markup.
 function renderSourceItem(source) {
   const li = document.createElement("li");
   li.className = "source-item";
-  const flags = source.flags && source.flags.length
-    ? `<div class="src-flags">⚠ ${source.flags.join(", ")}</div>`
-    : "";
-  li.innerHTML = `
-    <div class="src-kind">${source.kind}</div>
-    <div class="src-origin">${escapeHtml(source.origin)}</div>
-    ${flags}
-  `;
+
+  const kind = document.createElement("div");
+  kind.className = "src-kind";
+  kind.textContent = source.kind;
+  li.appendChild(kind);
+
+  const origin = document.createElement("div");
+  origin.className = "src-origin";
+  origin.textContent = source.origin;
+  li.appendChild(origin);
+
+  if (source.flags && source.flags.length) {
+    const flags = document.createElement("div");
+    flags.className = "src-flags";
+    flags.textContent = `⚠ ${source.flags.join(", ")}`;
+    li.appendChild(flags);
+  }
+
   return li;
 }
 
@@ -204,35 +218,48 @@ function initSourcesPanel() {
 
 // --- Chat panel -----------------------------------------------------------------------------------
 
-function escapeHtml(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
-}
-
 // The signature interaction (blueprint §2.3): a citation is a highlighter stroke woven into the
-// answer text, not a footnote number appended after it. Each citation's `quote` is located inside
-// the answer text (a best-effort substring match — the model may paraphrase around the quote, in
-// which case it falls back to appending the citation as its own line) and wrapped in a `.citation`
-// span carrying the wash + border.
+// answer text, not a footnote number appended after it.
+//
+// Built with createElement/textContent/setAttribute throughout, NEVER innerHTML or a raw HTML
+// string — `text` is the model's own answer prose and `citation.quote`/`source_id`/`locator` could
+// in principle echo attacker-supplied content from a prompt-injected source (CLAUDE.md invariant 6:
+// a source's content is untrusted, and injection_scan.py's flags are advisory, not a filter). An
+// early version of this function built a `<span title="...">` via string interpolation, which a
+// `"` character inside `source_id`/`locator` could have broken out of; rewritten before this was
+// ever shipped once that was noticed. Same discipline the sibling studios' own `app.js` files
+// already enforce for exactly this reason (see rlm_notebook/web/DESIGN.md's Do/Don't).
 function renderAnswerWithCitations(text, citations) {
-  let html = escapeHtml(text);
-  const unmatched = [];
-  citations.forEach((citation, index) => {
-    const quoteHtml = escapeHtml(citation.quote);
-    if (citation.quote && html.includes(quoteHtml)) {
-      const cls = citation.verified ? "citation" : "citation is-unverified";
-      html = html.replace(
-        quoteHtml,
-        `<span class="${cls}" title="${escapeHtml(citation.source_id)} · ${escapeHtml(citation.locator)}">${quoteHtml}</span>`
-      );
-    } else {
-      unmatched.push({ citation, index });
-    }
-  });
-
   const container = document.createElement("div");
-  container.innerHTML = html;
+
+  // Locate each citation's quote as a literal substring of the RAW answer text (never
+  // pre-escaped — a DOM text node needs no escaping, only innerHTML does). The model may
+  // paraphrase around a quote rather than reproducing it verbatim; when a quote can't be located,
+  // the citation still surfaces in the citation list below, just not inline.
+  const matches = [];
+  citations.forEach((citation) => {
+    if (!citation.quote) return;
+    const at = text.indexOf(citation.quote);
+    if (at !== -1) matches.push({ start: at, end: at + citation.quote.length, citation });
+  });
+  matches.sort((a, b) => a.start - b.start);
+
+  let cursor = 0;
+  matches.forEach((match) => {
+    if (match.start < cursor) return; // overlapping quotes — keep the first, skip the rest
+    if (match.start > cursor) {
+      container.appendChild(document.createTextNode(text.slice(cursor, match.start)));
+    }
+    const span = document.createElement("span");
+    span.className = match.citation.verified ? "citation" : "citation is-unverified";
+    span.title = `${match.citation.source_id} · ${match.citation.locator}`;
+    span.textContent = text.slice(match.start, match.end);
+    container.appendChild(span);
+    cursor = match.end;
+  });
+  if (cursor < text.length) {
+    container.appendChild(document.createTextNode(text.slice(cursor)));
+  }
 
   if (citations.length) {
     const list = document.createElement("div");
