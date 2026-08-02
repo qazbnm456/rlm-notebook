@@ -316,3 +316,54 @@ questions with verifiable citations, and get a distilled research artifact out.
   28) — the same class of gap the PREVIOUS slice's own `_SPEAKER_LABELS` drift was found to have,
   applied proactively here instead of waiting for a fourth review to find the fourth instance of
   the same lesson.
+
+- **Sixth slice: a web UI (`rlm_notebook/web/`), Phase 1 of a 3-phase blueprint** — Web shell +
+  Sources + Chat. Gives the HTTP API added in the previous slice a real end-user product surface;
+  before this slice it was only usable via `curl`/tests. Two small, additive API changes support
+  it: `GET /notebooks` (a listing endpoint for the notebook switcher) and `GET /notebooks/{id}` now
+  returning full turn history instead of just a count, so a re-opened notebook's past conversation
+  renders immediately (citations re-verified fresh against the current corpus on every read, same
+  discipline as a brand-new answer — invariant 11).
+
+  **Deliberately NOT another instance of the sibling projects' replay-only trace console.**
+  `ctx-distillery`/`cve-reverser`/`diff-sentry`/`toolscout` each ship a `studio/` that's a
+  single-verdict security/review console; this project's persistent, multi-notebook, multi-turn
+  knowledge workspace is structurally different on purpose (invariant 29). An original visual
+  identity — two full first-class OKLCH themes, Paper (light, default) and Study (dark), sharing
+  one hue family for brand continuity rather than the siblings' cool blue-slate security-console
+  dark — and a citation-as-highlighter-stroke signature interaction, not a footnote number.
+
+  **Went through a pre-implementation independent design audit before any code was written**
+  (`docs/design/web-ui-blueprint.md`, gitignored, same convention as `docs/research/`). The audit
+  found 4 blockers: the originally planned SSE reasoning-trace fusion was unbuildable as scoped (no
+  `run_id` ever reaches a client mid-run from `ask`/`guide`'s synchronous contract, and
+  citation-to-trace-turn linking had no data model at all) — pulled from this round entirely rather
+  than patched under pressure, and held for its own future design pass; a top-level `web/` directory
+  would have silently vanished from an installed wheel (no `pyproject.toml` packaging entry) — fixed
+  by moving assets under `rlm_notebook/web/`, verified by actually building a wheel and confirming
+  the files are inside it; `GET /notebooks`' original design cited a `NotebookConfig` field that
+  doesn't exist — fixed to read the same bare `notebook.DEFAULT_NOTEBOOKS_DIR` constant every other
+  notebook operation already uses; and two real, COMPUTED (not eyeballed) WCAG contrast failures in
+  the original palette (Paper's `--text-faint` measured 3.08:1 against `--surface-3`, Study's
+  2.97:1 — both below the 4.5:1 AA floor for normal text) plus a third the audit's own checklist
+  didn't anticipate (Study's citation highlight wash was self-contrast ≈1.0 against an elevated
+  panel, i.e. invisible) — all three fixed with recomputed, re-verified OKLCH values, and the
+  citation highlight gained a border backstop so its perceptibility never depends on wash luminance
+  alone.
+
+  **A second, independent completion check after implementation** (the project's standard
+  pre-merge gate) re-verified every one of those fixes was actually real in the shipped code, not
+  just described in a commit message — rebuilt the wheel and confirmed the static assets were
+  inside it, independently recomputed the WCAG contrast ratios from the real `style.css` values,
+  and ran the real test suite and a live `curl` smoke test against a running server. It also caught
+  that `app.js`'s citation renderer built an HTML attribute via string interpolation
+  (`<span title="...">`), which a `"` character inside a model-echoed `source_id`/`locator` could
+  have broken out of under a prompt-injected source (invariant 6) — found and fixed (rebuilt with
+  `createElement`/`textContent`/`element.title` throughout, never `innerHTML`) before the audit
+  even ran, then independently confirmed landed cleanly.
+
+  **Deliberately NOT in this slice**: Phase 2 (Guide tabs + podcast player, needs a new `/audio`
+  endpoint) and Phase 3 (the live reasoning-trace ticker, held back per the audit above) are
+  separate, not-yet-scheduled slices. Paste-text and file-upload source ingestion in the UI are
+  visible tabs that say plainly they aren't wired to the API yet, rather than silently failing or
+  pretending to work — the API itself still only accepts http(s) URLs (invariant 26).

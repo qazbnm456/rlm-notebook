@@ -111,6 +111,46 @@ def _add_a_source(client) -> None:
     assert resp.status_code == 200, resp.text
 
 
+# --- GET /notebooks (list) ----------------------------------------------------------------------
+
+
+def test_list_notebooks_empty_when_none_exist(client):
+    resp = client.get("/notebooks")
+    assert resp.status_code == 200
+    assert resp.json() == {"notebooks": [], "unreadable": []}
+
+
+def test_list_notebooks_reports_the_notebooks_own_id_not_the_slugged_filename(client):
+    """`slug()` is lossy — a notebook id with characters outside `[A-Za-z0-9._-]` is folded before
+    becoming a filename, so the listing must report the `id` stored INSIDE the file, not derive one
+    from the filename stem (found during the pre-implementation blueprint audit)."""
+    resp = client.post("/notebooks/My Notebook!/sources", json={"sources": ["https://example.com/a"]})
+    assert resp.status_code == 200, resp.text
+
+    resp = client.get("/notebooks")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unreadable"] == []
+    assert len(body["notebooks"]) == 1
+    assert body["notebooks"][0]["id"] == "My Notebook!"
+    assert body["notebooks"][0]["source_count"] == 1
+    assert body["notebooks"][0]["turn_count"] == 0
+
+
+def test_list_notebooks_flags_a_corrupted_file_without_breaking_the_rest(client, tmp_path):
+    _add_a_source(client)
+    corrupt_path = tmp_path / "notebooks" / "broken.json"
+    corrupt_path.write_text('{"id": "broken", "sources": [}', encoding="utf-8")
+
+    resp = client.get("/notebooks")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["unreadable"] == ["broken"]
+    assert [nb["id"] for nb in body["notebooks"]] == ["mynb"]
+
+
 # --- /notebooks/{id}/sources & GET /notebooks/{id} ----------------------------------------------
 
 
@@ -187,7 +227,7 @@ def test_get_notebook_404_when_missing(client):
     assert resp.status_code == 404
 
 
-def test_get_notebook_returns_sources_and_turn_count(client):
+def test_get_notebook_returns_sources_and_turns(client):
     _add_a_source(client)
 
     resp = client.get("/notebooks/mynb")
@@ -195,8 +235,33 @@ def test_get_notebook_returns_sources_and_turn_count(client):
     assert resp.status_code == 200
     body = resp.json()
     assert body["id"] == "mynb"
-    assert body["turn_count"] == 0
+    assert body["turns"] == []
     assert len(body["sources"]) == 1
+
+
+def test_get_notebook_includes_full_turn_history_with_freshly_verified_citations(client, monkeypatch):
+    """The web UI's Chat panel needs a re-opened notebook's past turns to render immediately, not
+    just a count — added when building the Phase 1 web UI. Citations are re-verified against the
+    CURRENT corpus at read time, same discipline as a brand-new answer (CLAUDE.md invariant 11)."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        {
+            "text": "the answer",
+            "citations": [{"source_id": "s1", "locator": "whole", "quote": "hello"}],
+        },
+    )
+    client.post("/notebooks/mynb/ask", json={"question": "what?"})
+
+    resp = client.get("/notebooks/mynb")
+
+    assert resp.status_code == 200
+    turns = resp.json()["turns"]
+    assert len(turns) == 1
+    assert turns[0]["question"] == "what?"
+    assert turns[0]["answer"] == "the answer"
+    assert turns[0]["citations"][0]["verified"] is True
 
 
 # --- /notebooks/{id}/ask -------------------------------------------------------------------------
