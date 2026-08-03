@@ -55,27 +55,32 @@ def is_youtube_url(value: str) -> bool:
 
 
 def _parse_vtt(raw: str) -> list[tuple[float, str]]:
-    """Parse WebVTT into `(start_seconds, text)` cues — one per timestamp line found. Handles two
-    real, verified caption shapes: clean single-line-per-cue official subtitles, and YouTube
-    auto-caption's "rolling karaoke" pairs (a long cue building word-by-word with `<c>`/timestamp
-    tags, followed by a near-zero-duration transition cue whose settled text re-appears as the
-    NEXT cue's first line).
+    """Parse WebVTT into `(start_seconds, text)` entries — ONE PER NON-BLANK LINE, not one per
+    cue. Every cue's payload lines are tag-stripped and flattened individually into the output,
+    each sharing that cue's start timestamp; `_dedupe_consecutive` (below) then collapses adjacent
+    identical entries. This is deliberately simpler than an earlier design that tried to classify
+    each cue as either a "building" (auto-caption) or "ordinary" (official dialogue) cue and
+    extract different lines accordingly — found, by an independent completion check running this
+    against a REAL fetched caption track, to still under-collapse: a "building" cue that advances
+    by exactly ONE new word often carries NO `<c>` tag at all (a tag wraps a word only when there
+    are multiple new words to time within one line), so the tag-presence heuristic misclassified
+    it as "ordinary" and left a duplicate word pair in the output (e.g. real auto-caption data
+    produced `"...I'm thinking thinking of..."`). Line-level flattening + adjacent-dedup sidesteps
+    that classification question entirely: a rolling-karaoke transition cue's settled line is
+    ALWAYS identical to some line already emitted by the immediately preceding cue, so it always
+    collapses via dedup regardless of whether that preceding cue had a tag; a genuine multi-line
+    OFFICIAL dialogue cue's two lines are both genuinely NEW text, so neither line collides with
+    anything and both survive. Verified against a real, live-fetched auto-caption track after
+    this fix (no more adjacent duplicate lines) — see `docs/design/web-ui-blueprint.md`'s
+    addendum 3 for the full before/after account.
 
-    Distinguishes the two cases by whether a cue's raw text contains ANY `<...>` tag markup at
-    all — a reliable signal, since official subtitles never carry `<c>`/timestamp tags and
-    auto-captions emit them ONLY on a "building" cue, never on a plain settled/annotation one.
-    **A "keep only the last non-blank line" rule, tried first and found wrong against real data**:
-    it correctly extracts an auto-caption building cue's current text, but WRONGLY drops real
-    content from a genuine multi-line OFFICIAL dialogue cue (e.g. a real official cue's two lines,
-    "You know the rules" / "and so do I ♪", are both real, wrapped-for-display dialogue — keeping
-    only the last line would silently discard "You know the rules"). Fixed: a cue with NO tags
-    anywhere joins ALL its non-blank lines (space-separated); a cue WITH tags keeps only its last
-    non-blank (tag-stripped) line, same reasoning as before. A cue with no non-blank line at all
-    (found live: a transition cue immediately following a bracketed-annotation cue, e.g.
-    `[Music]`, can have BOTH lines blank) is DROPPED entirely, never passed through as an empty
-    string. Does NOT dedupe consecutive-duplicate text — see `_dedupe_consecutive`.
+    A cue's payload ends at a TRULY empty line (VTT's own grammar) — NOT a whitespace-only-but-
+    non-empty one; real auto-caption VTT uses a single-space line as part of a cue's OWN payload
+    (found live against real data), so checking `.strip() != ""` here would misread that space
+    line as the cue-ending separator and silently drop it. A line that strips to empty (blank OR
+    tag-stripped-to-nothing) contributes no entry at all, never an empty string.
     """
-    cues: list[tuple[float, str]] = []
+    entries: list[tuple[float, str]] = []
     lines = raw.splitlines()
     i = 0
     while i < len(lines):
@@ -89,27 +94,12 @@ def _parse_vtt(raw: str) -> list[tuple[float, str]]:
         else:
             start = int(h_or_m) * 3600 + int(m2) * 60 + int(s) + int(ms) / 1000
         i += 1
-        raw_text_lines = []
-        # A cue's payload ends at a TRULY empty line (VTT's actual grammar) — NOT a whitespace-
-        # only-but-non-empty one. Real auto-caption VTT uses a single-space line as part of a
-        # cue's OWN two-line payload (the "old" half of the rolling-karaoke pair); checking
-        # `.strip() != ""` here would misread that space line as the cue-ending separator and
-        # silently drop the whole cue — found live against a real caption dump, not hypothetical.
         while i < len(lines) and lines[i] != "":
-            raw_text_lines.append(lines[i])
+            content = _TAG_RE.sub("", lines[i]).strip()
+            if content:
+                entries.append((start, content))
             i += 1
-
-        has_tags = any(_TAG_RE.search(line) for line in raw_text_lines)
-        if has_tags:
-            stripped = [_TAG_RE.sub("", line).strip() for line in raw_text_lines]
-            content = next((line for line in reversed(stripped) if line), None)
-        else:
-            non_blank = [line.strip() for line in raw_text_lines if line.strip()]
-            content = " ".join(non_blank) if non_blank else None
-
-        if content:
-            cues.append((start, content))
-    return cues
+    return entries
 
 
 def _dedupe_consecutive(cues: list[tuple[float, str]]) -> list[tuple[float, str]]:

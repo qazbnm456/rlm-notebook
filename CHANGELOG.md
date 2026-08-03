@@ -654,17 +654,23 @@ questions with verifiable citations, and get a distilled research artifact out.
   WebVTT into `(start, text)` cues, collapses auto-caption's "rolling karaoke" duplication, and
   chunks into `~120`-second blocks with a new `"ts:<mm:ss>"` locator prefix.
 
-  **Two real bugs found and fixed against REAL caption data, not assumed correct from reasoning
-  alone** (invariant 33 has the full account): a first design that kept only each cue's last
-  non-blank line correctly handled auto-captions but WRONGLY dropped real content from genuine
-  multi-line official dialogue cues — fixed by keying the extraction rule on whether a cue
-  contains ANY `<...>` tag markup (official subtitles never carry tags; auto-captions emit them
-  only on a "building" cue). A second bug treated a whitespace-only line the same as a truly
-  empty cue-separator line, silently dropping cues whose own payload legitimately includes a
-  single-space line (real auto-caption VTT does this) — fixed by checking exact emptiness for
-  cue-boundary detection, while still treating whitespace-only as blank CONTENT once extracting
-  text. Both fixes re-verified live against a real public video's official AND auto-generated
-  caption tracks, not just the hand-written test fixtures.
+  **Three real bugs found and fixed against REAL caption data across two independent review
+  rounds, not assumed correct from reasoning alone** (invariant 33 has the full account). A first
+  design kept only each cue's last non-blank line, which WRONGLY dropped real content from
+  genuine multi-line official dialogue cues — fixed (pre-implementation) by keying the extraction
+  rule on whether a cue contains ANY `<...>` tag markup. An independent POST-implementation
+  completion check then found that fix itself still under-collapses: a real auto-caption
+  "building" cue advancing by exactly ONE new word often carries NO tag at all, so the
+  tag-presence heuristic misclassified it and left a duplicated word pair in a live-fetched
+  transcript. Fixed by replacing the whole classification approach with something simpler:
+  flatten EVERY non-blank line into its own entry and leave all deduplication to plain adjacent-
+  collapse — sidesteps the tag-presence question entirely, since a rolling-karaoke transition
+  line always collides with something the preceding cue already emitted regardless of tags,
+  while genuine multi-line dialogue lines never collide with anything. A separate, still-correct
+  fix treats a whitespace-only line as part of a cue's OWN payload (not a separator), since real
+  auto-caption VTT uses a single-space line for exactly that. All fixes re-verified live against a
+  real public video's official AND auto-generated caption tracks, checking for adjacent duplicate
+  words across the WHOLE reconstructed transcript, not just the hand-written test fixtures.
 
   **A real pre-implementation-audit catch**: `CaptionError` was first drafted as a bare
   `RuntimeError`; `cli._prepare`/`api.add_sources` both catch ingestion failures as

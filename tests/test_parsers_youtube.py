@@ -106,22 +106,27 @@ def test_is_youtube_url_false_for_everything_else(url):
 # --- _parse_vtt ------------------------------------------------------------------------------------
 
 
-def test_parse_vtt_official_subtitles_are_clean_single_line_per_cue():
+def test_parse_vtt_official_subtitles_flatten_one_entry_per_line():
+    """Each line becomes its own entry — a genuine 2-line official dialogue cue ("You know the
+    rules" / "and so do I") yields TWO entries, not one joined string; `_chunk` (not `_parse_vtt`)
+    is what later reassembles them into a readable block."""
     cues = _parse_vtt(_OFFICIAL_VTT)
     assert [text for _, text in cues] == [
         "[Music]",
         "We're no strangers to love",
-        "You know the rules and so do I",
+        "You know the rules",
+        "and so do I",
     ]
 
 
-def test_parse_vtt_auto_captions_strips_tags_and_keeps_last_non_blank_line():
+def test_parse_vtt_auto_captions_strips_tags_and_flattens_every_line():
     cues = _parse_vtt(_AUTO_VTT)
     # Before dedup: the "rolling karaoke" duplication is still present here (that's
-    # _dedupe_consecutive's job) — this test only checks tag-stripping and the three-way
-    # last-non-blank-line rule, including the real both-lines-blank cue being dropped entirely.
+    # _dedupe_consecutive's job) — this test only checks tag-stripping and line flattening,
+    # including the real both-lines-blank cue contributing no entries at all.
     assert [text for _, text in cues] == [
         "[Music]",
+        "We're no strangers to",
         "We're no strangers to",
         "We're no strangers to",
         "love. You know the rules and so do",
@@ -152,13 +157,40 @@ def test_dedupe_consecutive_is_a_no_op_on_already_clean_official_subtitles():
     assert [text for _, text in cues] == [
         "[Music]",
         "We're no strangers to love",
-        "You know the rules and so do I",
+        "You know the rules",
+        "and so do I",
     ]
 
 
 def test_dedupe_consecutive_keeps_non_adjacent_repeats():
     cues = [(0.0, "hello"), (1.0, "world"), (2.0, "hello")]
     assert _dedupe_consecutive(cues) == cues
+
+
+def test_parse_vtt_handles_a_single_new_word_building_cue_with_no_tag_at_all():
+    """A real bug an independent completion check found live: when a "building" auto-caption cue
+    advances by exactly ONE new word, YouTube's real VTT often carries NO `<c>` tag at all (a tag
+    wraps a word only when there are multiple new words to time within one line) — an earlier
+    tag-presence-based design misclassified this as ordinary dialogue and left a duplicate word
+    pair in the output (e.g. real data produced "...I'm thinking thinking of..."). Line-level
+    flattening + adjacent dedup sidesteps the classification question: the settling transition
+    cue's line is identical to the just-emitted line regardless of tags, so it always collapses."""
+    vtt = "\n".join(  # noqa: FLY002 — a literal line list reads clearer than an f-string here
+        [
+            "WEBVTT",
+            "",
+            "00:00:25.960 --> 00:00:29.119 align:start position:0%",
+            "I feel commitments from what I'm",
+            "thinking",
+            "",
+            "00:00:29.119 --> 00:00:29.129 align:start position:0%",
+            "thinking",
+            " ",
+            "",
+        ]
+    )
+    cues = _dedupe_consecutive(_parse_vtt(vtt))
+    assert [text for _, text in cues] == ["I feel commitments from what I'm", "thinking"]
 
 
 # --- _chunk ------------------------------------------------------------------------------------
