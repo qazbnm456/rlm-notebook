@@ -112,12 +112,17 @@ one file per request) — never a local-path string, which is what keeps it from
 (word-broken, never truncated into an unreadable middle; a pasted text's origin is a readable
 snippet plus a content hash, an uploaded file's origin is its filename), and any `flags` from
 `injection_scan.py` shown as an amber warning line, never hidden and never blocking (CLAUDE.md
-invariant 6).
+invariant 6). Clicking a `.source-item` opens the source-viewer modal (§5.7) for that source, no
+highlight target.
 
 ### 5.3 Chat (center, fills remaining width)
 Turn history, oldest first, scrolled to bottom on append. A question renders as a right-aligned
 accent-filled bubble; an answer renders left-aligned in a bordered well, with citations rendered inline
 per §2 plus a compact citation list below (source id + locator, a checkmark or an "unverified" flag).
+Each citation-list row is itself clickable — opening the source-viewer modal (§5.7) with that
+citation's block highlighted — regardless of whether its `quote` matched inline in the answer text;
+a row also carries a secondary `⌁ trace` icon (only when a run id is known) that opens the Phase 3
+trace detail (§5.5) instead, stopping the row's own click from also firing.
 A pending turn (the model is still running — this is a real, potentially tens-of-seconds-long RLM
 loop, invariant 21) shows LIVE, updating copy from the Phase 3 reasoning ticker (§5.6) in place of a
 static "Thinking…" — the ticker is a secondary, opt-in layer; losing it (a dropped SSE connection)
@@ -180,6 +185,26 @@ a broken link.
 | a completed turn/tab/episode with a known run id | A `⌁ N steps` pill appears; clicking expands the plain-text event log. |
 | a citation clicked (run id known) | A shared detail slot below the answer fills with the matching trace turn's payload, or an inline `(error) …`/"not found" message. |
 | a citation clicked (no run id — a pre-Phase-3 saved turn) | Nothing — the citation simply isn't clickable, no broken affordance shown. |
+| a citation row or source item clicked | The source-viewer modal opens with "Loading…", then the source's full text with the matching block highlighted and scrolled into view (no highlight if opened from the Sources panel). |
+| the source viewer's fetch fails | The modal body shows an inline `(error) …` message; the modal itself stays open (closable normally). |
+| the source viewer is closed and reopened for a different source before the first fetch resolves | The first fetch is aborted; only the second open's response ever renders. |
+
+### 5.7 Source viewer modal (Post-launch addendum 2)
+
+NotebookLM's most basic closed loop: click a citation, see the highlighted original passage — not
+just the reasoning trace. The first stacking-context component in this codebase's `web/`
+(`.modal-overlay`/`.modal`, an explicit `z-index` rather than relying on paint order), opened from
+a citation-list row (§5.3, with a highlight target) or a `.source-item` (§5.2, no highlight
+target). Fetches `GET /notebooks/{id}/sources/{source_id}` and renders every block as a labelled
+`.source-block` section; the block whose `locator` matches the opening citation gets its `quote`
+highlighted with the SAME `.citation` styling §2 uses inline, and is scrolled into view. Closes via
+a `✕` button, a backdrop click, or `Esc` — the same family convention the sibling projects' own
+`studio/`s already use for their trace-replay drawers. Each open aborts any still-in-flight fetch
+from a PREVIOUS open (`AbortController`, module-level `sourceViewerAbort`) so a slower first
+response can never overwrite a faster second one's render. Also closes on `notebook:switched`, like
+every other stateful surface in this product. Does not paginate, cache across opens, or support
+next/prev-citation navigation — each open is a fresh fetch, deliberately (§8's Don't list has the
+same scope cut written out).
 
 ## 6. Depth / motion
 
@@ -212,7 +237,11 @@ something, never that the surrounding prose is faithful to it; don't collapse th
 — only first activation or an explicit regenerate; don't use a `data:` URI for the podcast player —
 a `Blob`/`ObjectURL` instead, revoked in the correct order (assign the new URL before revoking the
 old one, never the reverse); don't let a dropped ticker connection block or alter the actual
-request's own result — the ticker is strictly secondary.
+request's own result — the ticker is strictly secondary; don't let the source-viewer modal's fetch
+skip its `AbortController` guard — a stale response overwriting a fresher one's render is exactly
+the class of bug the Phase 3 trace-detail retrofit (§5.5) had to fix after shipping once already;
+don't add pagination, cross-open caching, or next/prev-citation navigation to the source viewer —
+each open is a deliberately fresh, simple fetch.
 
 ## 9. Acceptance (in a browser)
 
@@ -249,3 +278,8 @@ request's own result — the ticker is strictly secondary.
     file uploads and ingests it, with the Sources list showing the original filename as the origin.
     Selecting an unsupported file type shows a clear `alert()` naming the problem — the same error
     surface every other Sources-panel failure already uses, not a silent failure.
+13. Clicking a citation-list row (not just the inline highlighted span) opens the source-viewer
+    modal with that source's full text, the matching block highlighted and scrolled into view;
+    clicking the row's `⌁ trace` icon instead opens the Phase 3 trace detail, without also opening
+    the source viewer. Clicking a `.source-item` in the Sources panel opens the same modal with no
+    highlight. `Esc`, the backdrop, or the `✕` button all close it.

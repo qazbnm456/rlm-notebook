@@ -160,7 +160,16 @@ function renderTickerAffordance(runId) {
 // lookup (blueprint P3.3), never a faithfulness proof. `detailArea` is a shared slot inside the
 // SAME renderAnswerWithCitations() call the clicked span belongs to, so only one detail shows at
 // a time per answer rather than accumulating unboundedly.
+//
+// Staleness guard, added when the source-viewer addendum's own audit found this exact defect
+// already present here: opening the trace view for citation A, then quickly for citation B in the
+// SAME detailArea, could let A's slower response land after B's and overwrite it with the wrong
+// citation's payload. A monotonic token stored directly on `detailArea` — bumped on every call,
+// checked before writing the DOM — discards a stale response rather than an AbortController, since
+// this is a plain GET with no cleanup the browser needs told about.
 async function showCitationTurn(runId, citation, detailArea) {
+  const token = (detailArea._requestToken || 0) + 1;
+  detailArea._requestToken = token;
   detailArea.hidden = false;
   detailArea.textContent = "Loading…";
   try {
@@ -168,6 +177,7 @@ async function showCitationTurn(runId, citation, detailArea) {
     const data = await api(
       `/notebooks/${encodeURIComponent(state.notebookId)}/runs/${encodeURIComponent(runId)}/citation-turn?${params}`
     );
+    if (detailArea._requestToken !== token) return; // superseded by a newer click
     detailArea.textContent = "";
     const note = document.createElement("div");
     note.className = "citation-detail-note";
@@ -178,8 +188,104 @@ async function showCitationTurn(runId, citation, detailArea) {
     pre.textContent = JSON.stringify(data.payload, null, 2);
     detailArea.appendChild(pre);
   } catch (err) {
+    if (detailArea._requestToken !== token) return;
     detailArea.textContent = `(error) ${err.message}`;
   }
+}
+
+// --- Source viewer modal ------------------------------------------------------------------------
+//
+// NotebookLM's most basic loop: click a citation, see the highlighted original passage. A modal
+// (the first stacking-context component in this codebase's web/) rather than an inline slot —
+// source text can run to a whole PDF's worth of pages, too long for the trace-detail slot pattern
+// above. Opened from a citation's list row (always) or a Sources-panel list item (no highlight
+// target). Each open aborts any still-in-flight fetch from a PREVIOUS open, so a slower first
+// response can never overwrite a faster second one's render — the same class of defect just found
+// and fixed in showCitationTurn above, guarded against here from the start with an AbortController
+// instead (this fetch, unlike citation-turn's, is worth actually cancelling on the network level).
+let sourceViewerAbort = null;
+
+function closeSourceViewer() {
+  document.getElementById("source-viewer-overlay").hidden = true;
+  if (sourceViewerAbort) {
+    sourceViewerAbort.abort();
+    sourceViewerAbort = null;
+  }
+}
+
+// Highlights AT MOST one quote inside one block's text — deliberately simpler than
+// renderAnswerWithCitations's multi-citation overlap handling, since a source block only ever
+// needs one highlight per viewer open.
+function renderTextWithOptionalHighlight(text, quote) {
+  const container = document.createElement("div");
+  container.className = "source-block-text";
+  if (!quote) {
+    container.textContent = text;
+    return container;
+  }
+  const at = text.indexOf(quote);
+  if (at === -1) {
+    container.textContent = text;
+    return container;
+  }
+  container.appendChild(document.createTextNode(text.slice(0, at)));
+  const mark = document.createElement("span");
+  mark.className = "citation";
+  mark.textContent = text.slice(at, at + quote.length);
+  container.appendChild(mark);
+  container.appendChild(document.createTextNode(text.slice(at + quote.length)));
+  return container;
+}
+
+async function showSourceViewer(sourceId, locator, quote) {
+  if (sourceViewerAbort) sourceViewerAbort.abort();
+  const controller = new AbortController();
+  sourceViewerAbort = controller;
+
+  const overlay = document.getElementById("source-viewer-overlay");
+  const title = document.getElementById("source-viewer-title");
+  const body = document.getElementById("source-viewer-body");
+  overlay.hidden = false;
+  title.textContent = sourceId;
+  body.textContent = "Loading…";
+
+  try {
+    const source = await api(
+      `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(sourceId)}`,
+      { signal: controller.signal }
+    );
+    if (controller.signal.aborted) return;
+    title.textContent = `${source.kind} · ${source.origin}`;
+    body.innerHTML = "";
+    let targetSection = null;
+    source.blocks.forEach((block) => {
+      const section = document.createElement("div");
+      section.className = "source-block";
+      const label = document.createElement("div");
+      label.className = "source-block-locator";
+      label.textContent = block.locator;
+      section.appendChild(label);
+      const matches = locator && block.locator === locator;
+      section.appendChild(renderTextWithOptionalHighlight(block.text, matches ? quote : null));
+      body.appendChild(section);
+      if (matches) targetSection = section;
+    });
+    if (targetSection) targetSection.scrollIntoView({ block: "center" });
+  } catch (err) {
+    if (controller.signal.aborted) return;
+    body.textContent = `(error) ${err.message}`;
+  }
+}
+
+function initSourceViewer() {
+  document.getElementById("source-viewer-close").addEventListener("click", closeSourceViewer);
+  document.getElementById("source-viewer-overlay").addEventListener("click", (event) => {
+    if (event.target.id === "source-viewer-overlay") closeSourceViewer();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape") closeSourceViewer();
+  });
+  store.on("notebook:switched", closeSourceViewer);
 }
 
 // --- Notebook switcher ---------------------------------------------------------------------------
@@ -240,6 +346,7 @@ function initNotebookSwitch() {
 function renderSourceItem(source) {
   const li = document.createElement("li");
   li.className = "source-item";
+  li.addEventListener("click", () => showSourceViewer(source.id, null, null));
 
   const kind = document.createElement("div");
   kind.className = "src-kind";
@@ -401,8 +508,28 @@ function renderAnswerWithCitations(text, citations, runId) {
     citations.forEach((citation) => {
       const row = document.createElement("div");
       row.className = "citation-row";
+      row.addEventListener("click", () =>
+        showSourceViewer(citation.source_id, citation.locator, citation.quote)
+      );
+
+      const label = document.createElement("div");
+      label.className = "citation-row-label";
       const mark = citation.verified ? "✓" : "⚠ unverified";
-      row.textContent = `${mark} ${citation.source_id} · ${citation.locator}`;
+      label.textContent = `${mark} ${citation.source_id} · ${citation.locator}`;
+      row.appendChild(label);
+
+      if (runId) {
+        const trace = document.createElement("button");
+        trace.type = "button";
+        trace.className = "citation-row-trace";
+        trace.textContent = "⌁ trace";
+        trace.addEventListener("click", (event) => {
+          event.stopPropagation();
+          showCitationTurn(runId, citation, detailArea);
+        });
+        row.appendChild(trace);
+      }
+
       list.appendChild(row);
     });
     container.appendChild(list);
@@ -756,3 +883,4 @@ initSourcesPanel();
 initChatPanel();
 initStudioPanel();
 initPodcastPlayer();
+initSourceViewer();
