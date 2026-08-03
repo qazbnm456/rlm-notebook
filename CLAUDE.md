@@ -459,4 +459,47 @@ assume any of them exist because an earlier design discussion mentioned them.
     pre-implementation audit; a per-notebook lock (or a merging write) is a separate, tracked
     follow-up, not a blocker for a read-only endpoint.
 
+32. **Notes (`schema.Note`, `Notebook.notes`) are freeform, uncited text — grounded and citable
+    only once PROMOTED into a real `Source`, never before.** A note may have originated as a copy
+    of a citation-grounded `Answer`'s text (the web UI's "+ Save as note" button), but the note
+    itself carries no `citations` and is never re-verified against `sources` — invariant 5's
+    coordinate-only guarantee doesn't extend to it. `notebook.promote_note` is the ONLY path a
+    note's text ever reaches `notebook.sources`, and it reuses `ingest.ingest_pasted_text`
+    UNCHANGED (the same function `add_sources`'s pasted-text field already goes through) rather
+    than a parallel ingestion path — a promoted note gets the identical content-derived-origin,
+    dedup-by-origin, and injection-scan treatment any other pasted text already gets. Promotion
+    removes the note from `notes` regardless of whether a new source was actually appended (a
+    dedup hit against already-identical text returns `None` and appends nothing) — promotion is a
+    completed user action either way, and the endpoint always returns the full, ground-truth
+    `NotebookResponse` so a client distinguishes outcomes by diffing `sources`/`notes`, never by an
+    ambiguous status code.
+
+    **A note id is assigned from the MAX id among currently-live notes, never from `len(notes) +
+    1`** (`notebook._next_note_id`) — a real bug, not a style preference. An independent completion
+    check found and reproduced live that `len(notes) + 1` lets TWO LIVE notes share one id the
+    moment a non-last note is deleted (e.g. notes `n1`/`n2`, delete `n1`, add a third — the old
+    scheme computed `n2` again, colliding with the note still alive under that exact id); since
+    `delete_note`/`promote_note` both act BY id, the collision made either one silently affect
+    BOTH same-id notes at once — a promoted note's colliding sibling was discarded with no source
+    ever created for it and no error raised. `_next_note_id` fixes this at the root (derived from
+    the max id actually in use, so a new id can never collide with one still alive); `delete_note`/
+    `promote_note` ALSO now remove exactly the first matching note by index rather than filtering
+    every id-equal match, as defense in depth on top of the id fix, not instead of it. An id CAN
+    still be reused once NO live note holds it (e.g. every note gets deleted, then a new one is
+    added) — that case is genuinely safe and unchanged.
+
+    **`DELETE /notebooks/{id}/notes/{note_id}` is the first `DELETE` route in this API** — every
+    other mutator here is a `POST`. Uses `_load_notebook_or_404` (an existing note can only be
+    deleted from an EXISTING notebook, matching `ask`/`guide`'s existing-notebook-only precedent),
+    unlike `POST /notebooks/{id}/notes` itself, which uses `load_or_create` like `add_sources` (a
+    brand-new notebook can start life by adding a note).
+
+    **The "+ Save as note" button lives in `renderTurn` (Chat's own call site), never inside the
+    shared `renderAnswerWithCitations`.** That shared function is called from SIX sites (Chat plus
+    all four Guide-kind renders and the podcast transcript) — an earlier design draft would have
+    added the button INSIDE the shared function, leaking it onto Guide/Podcast artifacts, which are
+    generated output, not conversational turns a user is meant to curate into notes. Caught by an
+    independent pre-implementation audit before any code was written, not found live afterward:
+    don't move this button call into the shared function even as a "simplification."
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

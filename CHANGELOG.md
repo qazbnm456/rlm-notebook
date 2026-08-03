@@ -577,3 +577,53 @@ questions with verifiable citations, and get a distilled research artifact out.
   viewer opens (each open re-fetches), and pagination for very large sources. YouTube/audio source
   ingestion and a Notes research loop remain the last two open gaps from the same feature-parity
   assessment.
+
+- **Eleventh slice: Notes — the research-loop closing feature.** The third of the four gaps named
+  by the same Gemini-Notebook feature-parity assessment; only YouTube/audio source ingestion
+  remains after this. NotebookLM's own differentiating loop — read a source, write a note (or save
+  an AI answer as one), promote it into a full source, keep going — had no concept at all in this
+  project before this slice: `schema.Notebook` had only `sources` and `turns`.
+
+  **`schema.Note`/`Notebook.notes`** (new): a note is freeform, uncited text — grounded and citable
+  only once PROMOTED into a real `Source`, never before (invariant 32). Backward-compatible via
+  pydantic's default, the same precedent `ChatTurn.run_id` already established.
+
+  **`notebook.add_note`/`delete_note`/`promote_note`** (new): `promote_note` reuses
+  `ingest.ingest_pasted_text` UNCHANGED — the exact function pasted-text sources already go
+  through — so a promoted note gets the identical content-derived-origin, dedup, and
+  injection-scan treatment any other pasted text already gets, rather than a parallel code path.
+  Removes the note from `notes` regardless of outcome (a dedup hit against already-identical text
+  returns `None` and appends nothing new) — promotion is a completed action either way.
+
+  **Three new API endpoints, one extended response**: `POST /notebooks/{id}/notes` (uses
+  `load_or_create`, like `add_sources`), `DELETE /notebooks/{id}/notes/{note_id}` (this API's FIRST
+  `DELETE` route), `POST /notebooks/{id}/notes/{note_id}/promote` — the latter two use
+  `_load_notebook_or_404`, matching `ask`/`guide`'s existing-notebook-only precedent.
+  `NotebookResponse` gains a `notes` field, so every endpoint that already returns a notebook gets
+  it for free through the one shared `_notebook_response` conversion function.
+
+  **Web UI**: a Notes section in the Studio panel (below Audio Overview), each note with a
+  `→ Promote to source` and a `✕` delete button; a "+ Save as note" button on every Chat answer.
+
+  **A real pre-implementation-audit catch, not found live afterward**: the original design would
+  have put the "+ Save as note" button inside `renderAnswerWithCitations` — a function SIX
+  different call sites share (Chat plus all four Guide kinds and the podcast transcript) — which
+  would have leaked the button onto generated artifacts a user never curates into notes. Fixed
+  before any code was written: the button lives in `renderTurn` (Chat's own call site) instead.
+
+  **A real bug found by the independent post-implementation completion check, fixed before
+  merge**: the original `n{len(notes)+1}` id scheme let two LIVE notes share one id the moment a
+  non-last note was deleted (delete `n1` out of `[n1, n2]`, add a third — the old scheme reused
+  `n2`, colliding with the note still alive under that id) — reproduced live, and confirmed to
+  cause a real silent data loss: promoting one of a colliding pair discarded the other with no
+  source ever created and no error raised. Fixed at the root with `_next_note_id` (derives the
+  next id from the MAX id actually in use, not the count, so a new id can never collide with one
+  still alive); `delete_note`/`promote_note` also now remove exactly the first matching note by
+  index rather than filtering every id-equal match, as defense in depth on top of the id fix, not
+  instead of it (invariant 32). An id can still be safely reused once NO live note holds it.
+
+  **Deliberately NOT in this slice**: note editing (delete-and-recreate is the only revision path),
+  rich-text/markdown notes, note-to-note linking or tagging, and retroactively re-citing past `ask`
+  turns after a note they referenced gets promoted (a note was never a citable source before
+  promotion, so there's nothing to retroactively fix). YouTube/audio source ingestion is the one
+  remaining gap from the feature-parity assessment.

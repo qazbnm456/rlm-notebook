@@ -130,21 +130,22 @@ never blocks the request, which remains the sole source of the final answer. An 
 in-place as `(error) <message>`, never a silent disappearance of the question the user just asked.
 
 ### 5.4 Studio (right rail, ~340px)
-Two sections, Phase 2: Guide tabs (`Summary | FAQ | Timeline | Insight`, matching `guide/{kind}`'s
-four kinds) above a fixed "Audio Overview" section below. A tab's content is fetched ONLY on first
-activation or an explicit `↻ Regenerate` click — never automatically, including on notebook open —
-since a guide run is a real RLM loop and re-running it for free would burn a model call for
-nothing; results are cached client-side per notebook, invalidated on both a notebook switch AND a
-source being added (a cached Guide result is stale the instant the corpus it was computed from
-changes). `summary`/`insight` reuse `renderAnswerWithCitations` verbatim (same citation-highlighter
-treatment as Chat); `faq` renders one `.guide-item` block per Q/A pair; `timeline` renders one
-`.guide-item` per `{when, description}` event. Below: a `Generate podcast` button — `POST
-.../audio` runs a real RLM script-generation loop THEN a real network TTS call in series, so this
-is now the single slowest action in the product, with its own pending copy saying so — producing an
-`<audio controls>` element (backed by a `Blob`/`ObjectURL`, not a `data:` URI, so a multi-MB episode
-doesn't sit fully base64-encoded in a DOM attribute for its whole lifetime) plus a transcript below
-it, one `.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
-collapse-when-empty (still deferred — no phase has needed it yet).
+Three sections: Guide tabs (`Summary | FAQ | Timeline | Insight`, matching `guide/{kind}`'s four
+kinds, Phase 2) above a fixed "Audio Overview" section (Phase 2), above a "Notes" section
+(Post-launch addendum 4) at the bottom. A tab's content is fetched ONLY on first activation or an
+explicit `↻ Regenerate` click — never automatically, including on notebook open — since a guide
+run is a real RLM loop and re-running it for free would burn a model call for nothing; results are
+cached client-side per notebook, invalidated on both a notebook switch AND a source being added (a
+cached Guide result is stale the instant the corpus it was computed from changes). `summary`/
+`insight` reuse `renderAnswerWithCitations` verbatim (same citation-highlighter treatment as Chat);
+`faq` renders one `.guide-item` block per Q/A pair; `timeline` renders one `.guide-item` per
+`{when, description}` event. Below: a `Generate podcast` button — `POST .../audio` runs a real RLM
+script-generation loop THEN a real network TTS call in series, so this is now the single slowest
+action in the product, with its own pending copy saying so — producing an `<audio controls>`
+element (backed by a `Blob`/`ObjectURL`, not a `data:` URI, so a multi-MB episode doesn't sit fully
+base64-encoded in a DOM attribute for its whole lifetime) plus a transcript below it, one
+`.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
+collapse-when-empty (still deferred — no phase has needed it yet). Notes section: see §5.8.
 
 ### 5.5 Reasoning-trace ticker + citation-turn detail (Phase 3)
 
@@ -188,6 +189,11 @@ a broken link.
 | a citation row or source item clicked | The source-viewer modal opens with "Loading…", then the source's full text with the matching block highlighted and scrolled into view (no highlight if opened from the Sources panel). |
 | the source viewer's fetch fails | The modal body shows an inline `(error) …` message; the modal itself stays open (closable normally). |
 | the source viewer is closed and reopened for a different source before the first fetch resolves | The first fetch is aborted; only the second open's response ever renders. |
+| notebook opened, no notes | Notes section: empty-note under the add-note form. |
+| a note added (manually, or via "+ Save as note") | Notes section: the new `.note-item` appears in the list; the add-note textarea clears on success. |
+| a note promoted to a source | It disappears from Notes and a new item appears in Sources — both re-rendered from the same response; if the text was already an identical source, only the note disappears (no duplicate source). |
+| a note deleted | It disappears from the Notes list; no confirmation prompt (matches every other non-destructive-feeling list-item removal in this UI). |
+| a note action (promote/delete) fails | An `alert()` names the error, matching the Sources panel's own failure surface; the button re-enables. |
 
 ### 5.7 Source viewer modal (Post-launch addendum 2)
 
@@ -205,6 +211,26 @@ response can never overwrite a faster second one's render. Also closes on `noteb
 every other stateful surface in this product. Does not paginate, cache across opens, or support
 next/prev-citation navigation — each open is a fresh fetch, deliberately (§8's Don't list has the
 same scope cut written out).
+
+### 5.8 Notes section (Post-launch addendum 4)
+
+NotebookLM's research-loop closing feature: a manual note, or a Chat answer saved as one, can
+later be promoted into a real, independently-citable source. Lives at the bottom of the Studio
+panel (§5.4), below Audio Overview — a `.notes-section` with the same `.panel-head` + form + list +
+empty-state shape the other Studio sections already use, not a new fourth top-level column. A
+`.note-item` shows the note's text plus two actions: `→ Promote to source`
+(`POST .../notes/{id}/promote`) and `✕` delete (`DELETE .../notes/{id}`) — both re-render Sources
+and/or Notes from the mutating endpoint's own returned `NotebookResponse`, the same "the response
+IS the new state" pattern the Sources panel's add-source form already uses.
+
+Every Chat answer (`renderTurn`, §5.3) carries a `+ Save as note` button — added by `renderTurn`
+ITSELF, never inside the shared `renderAnswerWithCitations`, which five OTHER call sites (every
+Guide kind, the podcast transcript) also use and must never show this button on. Posts the
+answer's own already-in-hand text to `POST /notebooks/{id}/notes`, no DOM scraping or re-fetch.
+
+A note carries no citations of its own and is never re-verified against `sources` (CLAUDE.md
+invariant 5's coordinate-only guarantee doesn't extend to freeform notes) until it's promoted —
+nothing in this section's UI should imply a note is "grounded" before that point.
 
 ## 6. Depth / motion
 
@@ -241,7 +267,10 @@ request's own result — the ticker is strictly secondary; don't let the source-
 skip its `AbortController` guard — a stale response overwriting a fresher one's render is exactly
 the class of bug the Phase 3 trace-detail retrofit (§5.5) had to fix after shipping once already;
 don't add pagination, cross-open caching, or next/prev-citation navigation to the source viewer —
-each open is a deliberately fresh, simple fetch.
+each open is a deliberately fresh, simple fetch; don't move the "+ Save as note" button into the
+shared `renderAnswerWithCitations` — it must appear on Chat answers only, never on a Guide kind or
+the podcast transcript, which also call that same function; don't imply a note is grounded or
+citable before it's promoted into a real source.
 
 ## 9. Acceptance (in a browser)
 
@@ -283,3 +312,8 @@ each open is a deliberately fresh, simple fetch.
     clicking the row's `⌁ trace` icon instead opens the Phase 3 trace detail, without also opening
     the source viewer. Clicking a `.source-item` in the Sources panel opens the same modal with no
     highlight. `Esc`, the backdrop, or the `✕` button all close it.
+14. Typing a note into the Notes section's textarea and submitting adds it to the list and clears
+    the textarea; clicking `+ Save as note` on a Chat answer adds a note with that answer's text,
+    and the SAME button never appears on a Guide tab's or the podcast transcript's answers.
+    Clicking `→ Promote to source` on a note removes it from Notes and adds a matching item to
+    Sources; clicking `✕` on a note removes it with no confirmation prompt.

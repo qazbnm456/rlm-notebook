@@ -8,7 +8,9 @@ from pydantic import ValidationError
 
 from rlm_notebook.notebook import (
     EPHEMERAL_ID,
+    add_note,
     corpus_of,
+    delete_note,
     existing_origins,
     extend_with_sources,
     history_text,
@@ -16,10 +18,11 @@ from rlm_notebook.notebook import (
     load_notebook,
     load_or_create,
     notebook_path,
+    promote_note,
     save_notebook,
     slug,
 )
-from rlm_notebook.schema import Answer, ChatTurn, Notebook, Source, SourceBlock
+from rlm_notebook.schema import Answer, ChatTurn, Note, Notebook, Source, SourceBlock
 
 
 def _source(id_: str, origin: str = "x") -> Source:
@@ -253,3 +256,130 @@ def test_list_notebook_summaries_flags_a_corrupted_file_without_breaking_the_res
 
     assert [nb.id for nb in notebooks] == ["good"]
     assert unreadable == ["broken"]
+
+
+# --- Notes ----------------------------------------------------------------------------------------
+
+
+def test_add_note_appends_and_numbers_sequentially():
+    notebook = Notebook(id="mynb")
+    n1 = add_note(notebook, "first note")
+    n2 = add_note(notebook, "second note")
+    assert (n1.id, n1.text) == ("n1", "first note")
+    assert (n2.id, n2.text) == ("n2", "second note")
+    assert [n.id for n in notebook.notes] == ["n1", "n2"]
+
+
+def test_add_note_rejects_blank_text():
+    notebook = Notebook(id="mynb")
+    with pytest.raises(ValueError, match="empty"):
+        add_note(notebook, "   ")
+    assert notebook.notes == []
+
+
+def test_delete_note_removes_by_id():
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "keep me")
+    add_note(notebook, "delete me")
+    delete_note(notebook, "n2")
+    assert [n.id for n in notebook.notes] == ["n1"]
+
+
+def test_delete_note_raises_on_unknown_id():
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "a note")
+    with pytest.raises(ValueError, match="no note 'does-not-exist'"):
+        delete_note(notebook, "does-not-exist")
+    assert len(notebook.notes) == 1  # unchanged
+
+
+def test_promote_note_turns_it_into_a_source_and_removes_it_from_notes():
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "promote this text")
+
+    source = promote_note(notebook, "n1")
+
+    assert notebook.notes == []
+    assert source is not None
+    assert source.id == "s1"
+    assert source.blocks[0].text == "promote this text"
+    assert notebook.sources == [source]
+
+
+def test_promote_note_numbers_the_new_source_after_existing_sources():
+    notebook = Notebook(id="mynb", sources=[_source("s1", "a.txt")])
+    add_note(notebook, "promote this text")
+
+    source = promote_note(notebook, "n1")
+
+    assert source.id == "s2"
+    assert [s.id for s in notebook.sources] == ["s1", "s2"]
+
+
+def test_promote_note_dedupes_against_an_identical_existing_source_and_returns_none():
+    """Same content-hash-based dedup `add_sources`'s pasted-text loop already applies — promoting a
+    note whose text is byte-identical to text already pasted as a source appends nothing new, but
+    the note is still removed from `notes` either way (promotion is a completed action). Adds a
+    SECOND, pre-existing source first so the reused note id (see `add_note`'s own docstring: an id
+    can be reused after a delete/promote shrinks `notes`) isn't what this test is actually about."""
+    notebook = Notebook(id="mynb", sources=[_source("s1", "a.txt")])
+    add_note(notebook, "duplicate text")
+    promote_note(notebook, "n1")  # creates s2
+    add_note(notebook, "duplicate text")  # same text again, a new note (id reused: also "n1")
+
+    result = promote_note(notebook, "n1")
+
+    assert result is None
+    assert notebook.notes == []
+    assert len(notebook.sources) == 2  # no third source appended
+
+
+def test_promote_note_raises_on_unknown_id():
+    notebook = Notebook(id="mynb")
+    with pytest.raises(ValueError, match="no note 'does-not-exist'"):
+        promote_note(notebook, "does-not-exist")
+
+
+def test_add_note_can_reuse_an_id_once_no_live_note_holds_it():
+    """Safe id reuse: deleting the note that WAS `"n2"` frees that id for reuse, since no other
+    live note holds it afterward."""
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "first")
+    add_note(notebook, "second")  # id "n2"
+    delete_note(notebook, "n2")
+    reused = add_note(notebook, "third")
+    assert reused.id == "n2"
+
+
+def test_add_note_never_collides_with_a_still_live_note_after_deleting_an_earlier_one():
+    """The real bug an independent review found in the original `len(notes) + 1` id scheme: adding
+    notes n1/n2, deleting the EARLIER one (n1, not the most recent), then adding a third used to
+    reuse "n2" — colliding with the note that was still alive under that exact id. Confirms the fix
+    (`_next_note_id` deriving from the max id actually in use, not the count) never lets that
+    happen, regardless of which note gets deleted."""
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "first")  # n1
+    add_note(notebook, "second")  # n2
+    delete_note(notebook, "n1")  # n2 is still alive
+    third = add_note(notebook, "third")
+    assert third.id != "n2"  # must not collide with the still-live note
+    assert [n.id for n in notebook.notes] == ["n2", third.id]
+    assert len({n.id for n in notebook.notes}) == 2  # no duplicate ids
+
+
+def test_delete_note_removes_only_the_first_matching_note_by_index():
+    """Defense in depth, verified directly: even if two notes somehow shared an id (bypassing
+    `add_note`'s own now-collision-free scheme), `delete_note` removes exactly one, not both."""
+    notebook = Notebook(id="mynb")
+    notebook.notes = [Note(id="n2", text="first"), Note(id="n2", text="second")]
+    delete_note(notebook, "n2")
+    assert [n.text for n in notebook.notes] == ["second"]
+
+
+def test_promote_note_promotes_only_the_first_matching_note_by_index():
+    """Same defense-in-depth guarantee as `delete_note`, for `promote_note`."""
+    notebook = Notebook(id="mynb")
+    notebook.notes = [Note(id="n2", text="first"), Note(id="n2", text="second")]
+    source = promote_note(notebook, "n2")
+    assert source.blocks[0].text == "first"
+    assert [n.text for n in notebook.notes] == ["second"]

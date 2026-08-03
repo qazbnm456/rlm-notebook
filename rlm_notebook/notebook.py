@@ -17,8 +17,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .corpus import Corpus
-from .ingest import ingest_new
-from .schema import Notebook, Source
+from .ingest import ingest_new, ingest_pasted_text, with_injection_flags
+from .schema import Note, Notebook, Source
 
 DEFAULT_NOTEBOOKS_DIR = "notebooks"
 
@@ -154,3 +154,75 @@ def history_text(notebook: Notebook) -> str:
         return "(no prior turns in this conversation)"
     parts = [f"Q{i}: {turn.question}\nA{i}: {turn.answer.text}" for i, turn in enumerate(notebook.turns, start=1)]
     return "\n\n".join(parts)
+
+
+def _next_note_id(notebook: Notebook) -> str:
+    """`n{max existing numeric suffix among CURRENTLY LIVE notes + 1}` — NOT `n{len(notes) + 1}`.
+    Found by an independent review: `len(notes) + 1` reuses an id that's still held by ANOTHER
+    live note the moment a non-last note is deleted (e.g. notes `[n1, n2]`, delete `n1` — the list
+    is now length 1, so the next add computes `n2` again, colliding with the surviving note that's
+    STILL called `n2`). Two live notes sharing one id is a real, silent-data-loss bug, not a
+    cosmetic one: `delete_note`/`promote_note` filter/match BY id, so a collision makes either one
+    act on both notes at once — reproduced live, promoting one of a colliding pair silently
+    discarded the other with no source ever created for it and no error raised. Deriving the next
+    id from the MAX id actually in use (not the count) guarantees no new id can ever collide with
+    a note that's still alive, regardless of which note got deleted. An id CAN still be reused
+    once NO live note holds it anymore (e.g. every note is deleted, then a new one is added) — that
+    case is genuinely safe, unlike the one this function fixes."""
+    if not notebook.notes:
+        return "n1"
+    return f"n{max(int(n.id[1:]) for n in notebook.notes) + 1}"
+
+
+def add_note(notebook: Notebook, text: str) -> Note:
+    """Create and append a new `Note` to `notebook.notes` IN PLACE (see `_next_note_id` for the id
+    scheme). Raises `ValueError` on blank text, same discipline `parsers.text.parse_text` already
+    applies to a blank text SOURCE. Deliberately does NOT call `save_notebook` itself — same
+    convention every other mutator in this module already follows (`extend_with_sources` doesn't
+    save either); the caller persists once, after the mutation."""
+    if not text.strip():
+        raise ValueError("note text is empty")
+    note = Note(id=_next_note_id(notebook), text=text)
+    notebook.notes.append(note)
+    return note
+
+
+def delete_note(notebook: Notebook, note_id: str) -> None:
+    """Removes the note with id `note_id` from `notebook.notes` IN PLACE. Raises `ValueError` if no
+    such note exists, rather than a silent no-op on a typo'd id — the same "raise on a request that
+    named something that doesn't exist" discipline `corpus.Corpus.filtered` already applies to an
+    unknown source id. Removes exactly the FIRST matching note by index, not every id-equal match —
+    defense in depth alongside `_next_note_id`'s own collision fix, in case a duplicate id is ever
+    produced by a future code path this function doesn't control."""
+    for index, note in enumerate(notebook.notes):
+        if note.id == note_id:
+            del notebook.notes[index]
+            return
+    raise ValueError(f"no note {note_id!r} in this notebook")
+
+
+def promote_note(notebook: Notebook, note_id: str) -> Source | None:
+    """Turns a note into a real, independently-citable `Source`, reusing `ingest_pasted_text`
+    UNCHANGED — the exact function pasted-text sources already go through — rather than a parallel
+    code path, so a promoted note gets the IDENTICAL content-derived-origin, dedup, and
+    injection-scan treatment `add_sources`'s pasted-text branch already gives any other pasted
+    text (as far as ingestion is concerned, a note's text IS pasted text).
+
+    Removes the note from `notebook.notes` REGARDLESS of outcome — promotion is a completed user
+    action either way — then checks the candidate source's origin against
+    `existing_origins(notebook)` (the same dedup-by-content-hash check `add_sources`'s pasted-text
+    loop already performs): if identical text is already a source in this notebook, returns `None`
+    and appends nothing new; otherwise appends the new (injection-scanned) `Source` and returns it.
+    Raises `ValueError` if `note_id` doesn't exist, same as `delete_note`. Pops exactly the FIRST
+    matching note by index (same defense-in-depth reasoning as `delete_note`), not every id-equal
+    match."""
+    index = next((i for i, n in enumerate(notebook.notes) if n.id == note_id), None)
+    if index is None:
+        raise ValueError(f"no note {note_id!r} in this notebook")
+    note = notebook.notes.pop(index)
+    candidate = ingest_pasted_text(note.text, source_id=f"s{len(notebook.sources) + 1}")
+    if candidate.origin in existing_origins(notebook):
+        return None
+    source = with_injection_flags(candidate)
+    notebook.sources.append(source)
+    return source

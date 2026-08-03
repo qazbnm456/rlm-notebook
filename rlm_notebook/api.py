@@ -7,8 +7,10 @@ execution-model invariant. `cli.py`'s synchronous in-process invocation is compl
 Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend — URLs and/or
 pasted text), `POST /notebooks/{id}/sources/upload` (a `.pdf`/`.txt`/`.md` file's raw bytes),
 `GET /notebooks/{id}`, `GET /notebooks/{id}/sources/{source_id}` (one source's full text, every
-block — the web UI's source viewer), `POST /notebooks/{id}/ask`,
-`POST /notebooks/{id}/guide/{kind}`, `POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
+block — the web UI's source viewer), `POST /notebooks/{id}/notes` (create a note),
+`DELETE /notebooks/{id}/notes/{note_id}`, `POST /notebooks/{id}/notes/{note_id}/promote` (turn a
+note into a real source), `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
+`POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
 `GET /notebooks/{id}/runs/{run_id}/stream` (live reasoning-trace SSE), and
 `GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup). `/audio` is two
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
@@ -67,13 +69,16 @@ from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
 from .notebook import (
+    add_note,
     corpus_of,
+    delete_note,
     existing_origins,
     extend_with_sources,
     history_text,
     list_notebook_summaries,
     load_notebook,
     load_or_create,
+    promote_note,
     save_notebook,
     slug,
 )
@@ -257,10 +262,16 @@ class ChatTurnResponse(BaseModel):
     run_id: str | None = None
 
 
+class NoteResponse(BaseModel):
+    id: str
+    text: str
+
+
 class NotebookResponse(BaseModel):
     id: str
     sources: list[dict]
     turns: list[ChatTurnResponse]
+    notes: list[NoteResponse]
 
 
 def _notebook_response(notebook: Notebook) -> NotebookResponse:
@@ -268,7 +279,9 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
     to render a re-opened notebook's past turns, not just ones asked during the current session.
     Every historical turn's citations are re-verified against the CURRENT corpus at read time, same
     as a brand-new answer (CLAUDE.md invariant 11: history is never itself a trusted source of
-    facts, and a citation is verified fresh every time regardless of what a past turn recorded)."""
+    facts, and a citation is verified fresh every time regardless of what a past turn recorded).
+    Also includes `notes` — every endpoint that returns a notebook gets them for free from this ONE
+    conversion function, no per-endpoint change needed (blueprint's Notes addendum)."""
     corpus = corpus_of(notebook)
     return NotebookResponse(
         id=notebook.id,
@@ -285,6 +298,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
             )
             for t in notebook.turns
         ],
+        notes=[NoteResponse(id=n.id, text=n.text) for n in notebook.notes],
     )
 
 
@@ -340,6 +354,62 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
         seen.add(source.origin)
         notebook.sources.append(with_injection_flags(source))
 
+    save_notebook(notebook)
+    return _notebook_response(notebook)
+
+
+class NoteRequest(BaseModel):
+    text: str
+
+
+@app.post("/notebooks/{notebook_id}/notes", response_model=NotebookResponse)
+async def add_note_endpoint(notebook_id: str, body: NoteRequest) -> NotebookResponse:
+    """Create a note — manual, or a copy of a past Chat answer's text (the web UI's "Save as note"
+    button). Uses `load_or_create` like `add_sources`: a brand-new notebook can start life by
+    adding a note, same as it can by adding a source."""
+    try:
+        notebook = load_or_create(notebook_id)
+    except ValidationError as exc:
+        raise HTTPException(
+            409,
+            f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
+            f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
+        ) from exc
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
+    try:
+        add_note(notebook, body.text)
+    except ValueError as exc:
+        raise HTTPException(422, str(exc)) from exc
+    save_notebook(notebook)
+    return _notebook_response(notebook)
+
+
+@app.delete("/notebooks/{notebook_id}/notes/{note_id}", response_model=NotebookResponse)
+async def delete_note_endpoint(notebook_id: str, note_id: str) -> NotebookResponse:
+    """Delete a note by id — an existing note can only be deleted from an EXISTING notebook (no
+    `load_or_create` here, matching `ask`/`guide`'s existing-notebook-only precedent)."""
+    notebook = _load_notebook_or_404(notebook_id)
+    try:
+        delete_note(notebook, note_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
+    save_notebook(notebook)
+    return _notebook_response(notebook)
+
+
+@app.post("/notebooks/{notebook_id}/notes/{note_id}/promote", response_model=NotebookResponse)
+async def promote_note_endpoint(notebook_id: str, note_id: str) -> NotebookResponse:
+    """Turn a note into a real, independently-citable source (`notebook.promote_note`) — reuses the
+    same pasted-text ingestion path `add_sources`'s `texts` field already goes through. Returns the
+    updated `NotebookResponse` either way (whether or not a new source was actually appended —
+    ground truth is already visible in the returned `sources`/`notes` lists, no separate "did it
+    dedupe" flag needed)."""
+    notebook = _load_notebook_or_404(notebook_id)
+    try:
+        promote_note(notebook, note_id)
+    except ValueError as exc:
+        raise HTTPException(404, str(exc)) from exc
     save_notebook(notebook)
     return _notebook_response(notebook)
 

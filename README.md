@@ -110,6 +110,13 @@ curl -X POST localhost:8000/notebooks/mynb/sources/upload -F "file=@./paper.pdf"
 # short `quote`. A materially different exposure than most other endpoints here (CLAUDE.md
 # invariant 31).
 curl -X GET localhost:8000/notebooks/mynb/sources/s1
+
+# Notes: freeform, uncited text — write one directly, or save a Chat answer as one. Only grounded
+# once promoted into a real source (CLAUDE.md invariant 32).
+curl -X POST localhost:8000/notebooks/mynb/notes -H "Content-Type: application/json" \
+    -d '{"text": "a thought worth keeping around"}'
+curl -X DELETE localhost:8000/notebooks/mynb/notes/n1
+curl -X POST localhost:8000/notebooks/mynb/notes/n1/promote   # turns it into a real source
 ```
 
 Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable subprocess — unlike
@@ -123,21 +130,24 @@ upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) neve
 local-path string — only bytes the caller already had — so it doesn't reopen the local-path
 restriction `sources` already enforces. `GET .../sources/{source_id}` returns a source's full
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
-materially different exposure, alongside the trace stream/citation-turn lookup. See `api.py`'s
-module docstring and CLAUDE.md invariants 20-31.
+materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
+citations of its own until it's promoted into a real source — see CLAUDE.md invariant 32. See
+`api.py`'s module docstring and CLAUDE.md invariants 20-32.
 
 ## Web UI
 
 Once the server above is running, open `http://localhost:8000/` in a browser: a real end-user
 product surface (source management — URL, pasted text, or file upload — citation-grounded chat, a
-Studio panel with Guide tabs and a podcast player, and a live "what is the model doing right now"
-reasoning ticker), not a developer trace console. Zero build step — it's served directly out of
-`rlm_notebook/web/` by the same FastAPI app. Clicking a citation opens a source-viewer modal with
-the full original passage highlighted and scrolled into view — NotebookLM's most basic closed loop
-— with a secondary `⌁ trace` icon on the same row still showing the trace turn where the model
-read that source span, a transparency mechanism, never a stronger faithfulness claim than
-`citations.py` itself already makes. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants
-29-31.
+Studio panel with Guide tabs, a podcast player, and Notes, and a live "what is the model doing
+right now" reasoning ticker), not a developer trace console. Zero build step — it's served
+directly out of `rlm_notebook/web/` by the same FastAPI app. Clicking a citation opens a
+source-viewer modal with the full original passage highlighted and scrolled into view —
+NotebookLM's most basic closed loop — with a secondary `⌁ trace` icon on the same row still
+showing the trace turn where the model read that source span, a transparency mechanism, never a
+stronger faithfulness claim than `citations.py` itself already makes. Every Chat answer can be
+saved as a note, and every note can later be promoted into a real, citable source — NotebookLM's
+own research loop of reading, noting, and deepening a notebook over successive turns. See
+`rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-32.
 
 ## What this is not (yet)
 

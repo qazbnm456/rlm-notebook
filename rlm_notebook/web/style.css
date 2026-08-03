@@ -596,6 +596,100 @@ input:focus {
   margin-bottom: 0.25rem;
 }
 
+/* --- Studio panel: Notes --- */
+
+.notes-section {
+  margin-top: 1.25rem;
+  padding-top: 1.25rem;
+  border-top: 1px solid var(--border);
+}
+
+.add-note {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.75rem;
+}
+
+.add-note textarea {
+  width: 100%;
+  resize: vertical;
+}
+
+.note-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.note-item {
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.5em 0.7em;
+  font-size: 0.82rem;
+}
+
+.note-item .note-text {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  margin-bottom: 0.4rem;
+}
+
+.note-actions {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.note-promote {
+  font-size: 0.72rem;
+  padding: 0.3em 0.6em;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.note-promote:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+
+.note-delete {
+  flex: 0 0 auto;
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  width: 24px;
+  height: 24px;
+  font-size: 0.7rem;
+  padding: 0;
+  color: var(--text-faint);
+}
+
+.note-delete:hover {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.save-as-note {
+  display: block;
+  margin-top: 0.5rem;
+  font-size: 0.72rem;
+  padding: 0.3em 0.6em;
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-dim);
+}
+
+.save-as-note:hover {
+  border-color: var(--accent-dim);
+  color: var(--text);
+}
+
 /* --- Reasoning-trace ticker (Phase 3) --- */
 
 .ticker-toggle {
