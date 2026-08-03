@@ -247,4 +247,5 @@ request's own result — the ticker is strictly secondary.
 12. Switching to the "Paste text" tab and submitting real text adds a source whose origin is a
     readable snippet, not a bare hash; switching to "File" and selecting a real `.pdf`/`.txt`/`.md`
     file uploads and ingests it, with the Sources list showing the original filename as the origin.
-    Selecting an unsupported file type shows a clear inline error, not a silent failure.
+    Selecting an unsupported file type shows a clear `alert()` naming the problem — the same error
+    surface every other Sources-panel failure already uses, not a silent failure.
