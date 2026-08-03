@@ -6,6 +6,7 @@
 //   sources:changed    { sources }
 //   chat:turnAdded     { turn }
 //   chat:pending       { pending }
+//   notes:changed      { notes }
 // Each pane subscribes only to what it renders from; no pane writes another pane's state directly.
 
 function createStore() {
@@ -27,6 +28,7 @@ const state = {
   notebookId: null,
   sources: [],
   turns: [],
+  notes: [],
 };
 
 // --- Theme ------------------------------------------------------------------------------------
@@ -313,13 +315,15 @@ async function openNotebook(notebookId) {
     notebook = await api(`/notebooks/${encodeURIComponent(trimmed)}`);
   } catch {
     // Doesn't exist yet — that's fine, it's created lazily on the first add-source call.
-    notebook = { id: trimmed, sources: [], turns: [] };
+    notebook = { id: trimmed, sources: [], turns: [], notes: [] };
   }
   state.notebookId = notebook.id;
   state.sources = notebook.sources;
   state.turns = notebook.turns;
+  state.notes = notebook.notes || [];
   store.emit("notebook:switched", { notebookId: notebook.id });
   store.emit("sources:changed", { sources: state.sources });
+  store.emit("notes:changed", { notes: state.notes });
   state.turns.forEach((turn) => store.emit("chat:turnAdded", { turn }));
   refreshNotebookList();
 }
@@ -560,6 +564,15 @@ function renderTurn(turn) {
     if (turn.run_id && tickerLogs.has(turn.run_id)) {
       answer.appendChild(renderTickerAffordance(turn.run_id));
     }
+    // Appended HERE, by renderTurn itself — NOT inside renderAnswerWithCitations, which five OTHER
+    // call sites (Guide/Podcast) also use and must never show this button (blueprint's Notes
+    // addendum, audit round 1).
+    const saveNoteBtn = document.createElement("button");
+    saveNoteBtn.type = "button";
+    saveNoteBtn.className = "btn save-as-note";
+    saveNoteBtn.textContent = "+ Save as note";
+    saveNoteBtn.addEventListener("click", () => addNote(turn.answer));
+    answer.appendChild(saveNoteBtn);
   }
   wrapper.appendChild(answer);
 
@@ -875,6 +888,118 @@ function initPodcastPlayer() {
   store.on("notebook:switched", clearPlayer);
 }
 
+// --- Notes section (Studio panel) ----------------------------------------------------------------
+//
+// NotebookLM's research-loop closing feature: a manual note, or a Chat answer saved as one
+// (`addNote`, wired from `renderTurn`), can later be PROMOTED into a real, independently-
+// citable source — the "read a source → note something → the note becomes a source → keep going"
+// loop this project had no concept of at all before this. Built with createElement/textContent
+// throughout, same discipline every other list in this file already follows — a note's `text` is
+// user-authored (or copied from a model answer) and never assumed safe to treat as markup.
+
+function renderNoteItem(note) {
+  const li = document.createElement("li");
+  li.className = "note-item";
+
+  const text = document.createElement("div");
+  text.className = "note-text";
+  text.textContent = note.text;
+  li.appendChild(text);
+
+  const actions = document.createElement("div");
+  actions.className = "note-actions";
+
+  const promoteBtn = document.createElement("button");
+  promoteBtn.type = "button";
+  promoteBtn.className = "btn note-promote";
+  promoteBtn.textContent = "→ Promote to source";
+  promoteBtn.addEventListener("click", async () => {
+    promoteBtn.disabled = true;
+    try {
+      const notebook = await api(
+        `/notebooks/${encodeURIComponent(state.notebookId)}/notes/${encodeURIComponent(note.id)}/promote`,
+        { method: "POST" }
+      );
+      state.sources = notebook.sources;
+      state.notes = notebook.notes;
+      store.emit("sources:changed", { sources: state.sources });
+      store.emit("notes:changed", { notes: state.notes });
+    } catch (err) {
+      alert(`Could not promote note: ${err.message}`);
+      promoteBtn.disabled = false;
+    }
+  });
+  actions.appendChild(promoteBtn);
+
+  const deleteBtn = document.createElement("button");
+  deleteBtn.type = "button";
+  deleteBtn.className = "btn note-delete";
+  deleteBtn.textContent = "✕";
+  deleteBtn.addEventListener("click", async () => {
+    deleteBtn.disabled = true;
+    try {
+      const notebook = await api(
+        `/notebooks/${encodeURIComponent(state.notebookId)}/notes/${encodeURIComponent(note.id)}`,
+        { method: "DELETE" }
+      );
+      state.notes = notebook.notes;
+      store.emit("notes:changed", { notes: state.notes });
+    } catch (err) {
+      alert(`Could not delete note: ${err.message}`);
+      deleteBtn.disabled = false;
+    }
+  });
+  actions.appendChild(deleteBtn);
+
+  li.appendChild(actions);
+  return li;
+}
+
+async function addNote(text) {
+  if (!state.notebookId) return;
+  try {
+    const notebook = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+    });
+    state.notes = notebook.notes;
+    store.emit("notes:changed", { notes: state.notes });
+  } catch (err) {
+    alert(`Could not save note: ${err.message}`);
+  }
+}
+
+function initNotesPanel() {
+  const form = document.getElementById("add-note-form");
+  form.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    if (!state.notebookId) {
+      alert("Open or name a notebook first.");
+      return;
+    }
+    const input = document.getElementById("note-text");
+    const value = input.value.trim();
+    if (!value) return;
+    const submitBtn = form.querySelector("button[type=submit]");
+    submitBtn.disabled = true;
+    try {
+      await addNote(value);
+      input.value = "";
+    } finally {
+      submitBtn.disabled = false;
+    }
+  });
+
+  store.on("notes:changed", ({ notes }) => {
+    const list = document.getElementById("note-list");
+    const empty = document.getElementById("notes-empty");
+    list.innerHTML = "";
+    notes.forEach((note) => list.appendChild(renderNoteItem(note)));
+    empty.hidden = notes.length > 0;
+  });
+}
+
 // --- Boot -------------------------------------------------------------------------------------
 
 initTheme();
@@ -884,3 +1009,4 @@ initChatPanel();
 initStudioPanel();
 initPodcastPlayer();
 initSourceViewer();
+initNotesPanel();

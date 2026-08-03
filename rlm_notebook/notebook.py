@@ -17,8 +17,8 @@ from pathlib import Path
 from pydantic import ValidationError
 
 from .corpus import Corpus
-from .ingest import ingest_new
-from .schema import Notebook, Source
+from .ingest import ingest_new, ingest_pasted_text, with_injection_flags
+from .schema import Note, Notebook, Source
 
 DEFAULT_NOTEBOOKS_DIR = "notebooks"
 
@@ -154,3 +154,60 @@ def history_text(notebook: Notebook) -> str:
         return "(no prior turns in this conversation)"
     parts = [f"Q{i}: {turn.question}\nA{i}: {turn.answer.text}" for i, turn in enumerate(notebook.turns, start=1)]
     return "\n\n".join(parts)
+
+
+def add_note(notebook: Notebook, text: str) -> Note:
+    """Create and append a new `Note` to `notebook.notes` IN PLACE, numbered `n{len+1}` (mirrors
+    `s{n}`'s sequential, human-legible source-id scheme). Raises `ValueError` on blank text, same
+    discipline `parsers.text.parse_text` already applies to a blank text SOURCE. Deliberately does
+    NOT call `save_notebook` itself — same convention every other mutator in this module already
+    follows (`extend_with_sources` doesn't save either); the caller persists once, after the
+    mutation.
+
+    Unlike a source id (`notebook.sources` only ever grows, so `s{n}` is collision-free for the
+    notebook's whole lifetime), a note id CAN be reused after `delete_note`/`promote_note` shrinks
+    `notebook.notes` — e.g. deleting `"n2"` then adding a new note makes THAT note `"n2"` too. This
+    is accepted, not fixed: nothing in this project holds a note id across such a gap (unlike
+    `run_id`, which is embedded in a trace file path) — every note id is read fresh from the same
+    `NotebookResponse` a UI action was rendered from, in the same request/response round trip."""
+    if not text.strip():
+        raise ValueError("note text is empty")
+    note = Note(id=f"n{len(notebook.notes) + 1}", text=text)
+    notebook.notes.append(note)
+    return note
+
+
+def delete_note(notebook: Notebook, note_id: str) -> None:
+    """Removes the note with id `note_id` from `notebook.notes` IN PLACE. Raises `ValueError` if no
+    such note exists, rather than a silent no-op on a typo'd id — the same "raise on a request that
+    named something that doesn't exist" discipline `corpus.Corpus.filtered` already applies to an
+    unknown source id."""
+    before = len(notebook.notes)
+    notebook.notes = [n for n in notebook.notes if n.id != note_id]
+    if len(notebook.notes) == before:
+        raise ValueError(f"no note {note_id!r} in this notebook")
+
+
+def promote_note(notebook: Notebook, note_id: str) -> Source | None:
+    """Turns a note into a real, independently-citable `Source`, reusing `ingest_pasted_text`
+    UNCHANGED — the exact function pasted-text sources already go through — rather than a parallel
+    code path, so a promoted note gets the IDENTICAL content-derived-origin, dedup, and
+    injection-scan treatment `add_sources`'s pasted-text branch already gives any other pasted
+    text (as far as ingestion is concerned, a note's text IS pasted text).
+
+    Removes the note from `notebook.notes` REGARDLESS of outcome — promotion is a completed user
+    action either way — then checks the candidate source's origin against
+    `existing_origins(notebook)` (the same dedup-by-content-hash check `add_sources`'s pasted-text
+    loop already performs): if identical text is already a source in this notebook, returns `None`
+    and appends nothing new; otherwise appends the new (injection-scanned) `Source` and returns it.
+    Raises `ValueError` if `note_id` doesn't exist, same as `delete_note`."""
+    note = next((n for n in notebook.notes if n.id == note_id), None)
+    if note is None:
+        raise ValueError(f"no note {note_id!r} in this notebook")
+    notebook.notes = [n for n in notebook.notes if n.id != note_id]
+    candidate = ingest_pasted_text(note.text, source_id=f"s{len(notebook.sources) + 1}")
+    if candidate.origin in existing_origins(notebook):
+        return None
+    source = with_injection_flags(candidate)
+    notebook.sources.append(source)
+    return source

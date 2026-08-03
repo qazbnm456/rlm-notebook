@@ -163,6 +163,19 @@ class ChatTurn(BaseModel):
     run_id: str | None = None
 
 
+class Note(BaseModel):
+    """A user-curated note — written directly, or copied from a past `Answer`'s text (see the web
+    UI's "Save as note" button, `docs/design/web-ui-blueprint.md`'s Notes addendum). Deliberately
+    carries NO citations of its own: a note's text may have originated from a citation-grounded
+    `Answer`, but the note itself is not re-verified against `sources` (CLAUDE.md invariant 5's
+    coordinate-only guarantee doesn't extend to freeform notes) until/unless it's PROMOTED into a
+    real `Source` (`notebook.promote_note`), at which point it's grounded and citable exactly like
+    any other source, no differently."""
+
+    id: str
+    text: str
+
+
 class Notebook(BaseModel):
     """Sources plus chat history that survive across `ask` invocations (see `notebook.py`). This is
     the whole persisted unit — one JSON file per notebook, no database."""
@@ -170,3 +183,4 @@ class Notebook(BaseModel):
     id: str
     sources: list[Source] = Field(default_factory=list)
     turns: list[ChatTurn] = Field(default_factory=list)
+    notes: list[Note] = Field(default_factory=list)

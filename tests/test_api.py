@@ -279,6 +279,9 @@ def test_endpoints_report_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_
     assert client.post(f"/notebooks/{bad_id}/ask", json={"question": "x"}).status_code == 400
     assert client.post(f"/notebooks/{bad_id}/guide/summary").status_code == 400
     assert client.get(f"/notebooks/{bad_id}/sources/s1").status_code == 400
+    assert client.post(f"/notebooks/{bad_id}/notes", json={"text": "x"}).status_code == 400
+    assert client.delete(f"/notebooks/{bad_id}/notes/n1").status_code == 400
+    assert client.post(f"/notebooks/{bad_id}/notes/n1/promote").status_code == 400
 
 
 def test_get_notebook_404_when_missing(client):
@@ -354,6 +357,73 @@ def test_get_source_returns_full_text_every_block(client):
         "flags": [],
         "blocks": [{"locator": "whole", "text": "content of https://example.com/a"}],
     }
+
+
+# --- /notebooks/{id}/notes -----------------------------------------------------------------------
+
+
+def test_add_note_creates_and_persists_a_notebook(client):
+    """Mirrors `add_sources`: a brand-new notebook can start life by adding a note."""
+    resp = client.post("/notebooks/mynb/notes", json={"text": "a first note"})
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["notes"] == [{"id": "n1", "text": "a first note"}]
+
+    reloaded = client.get("/notebooks/mynb")
+    assert reloaded.json()["notes"] == [{"id": "n1", "text": "a first note"}]
+
+
+def test_add_note_rejects_blank_text(client):
+    resp = client.post("/notebooks/mynb/notes", json={"text": "   "})
+    assert resp.status_code == 422
+
+
+def test_delete_note_404_when_notebook_missing(client):
+    resp = client.delete("/notebooks/does-not-exist/notes/n1")
+    assert resp.status_code == 404
+
+
+def test_delete_note_404_when_note_id_unknown(client):
+    client.post("/notebooks/mynb/notes", json={"text": "a note"})
+    resp = client.delete("/notebooks/mynb/notes/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_delete_note_removes_it_and_persists(client):
+    client.post("/notebooks/mynb/notes", json={"text": "a note"})
+    resp = client.delete("/notebooks/mynb/notes/n1")
+    assert resp.status_code == 200
+    assert resp.json()["notes"] == []
+
+    reloaded = client.get("/notebooks/mynb")
+    assert reloaded.json()["notes"] == []
+
+
+def test_promote_note_404_when_notebook_missing(client):
+    resp = client.post("/notebooks/does-not-exist/notes/n1/promote")
+    assert resp.status_code == 404
+
+
+def test_promote_note_404_when_note_id_unknown(client):
+    client.post("/notebooks/mynb/notes", json={"text": "a note"})
+    resp = client.post("/notebooks/mynb/notes/does-not-exist/promote")
+    assert resp.status_code == 404
+
+
+def test_promote_note_turns_it_into_a_source_and_persists(client):
+    client.post("/notebooks/mynb/notes", json={"text": "promote this text"})
+
+    resp = client.post("/notebooks/mynb/notes/n1/promote")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["notes"] == []
+    assert len(body["sources"]) == 1
+    assert body["sources"][0]["kind"] == "text"
+
+    reloaded = client.get("/notebooks/mynb")
+    assert reloaded.json()["notes"] == []
+    assert len(reloaded.json()["sources"]) == 1
 
 
 # --- /notebooks/{id}/ask -------------------------------------------------------------------------
