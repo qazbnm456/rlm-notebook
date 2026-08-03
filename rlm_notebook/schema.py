@@ -19,7 +19,7 @@ class SourceBlock(BaseModel):
 
     A `text`/`web` source has exactly one block, `locator="whole"` — see CLAUDE.md's Scope note:
     finer-grained (paragraph/char-offset) citation within a text/web source is a deferred follow-up.
-    A `pdf` source has one block per page, `locator="page:<n>"` (1-indexed) — pymupdf4llm's natural
+    A `pdf` source has one block per page, `locator="page:<n>"` (1-indexed) — a PDF's own natural
     per-page granularity, which also gives OCR'd pages the same citable grain as text-layer ones.
     """
 

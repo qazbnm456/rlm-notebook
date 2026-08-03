@@ -4,6 +4,7 @@ import tempfile as tempfile_module
 from pathlib import Path
 
 import pytest
+from _pdf_fixtures import make_text_pdf, make_text_pdf_bytes
 
 from rlm_notebook.ingest import (
     ingest_new,
@@ -32,11 +33,8 @@ def test_ingest_one_text_file(tmp_path):
 
 
 def test_ingest_one_pdf(tmp_path):
-    fitz = pytest.importorskip("fitz")
     path = tmp_path / "doc.pdf"
-    doc = fitz.open()
-    doc.new_page().insert_text((72, 72), "hello pdf")
-    doc.save(str(path))
+    make_text_pdf(path, ["hello pdf"])
     source = ingest_one(str(path), "s1")
     assert source.kind == "pdf"
     assert source.blocks[0].locator == "page:1"
@@ -134,10 +132,7 @@ def test_ingest_uploaded_file_md_treated_as_plain_text():
 
 
 def test_ingest_uploaded_file_pdf():
-    fitz = pytest.importorskip("fitz")
-    doc = fitz.open()
-    doc.new_page().insert_text((72, 72), "hello uploaded pdf")
-    data = doc.tobytes()
+    data = make_text_pdf_bytes(["hello uploaded pdf"])
 
     source = ingest_uploaded_file(data, "report.pdf", "s1")
 
@@ -159,10 +154,7 @@ def test_ingest_uploaded_file_pdf_cleans_up_its_temp_file(tmp_path, monkeypatch)
         return fd, path
 
     monkeypatch.setattr(tempfile_module, "mkstemp", _tracking_mkstemp)
-    fitz = pytest.importorskip("fitz")
-    doc = fitz.open()
-    doc.new_page().insert_text((72, 72), "hello")
-    ingest_uploaded_file(doc.tobytes(), "report.pdf", "s1")
+    ingest_uploaded_file(make_text_pdf_bytes(["hello"]), "report.pdf", "s1")
 
     assert len(seen_paths) == 1
     assert not Path(seen_paths[0]).exists()
