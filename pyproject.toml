@@ -30,14 +30,26 @@ dependencies = [
     "pydantic>=2.9",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",
-    "pymupdf4llm>=0.0.17",
-    # Local OCR backends pymupdf4llm auto-detects and dispatches to for scanned/image PDF pages.
-    # CLAUDE.md invariant 7: this ships INSTALLED BY DEFAULT, not as an opt-in extra — a sibling
-    # open-source project (lfnovo/open-notebook, issue #819) shipped OCR as pluggable-but-not-
-    # installed-by-default and image sources silently failed to parse in its Docker image. RapidOCR
-    # (ONNX, <20MB models, CJK-strong) is primary; Tesseract is pymupdf4llm's other supported local
-    # backend. Both Apache-2.0, both CPU-only — the combined footprint is acceptable for a project
-    # whose whole point is ingesting arbitrary documents.
+    # PDF text extraction + page rasterization (for OCR dispatch — parsers/_ocr.py). Wraps Google's
+    # PDFium (BSD-3-Clause/Apache-2.0, verified down to every bundled native dependency) — NOT
+    # pymupdf/pymupdf4llm, which this project used to depend on and which is dual-licensed AGPL-3.0
+    # or a paid Artifex commercial license (`pymupdf-layout`, a pymupdf4llm transitive dependency,
+    # carried a SECOND, even stricter Artifex license — Polyform Noncommercial). An MIT-licensed
+    # project shipping an HTTP API meant to run as a network service (invariant 25) cannot carry an
+    # AGPL dependency undisclosed — see CLAUDE.md invariant 7 for the full account of why this was
+    # replaced, not merely disclosed.
+    "pypdfium2>=4",
+    # pypdfium2 declares NO runtime dependencies of its own — `.render(...).to_pil()` needs this
+    # explicitly, not by luck via some other package's transitive dependency (the exact class of gap
+    # already caught once for python-multipart, below).
+    "Pillow>=10",
+    # Local OCR backends `parsers/_ocr.py` dispatches scanned/image PDF pages to (RapidOCR primary,
+    # Tesseract fallback). CLAUDE.md invariant 7: this ships INSTALLED BY DEFAULT, not as an opt-in
+    # extra — a sibling open-source project (lfnovo/open-notebook, issue #819) shipped OCR as
+    # pluggable-but-not-installed-by-default and image sources silently failed to parse in its
+    # Docker image. RapidOCR (ONNX, <20MB models, CJK-strong) is primary; Tesseract is the fallback.
+    # Both Apache-2.0, both CPU-only — the combined footprint is acceptable for a project whose whole
+    # point is ingesting arbitrary documents.
     "rapidocr-onnxruntime>=1.3",
     "pytesseract>=0.3.10",
     # Default TTS backend for the Audio Overview (audio.py/tts.py) — free, no API key needed, so
@@ -69,6 +81,11 @@ api = [
 [dependency-groups]
 dev = [
     "pytest>=8.0",
+    # Test-only PDF fixture construction (tests/test_parsers_pdf.py, test_ingest.py, test_api.py) —
+    # BSD-licensed, never a runtime dependency of the shipped package. Replaces the fitz (pymupdf)
+    # fixture-building this project used to do, which relied on pymupdf being present as a
+    # (now-removed) AGPL runtime dependency — see CLAUDE.md invariant 7.
+    "reportlab>=4",
 ]
 
 [project.scripts]

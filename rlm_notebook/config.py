@@ -93,7 +93,7 @@ class NotebookConfig:
     max_corpus_chars: int = _DEFAULT_MAX_CORPUS_CHARS
 
     #: Which OCR backend `parsers/pdf.py` dispatches scanned/image pages to. "local" (default) uses
-    #: pymupdf4llm's built-in hybrid OCR (RapidOCR/Tesseract — core dependencies, always installed).
+    #: `parsers/_ocr.py`'s hybrid OCR (RapidOCR/Tesseract — core dependencies, always installed).
     #: "vision_llm" is a deferred follow-up (CLAUDE.md invariant 7) — accepted here so config
     #: validation is ready for it, but `parsers/pdf.py` does not yet implement that branch.
     ocr_provider: str = "local"

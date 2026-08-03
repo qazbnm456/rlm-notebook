@@ -691,3 +691,48 @@ questions with verifiable citations, and get a distilled research artifact out.
   deliberate coarser grain, matching text/web's own single-locator precedent); playlist/channel
   ingestion. This closes out the four-gap Gemini-Notebook feature-parity assessment that started
   with file upload.
+
+- **Thirteenth slice: replace `pymupdf`/`pymupdf4llm` — a real AGPL-vs-MIT license conflict, found
+  and fixed, not a preemptive style choice.** `pymupdf`/`pymupdf4llm` are dual-licensed "GNU AGPL
+  v3 OR Artifex Commercial License" (confirmed via `importlib.metadata` against the actually-
+  installed distributions and the vendor's own file header) — no free non-AGPL option exists. A
+  transitive `pymupdf4llm` dependency, `pymupdf-layout`, carried a SECOND, even stricter Artifex
+  license (Polyform Noncommercial — bars commercial use outright, no source-disclosure escape
+  valve at all). This project is `license = "MIT"` and ALSO ships an HTTP API meant to run as a
+  network service (invariant 25) — AGPL-3.0's network-use clause obligates anyone running a
+  covered program as a network service to offer the combined work's complete source, and nothing
+  in `LICENSE`/`README.md`/`pyproject.toml` ever disclosed this. Found while auditing the
+  project's overall dependency licensing after a direct user question; the user decided to
+  replace the dependency rather than relicense to AGPL, gate PDF support behind an extra, or
+  merely disclose the risk.
+
+  **`pypdfium2`** (BSD-3-Clause/Apache-2.0, wraps Google's PDFium — the engine Chromium itself
+  uses) replaces `pymupdf`/`pymupdf4llm` in `parsers/pdf.py`. Verified permissive down to every
+  bundled native dependency (`freetype`/`zlib`/`libpng`/`libtiff`/`libjpeg_turbo`/`libopenjpeg`/
+  `lcms`/`icu`/`abseil` — no AGPL/GPL anywhere in the tree, confirmed by listing the actual bundled
+  license files, not trusting the top-level metadata field alone). `Pillow` was ALSO added as an
+  explicit direct dependency — `pypdfium2` declares zero runtime dependencies of its own, and
+  `.render(...).to_pil()` only worked before by luck via `rapidocr-onnxruntime`'s own transitive
+  dependency, the exact same "worked by luck until resolution shifted" class already documented
+  for `python-multipart` (invariant 30) — caught proactively this time, before it broke anything.
+
+  **`parsers/_ocr.py`** (new): RapidOCR primary, Tesseract fallback, hand-implemented now that
+  `pymupdf4llm`'s built-in OCR dispatch goes away with it. Deliberately simpler than
+  `pymupdf4llm`'s former ML-based OCR-need classifier — a plain "extracted text below a small
+  character threshold" check, which does NOT catch a GARBLED-but-present text layer the way the
+  old ONNX classifier did. This project's own actual scanned-PDF case (a page with no text layer
+  at all) is unaffected; a bad-character-ratio heuristic for the garbled case is a smaller, later,
+  independently-mergeable follow-up if it ever turns out to matter — a disclosed tradeoff, not
+  silently assumed equivalent (CLAUDE.md invariant 7 has the full account).
+
+  **`tests/_pdf_fixtures.py`** (new): builds test PDFs with `reportlab` (BSD), a `dev`-only
+  dependency — never a runtime dependency of the shipped package. Replaces this project's former
+  `fitz` (`pymupdf`) based fixture-building across THREE test files
+  (`test_parsers_pdf.py`/`test_ingest.py`/`test_api.py`) — an independent pre-implementation audit
+  found the first draft of this slice's design named only one of the three, before any code was
+  written.
+
+  **Also disclosed, not fixed here**: `edge-tts` (the default TTS provider) is LGPLv3 — lower
+  risk (LGPL generally permits an unmodified dependency relationship from a permissively-licensed
+  program without forcing that program under LGPL itself), but named in `README.md`'s new
+  "Licensing" section rather than left undisclosed alongside everything else.

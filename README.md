@@ -168,3 +168,15 @@ CAPTIONS are supported — see above — but that's captions only, never a trans
 no ATLAS rubric/eval/RL-export member (unlike this project's sibling tools), no trace-file
 retention policy, and no desktop app packaging (Tauri is the intended eventual shell, not yet
 built). Those are follow-up work.
+
+## Licensing
+
+`rlm-notebook` itself is MIT (`LICENSE`). PDF ingestion (`parsers/pdf.py`) uses `pypdfium2`
+(BSD-3-Clause/Apache-2.0) — an earlier version of this project used `pymupdf`/`pymupdf4llm`
+instead, which are dual-licensed AGPL-3.0-or-a-paid-Artifex-commercial-license; that dependency
+was replaced, not merely disclosed, once the conflict with this project's own MIT license (and its
+HTTP API, meant to run as a network service) was found — see CLAUDE.md invariant 7.
+
+The default TTS provider, `edge-tts` (`tts.py`), is LGPLv3. LGPL generally permits an unmodified
+dependency relationship from a permissively-licensed program without forcing that program under
+LGPL itself; this is common, low-risk practice, named here rather than left undisclosed.

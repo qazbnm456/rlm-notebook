@@ -73,7 +73,7 @@ assume any of them exist because an earlier design discussion mentioned them.
    against a real redirect target before landing the fix. Do not swap back to plain
    `urllib.request.urlopen`.
 3. **Ingestion is host-side only, never inside the sandbox.** `parsers/{text,web,pdf}.py` run
-   before any `RLMTask` exists. `pymupdf4llm`, `trafilatura`, and the OCR backends (invariant 7) are
+   before any `RLMTask` exists. `pypdfium2`, `trafilatura`, and the OCR backends (invariant 7) are
    native/C-extension dependencies unsuited to the pyodide/deno sandbox rlm-kit builds by default —
    and untrusted parsing logic has no reason to run inside the same trust boundary as the model's
    own code anyway. `corpus.py` only ever hands the RLM a plain string, already parsed.
@@ -102,17 +102,55 @@ assume any of them exist because an earlier design discussion mentioned them.
    run. Its patterns trade recall for precision on purpose (e.g. a paper *discussing* prompt
    injection as a topic can trip it) — that is an acceptable false-positive rate for a flag nobody
    is forced to act on; don't over-tighten it into false negatives chasing a clean read.
-7. **OCR ships enabled by default, not merely pluggable-but-off.** `parsers/pdf.py` uses
-   `pymupdf4llm`'s built-in hybrid OCR (RapidOCR primary, Tesseract fallback — both Apache-2.0, both
-   CPU-only) for scanned/image PDF pages. The backends are core `dependencies` in `pyproject.toml`,
-   not an opt-in extra — a plain `uv sync` installs them, no flag required. (An earlier draft of
-   this project put them behind an `ocr` extra and CI's plain `uv sync` never installed them;
-   caught by an independent review that reproduced the exact CI sync and got a real test failure.
-   A sibling open-source project, `lfnovo/open-notebook` issue #819, shipped the same
+7. **OCR ships enabled by default, not merely pluggable-but-off.** `parsers/pdf.py` extracts each
+   page's text via `pypdfium2`; a page whose text layer extracts to (near-)nothing is rendered to
+   an image and dispatched to `parsers/_ocr.py`'s hybrid OCR (RapidOCR primary, Tesseract fallback
+   — both Apache-2.0, both CPU-only). The backends are core `dependencies` in `pyproject.toml`, not
+   an opt-in extra — a plain `uv sync` installs them, no flag required. (An earlier draft of this
+   project put them behind an `ocr` extra and CI's plain `uv sync` never installed them; caught by
+   an independent review that reproduced the exact CI sync and got a real test failure. A sibling
+   open-source project, `lfnovo/open-notebook` issue #819, shipped the same
    pluggable-but-not-installed-by-default mistake and image sources silently failed to parse in its
    Docker image — this is that pitfall, hit for real once, not a hypothetical.) A `vision_llm` OCR
    mode (reusing the already-configured multimodal `dspy.LM` for hard/handwritten pages) is a
    deferred follow-up, not yet implemented.
+
+   **`pypdfium2` replaced `pymupdf`/`pymupdf4llm` — a real AGPL-vs-MIT license conflict, found and
+   fixed, not a preemptive style choice.** `pymupdf`/`pymupdf4llm` are dual-licensed "GNU AGPL v3
+   OR Artifex Commercial License" (confirmed via `importlib.metadata` against the actually-
+   installed distributions, and straight from the vendor's own file header) — there is no free
+   non-AGPL way to use them. A transitive `pymupdf4llm` dependency, `pymupdf-layout`, carried a
+   SECOND, even stricter Artifex license (Polyform Noncommercial — no source-disclosure escape
+   valve at all, commercial use is simply barred without paying Artifex). This project is `license
+   = "MIT"` (`pyproject.toml`) and ALSO ships an HTTP API meant to run as a network service
+   (invariant 25) — AGPL-3.0's network-use clause obligates anyone running a covered program as a
+   network service to offer the combined work's complete source to its users, and nothing in
+   `LICENSE`/`README.md`/`pyproject.toml` ever disclosed this. Replaced with `pypdfium2` (BSD-3-
+   Clause/Apache-2.0, wraps Google's PDFium — verified permissive down to every bundled native
+   dependency: `freetype`/`zlib`/`libpng`/`libtiff`/`libjpeg_turbo`/`libopenjpeg`/`lcms`/`icu`/
+   `abseil`, no AGPL/GPL anywhere in the tree) plus `Pillow` (an explicit direct dependency —
+   `pypdfium2` declares NO runtime dependencies of its own, and `.render(...).to_pil()` only
+   worked before by luck via `rapidocr-onnxruntime`'s own transitive `Pillow` dependency, the
+   EXACT same "worked by luck until resolution shifted" failure class already documented for
+   `python-multipart`, invariant 30 — caught and fixed proactively this time, not after a second
+   incident). Full design record: `docs/design/pymupdf-license-replacement.md`.
+
+   **A deliberately simpler OCR-need heuristic than `pymupdf4llm`'s former one — a disclosed
+   tradeoff, not silently assumed equivalent.** `pymupdf4llm` ran an ONNX classifier over page
+   layout features (image/text/vector area ratios, bad-character ratio, previously-OCR'd span
+   detection) to decide per page whether OCR was warranted — catching a page with a GARBLED
+   existing text layer, not just a MISSING one. `parsers/pdf.py` now uses a plain
+   "extracted text below a small character threshold" check — it does NOT detect a garbled-but-
+   present text layer. This project's own actual scanned-PDF case (a page with NO text layer at
+   all) is unaffected; a bad-character-ratio heuristic for the garbled case is a smaller, later,
+   independently-mergeable follow-up if it ever turns out to matter, not attempted here.
+
+   **`tests/_pdf_fixtures.py` (new, shared by `test_parsers_pdf.py`/`test_ingest.py`/
+   `test_api.py`) builds test PDFs with `reportlab` (BSD), a `dev`-only dependency — never a
+   runtime dependency of the shipped package.** Replaces this project's former `fitz` (`pymupdf`)
+   based fixture-building, which relied on `pymupdf` being present as a (now-removed) AGPL runtime
+   dependency; an independent audit found TWO of the three affected test files on the first pass
+   named only one.
 8. **`corpus.py` enforces a size cap on the assembled blob and fails loudly, not silently, past
    it.** The single-blob-as-REPL-variable design (rlm-kit's core mechanic) has a real memory
    ceiling in the pyodide/deno sandbox; a notebook that exceeds the cap must get a clear error at

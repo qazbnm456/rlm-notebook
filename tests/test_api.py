@@ -20,6 +20,7 @@ import pytest
 
 fastapi = pytest.importorskip("fastapi")
 
+from _pdf_fixtures import make_text_pdf_bytes
 from fastapi.testclient import TestClient
 
 from rlm_notebook import api, cli
@@ -763,10 +764,7 @@ def test_upload_source_creates_and_persists_a_notebook(client):
 
 
 def test_upload_source_pdf():
-    fitz = pytest.importorskip("fitz")
-    doc = fitz.open()
-    doc.new_page().insert_text((72, 72), "hello uploaded pdf")
-    data = doc.tobytes()
+    data = make_text_pdf_bytes(["hello uploaded pdf"])
     client = TestClient(api.app)
 
     resp = client.post(
