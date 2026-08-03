@@ -538,3 +538,42 @@ questions with verifiable citations, and get a distilled research artifact out.
   dependencies — this only wires up the two parsers that already existed), multi-file batch upload,
   YouTube/audio source ingestion, and a source-text viewer (still open gaps from the same
   feature-parity assessment, not attempted here).
+
+- **Tenth slice: a source-text viewer — NotebookLM's most basic closed loop (click a citation, see
+  the highlighted original passage).** The second of the three remaining gaps from the same
+  Gemini-Notebook feature-parity assessment; the first (file upload) shipped the previous slice.
+
+  **`GET /notebooks/{id}/sources/{source_id}`** (new) returns a source's full text, every block —
+  `{id, kind, origin, flags, blocks: [{locator, text}]}`. Reuses `corpus.Corpus.get(source_id)`,
+  the same lookup `citations.py` already performs on every `ask`/`guide` request, confirmed cheap
+  before reuse rather than assumed. A materially different exposure than most other endpoints here
+  (invariant 31) — before this, no caller could read more of a source than a citation's short
+  `quote`.
+
+  **The web UI's citation-list row is now clickable, opening a source-viewer modal** — the first
+  stacking-context component in `rlm_notebook/web/` (`.modal-overlay`/`.modal`, closing via `✕`/
+  backdrop/`Esc`, the same family convention the sibling projects' own `studio/`s already use for
+  their trace-replay drawers). The matching block is highlighted (reusing the existing `.citation`
+  highlighter-stroke styling) and scrolled into view. The pre-existing reasoning-trace view
+  (`showCitationTurn`, Phase 3) is demoted to a secondary `⌁ trace` icon inside the same row rather
+  than removed — the two click targets coexist, the icon calling `event.stopPropagation()` so
+  clicking it never also opens the source viewer.
+
+  **Two staleness-guard bugs, one new and one pre-existing, both fixed in this slice.** The
+  pre-implementation audit required a guard against a slower first fetch overwriting a faster
+  second one's render for the brand-new source-viewer fetch (fixed with a module-level
+  `AbortController`), then found the SAME class of defect already present, unfixed, in the
+  pre-existing `showCitationTurn` from Phase 3 — retrofit with an equivalent monotonic-token guard
+  there (`detailArea._requestToken`), chosen over `AbortController` for that one site since it's a
+  plain GET with no browser-level cleanup worth invoking.
+
+  **A pre-existing concurrency bug found, and explicitly NOT fixed here**: `notebook.py`'s
+  single-writer assumption doesn't hold once `api.py` serves concurrent requests — two concurrent
+  `POST /notebooks/{id}/sources` calls on the same notebook can silently discard one via
+  `save_notebook`'s non-merging atomic replace (invariant 31's closing paragraph). Read-only, so
+  not a blocker for this slice; a per-notebook lock (or a merging write) is a separate follow-up.
+
+  **Deliberately NOT in this slice**: source editing, next/prev-citation navigation, caching across
+  viewer opens (each open re-fetches), and pagination for very large sources. YouTube/audio source
+  ingestion and a Notes research loop remain the last two open gaps from the same feature-parity
+  assessment.

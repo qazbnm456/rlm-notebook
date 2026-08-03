@@ -105,6 +105,11 @@ curl -X GET  "localhost:8000/notebooks/mynb/runs/mynb-my-token/citation-turn?sou
 curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application/json" \
     -d '{"texts": ["some text pasted straight in, no URL or path needed"]}'
 curl -X POST localhost:8000/notebooks/mynb/sources/upload -F "file=@./paper.pdf"
+
+# A source's full text, every block — the web UI's source-text viewer, not just a citation's
+# short `quote`. A materially different exposure than most other endpoints here (CLAUDE.md
+# invariant 31).
+curl -X GET localhost:8000/notebooks/mynb/sources/s1
 ```
 
 Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable subprocess — unlike
@@ -116,8 +121,10 @@ in it. The trace stream and citation-turn lookup are a materially different expo
 other endpoint here (they can surface full ingested source text, not just metadata/prose). File
 upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) never accepts a
 local-path string — only bytes the caller already had — so it doesn't reopen the local-path
-restriction `sources` already enforces. See `api.py`'s module docstring and CLAUDE.md
-invariants 20-30.
+restriction `sources` already enforces. `GET .../sources/{source_id}` returns a source's full
+text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
+materially different exposure, alongside the trace stream/citation-turn lookup. See `api.py`'s
+module docstring and CLAUDE.md invariants 20-31.
 
 ## Web UI
 
@@ -125,10 +132,12 @@ Once the server above is running, open `http://localhost:8000/` in a browser: a 
 product surface (source management — URL, pasted text, or file upload — citation-grounded chat, a
 Studio panel with Guide tabs and a podcast player, and a live "what is the model doing right now"
 reasoning ticker), not a developer trace console. Zero build step — it's served directly out of
-`rlm_notebook/web/` by the same FastAPI app. Every citation in an answer, a Guide tab, or a podcast
-transcript is clickable — it shows the trace turn where the model read that source span, a
-transparency mechanism, never a stronger faithfulness claim than `citations.py` itself
-already makes. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariant 29.
+`rlm_notebook/web/` by the same FastAPI app. Clicking a citation opens a source-viewer modal with
+the full original passage highlighted and scrolled into view — NotebookLM's most basic closed loop
+— with a secondary `⌁ trace` icon on the same row still showing the trace turn where the model
+read that source span, a transparency mechanism, never a stronger faithfulness claim than
+`citations.py` itself already makes. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants
+29-31.
 
 ## What this is not (yet)
 

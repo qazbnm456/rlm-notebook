@@ -423,4 +423,40 @@ assume any of them exist because an earlier design discussion mentioned them.
     plain text/markdown); multi-file batch upload (matches the Sources panel's single-file
     `<input>`, no `multiple` attribute).
 
+31. **`GET /notebooks/{id}/sources/{source_id}` returns a source's FULL text, every block — a
+    materially different exposure than every other endpoint here except the trace stream/
+    citation-turn lookup (invariant 29's Phase 3 paragraph already names that pair; this is the
+    third).** Before this endpoint, no caller could read more of a source than the short `quote`
+    strings a citation happens to include. It reuses `corpus.Corpus.get(source_id)` — the SAME
+    lookup `citations.py` already performs on every `ask`/`guide` request — rather than a second
+    hand-rolled scan; `Corpus.get` was confirmed cheap (a linear scan already proven fine at
+    citation-verification time) before reuse, not assumed. CLAUDE.md invariant 25's no-auth
+    posture already covers this in spirit (the model itself already has the whole corpus), but the
+    endpoint SURFACE returning full source text is new and worth its own line rather than folding
+    silently into "same as everything else."
+
+    **The web UI's citation-list row is now the primary click target for the source-text viewer —
+    NotebookLM's most basic closed loop (click a citation, see the highlighted original passage) —
+    with the pre-existing reasoning-trace view demoted to a secondary per-row `⌁ trace` icon.**
+    `app.js`'s `.citation-row` is clickable regardless of whether the citation's `quote` matched
+    inline in the answer text (an inline-match miss still leaves the citation in the list below,
+    per the row's own pre-existing comment — before this slice that case had NO way to open
+    anything at all). The trace icon inside each row calls `event.stopPropagation()` so the two
+    click targets never double-fire. A brand-new `AbortController`-based staleness guard
+    (`sourceViewerAbort`, module-level, aborted and replaced on every open) protects the new
+    `showSourceViewer` fetch; the audit that designed this endpoint found the SAME class of defect
+    already present, unfixed, in the pre-existing `showCitationTurn` (Phase 3) and it was retrofit
+    with an equivalent guard (a monotonic token on `detailArea` itself, chosen over
+    `AbortController` there since it's a plain GET with no browser-level cleanup to invoke) in the
+    same slice — don't reintroduce either gap in a future citation-detail fetch path.
+
+    **Known, pre-existing, explicitly NOT fixed here**: `notebook.py`'s module docstring assumes
+    "exactly one writer at a time," true when only `cli.py` existed but false now that `api.py`
+    serves concurrent HTTP requests with zero per-notebook locking — two concurrent
+    `POST /notebooks/{id}/sources` calls on the SAME notebook can silently discard one via
+    `save_notebook`'s non-merging atomic-file-replace. `Corpus.add()`'s duplicate-id dedup guard is
+    dead code: nothing in the real ingestion path calls it. Found by this slice's own
+    pre-implementation audit; a per-notebook lock (or a merging write) is a separate, tracked
+    follow-up, not a blocker for a read-only endpoint.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

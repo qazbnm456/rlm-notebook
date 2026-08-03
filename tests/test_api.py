@@ -278,6 +278,7 @@ def test_endpoints_report_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_
     assert client.post(f"/notebooks/{bad_id}/sources", json={"sources": []}).status_code == 400
     assert client.post(f"/notebooks/{bad_id}/ask", json={"question": "x"}).status_code == 400
     assert client.post(f"/notebooks/{bad_id}/guide/summary").status_code == 400
+    assert client.get(f"/notebooks/{bad_id}/sources/s1").status_code == 400
 
 
 def test_get_notebook_404_when_missing(client):
@@ -320,6 +321,39 @@ def test_get_notebook_includes_full_turn_history_with_freshly_verified_citations
     assert turns[0]["question"] == "what?"
     assert turns[0]["answer"] == "the answer"
     assert turns[0]["citations"][0]["verified"] is True
+
+
+# --- GET /notebooks/{id}/sources/{source_id} -----------------------------------------------------
+
+
+def test_get_source_404_when_notebook_missing(client):
+    resp = client.get("/notebooks/does-not-exist/sources/s1")
+    assert resp.status_code == 404
+
+
+def test_get_source_404_when_source_id_unknown(client):
+    _add_a_source(client)
+    resp = client.get("/notebooks/mynb/sources/does-not-exist")
+    assert resp.status_code == 404
+
+
+def test_get_source_returns_full_text_every_block(client):
+    """The web UI's source viewer (blueprint's "Post-launch addendum 2") needs the WHOLE source,
+    not just a citation's short `quote` — this is the endpoint that closes NotebookLM's most basic
+    loop: click a citation, see the highlighted original passage."""
+    _add_a_source(client)
+
+    resp = client.get("/notebooks/mynb/sources/s1")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {
+        "id": "s1",
+        "kind": "web",
+        "origin": "https://example.com/a",
+        "flags": [],
+        "blocks": [{"locator": "whole", "text": "content of https://example.com/a"}],
+    }
 
 
 # --- /notebooks/{id}/ask -------------------------------------------------------------------------

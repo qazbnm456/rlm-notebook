@@ -6,8 +6,9 @@ execution-model invariant. `cli.py`'s synchronous in-process invocation is compl
 
 Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend — URLs and/or
 pasted text), `POST /notebooks/{id}/sources/upload` (a `.pdf`/`.txt`/`.md` file's raw bytes),
-`GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
-`POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
+`GET /notebooks/{id}`, `GET /notebooks/{id}/sources/{source_id}` (one source's full text, every
+block — the web UI's source viewer), `POST /notebooks/{id}/ask`,
+`POST /notebooks/{id}/guide/{kind}`, `POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
 `GET /notebooks/{id}/runs/{run_id}/stream` (live reasoning-trace SSE), and
 `GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup). `/audio` is two
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
@@ -408,6 +409,45 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
 async def get_notebook(notebook_id: str) -> NotebookResponse:
     notebook = _load_notebook_or_404(notebook_id)
     return _notebook_response(notebook)
+
+
+class SourceBlockResponse(BaseModel):
+    locator: str
+    text: str
+
+
+class SourceDetailResponse(BaseModel):
+    id: str
+    kind: str
+    origin: str
+    flags: list[str]
+    blocks: list[SourceBlockResponse]
+
+
+@app.get("/notebooks/{notebook_id}/sources/{source_id}", response_model=SourceDetailResponse)
+async def get_source(notebook_id: str, source_id: str) -> SourceDetailResponse:
+    """One source's full text, every block — the web UI's source viewer (blueprint's "Post-launch
+    addendum 2") needs this to close NotebookLM's most basic loop: click a citation, see the
+    highlighted original passage. Before this endpoint, no caller could read more of a source than
+    the short `quote` strings a citation happens to include.
+
+    **Materially different exposure than every other endpoint here except the trace stream/
+    citation-turn lookup, said explicitly rather than folded silently into "same as everything
+    else"** (CLAUDE.md invariant 25's no-auth posture already covers this in spirit — the model
+    itself already has the whole corpus — but the ENDPOINT SURFACE returning full source text is
+    new). Reuses `corpus.Corpus.get`, the same lookup `citations.py` already performs on every
+    `ask`/`guide` request, rather than a second hand-rolled scan."""
+    notebook = _load_notebook_or_404(notebook_id)
+    source = corpus_of(notebook).get(source_id)
+    if source is None:
+        raise HTTPException(404, f"no source {source_id!r} in notebook {notebook_id!r}")
+    return SourceDetailResponse(
+        id=source.id,
+        kind=source.kind,
+        origin=source.origin,
+        flags=source.flags,
+        blocks=[SourceBlockResponse(locator=b.locator, text=b.text) for b in source.blocks],
+    )
 
 
 class RunOptions(BaseModel):
