@@ -107,15 +107,19 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Literata is reserved for content meant to be READ at length — artifact headlines (Phase 2's
-   Guide/podcast titles) and full source text — never UI chrome. Not used anywhere in Phase 1's
-   surface yet; declared here so Phase 2 doesn't invent a second font-stack convention. */
+/* Literata is reserved for content meant to be READ at length — the full source-text viewer,
+   still unbuilt as of Phase 3. Guide/podcast content deliberately did NOT switch to it in Phase 2
+   (reused renderAnswerWithCitations's existing Public Sans treatment instead, for consistency with
+   Chat — see rlm_notebook/web/DESIGN.md's typography section) — this class stays unused until a
+   dedicated long-form reading surface exists. */
 .reading-face {
   font-family: "Literata", ui-serif, Georgia, serif;
 }
 
-/* JetBrains Mono is reserved for the (currently unbuilt, §5.5 deferred) reasoning-trace panel —
-   the one deliberate callback to the sibling studios' technical identity. Not used in Phase 1. */
+/* JetBrains Mono — the one deliberate callback to the sibling studios' technical identity, used by
+   Phase 3's reasoning-trace ticker (.ticker-toggle/.ticker-detail) and the citation-turn detail
+   payload (.citation-detail-payload), which all extend this class rather than each repeating the
+   font stack. */
 .trace-face {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -437,7 +441,6 @@ input:focus {
 }
 
 .citation-detail-payload {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.72rem;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -566,7 +569,6 @@ input:focus {
 /* --- Reasoning-trace ticker (Phase 3) --- */
 
 .ticker-toggle {
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.72rem;
   background: none;
   border: 1px solid var(--border);
@@ -589,7 +591,6 @@ input:focus {
   display: flex;
   flex-direction: column;
   gap: 0.2rem;
-  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
   font-size: 0.72rem;
   color: var(--text-faint);
 }

@@ -476,6 +476,12 @@ questions with verifiable citations, and get a distilled research artifact out.
   their citation links only need to work within the current browser session, which the client's
   own in-memory run id already satisfies with no server round-trip or schema change.
 
+  **Post-merge follow-up**: a code-vs-docs consistency check (dispatched separately from this
+  slice's own implementation/completion checks) found `stream_run` was missing the same
+  `run_id`-belongs-to-`notebook_id` check `citation_turn` already had, so a mismatched
+  `notebook_id` in the URL could still stream a trace belonging to a different notebook. Fixed in
+  a small follow-up commit; both endpoints now apply the check consistently.
+
   **Frontend**: every `ask`/Guide-tab/podcast-generate call opens a live ticker alongside the
   actual request, replacing static "Thinking…"/"Generating…" copy with live-updating copy in the
   SAME pending slot — deliberately not a new UI element, and deliberately a SECONDARY layer: losing

@@ -134,11 +134,11 @@ function renderTickerAffordance(runId) {
 
   const toggle = document.createElement("button");
   toggle.type = "button";
-  toggle.className = "ticker-toggle";
+  toggle.className = "ticker-toggle trace-face";
   toggle.textContent = `⌁ ${events.length} step${events.length === 1 ? "" : "s"}`;
 
   const detail = document.createElement("div");
-  detail.className = "ticker-detail";
+  detail.className = "ticker-detail trace-face";
   detail.hidden = true;
   events.forEach((event) => {
     const row = document.createElement("div");
@@ -174,7 +174,7 @@ async function showCitationTurn(runId, citation, detailArea) {
     note.textContent = "Where the model read this source (not proof the surrounding prose is faithful):";
     detailArea.appendChild(note);
     const pre = document.createElement("pre");
-    pre.className = "citation-detail-payload";
+    pre.className = "citation-detail-payload trace-face";
     pre.textContent = JSON.stringify(data.payload, null, 2);
     detailArea.appendChild(pre);
   } catch (err) {

@@ -359,7 +359,10 @@ them.
       change this needed — Guide/Audio results still aren't persisted onto a notebook at all
       (unchanged scope), so their citation links only need to work within the current browser
       session, which the client's own already-in-memory run id already satisfies with no server
-      round-trip.
+      round-trip. `citation_turn` checks `run_id` actually belongs to `notebook_id`
+      (`run_id.startswith(f"{notebook_id}-")`) — a follow-up completion check found `stream_run`
+      lacked the same check, fixed in a small post-merge commit so both endpoints apply it
+      consistently.
 
     **Known, stated limitations, not solved by this phase**: no trace-file retention policy exists
     anywhere in this project (a citation's "view reasoning" link is only as durable as a file

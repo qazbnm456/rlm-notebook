@@ -4,13 +4,13 @@
 ones) — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions
 grounded in them, with a citation you can check back against the original text yourself.
 
-**Status: five slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
+**Status: six slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
 citation-grounded chat, a persistent multi-turn notebook, a Notebook Guide (summary/FAQ/
 timeline/key-insight generation), and an Audio Overview (two-host podcast script + synthesized
-speech) are all driveable from the command line — and now also from an HTTP API (`ask`/`guide`,
-each run isolated in its own cancellable subprocess). Not yet built: a browser UI, an `/audio` API
-endpoint, and SSE/progress streaming. See `CLAUDE.md` for the hard invariants this project is
-built against.
+speech) are all driveable from the command line — and also from an HTTP API (`ask`/`guide`/`audio`,
+each run isolated in its own cancellable subprocess) and a full browser web UI (source management,
+chat, a Studio panel, and a live reasoning ticker — see "Web UI" below). See `CLAUDE.md` for the
+hard invariants this project is built against.
 
 ## Install and run
 
@@ -83,9 +83,12 @@ uv run uvicorn rlm_notebook.api:app
 
 ```bash
 # --source accepts URLs only here (not local paths — see CLAUDE.md invariant 26); use the CLI
-# above for a local file.
-curl -X POST localhost:8000/notebooks/mynb/sources -d '{"sources": ["https://example.com/article"]}'
-curl -X POST localhost:8000/notebooks/mynb/ask -d '{"question": "what does it say about X?"}'
+# above for a local file. -H is required — a POST body with no Content-Type: application/json
+# gets rejected with a 422, not silently accepted.
+curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application/json" \
+    -d '{"sources": ["https://example.com/article"]}'
+curl -X POST localhost:8000/notebooks/mynb/ask -H "Content-Type: application/json" \
+    -d '{"question": "what does it say about X?"}'
 curl -X POST localhost:8000/notebooks/mynb/guide/summary
 curl -X POST localhost:8000/notebooks/mynb/audio         # podcast script + base64-encoded MP3
 curl -X POST localhost:8000/notebooks/mynb/cancel        # cancel that notebook's in-flight run
@@ -93,6 +96,8 @@ curl -X POST localhost:8000/notebooks/mynb/cancel        # cancel that notebook'
 # Optional on ask/guide/audio: {"run_id": "my-token"} picks your OWN run id (sanitized, then
 # prefixed with the notebook id) so you can open the trace stream below before/alongside firing
 # the request that will populate it — omit it and the server picks one, same as before.
+curl -X POST localhost:8000/notebooks/mynb/audio -H "Content-Type: application/json" \
+    -d '{"run_id": "my-token"}'
 curl -X GET  "localhost:8000/notebooks/mynb/runs/mynb-my-token/stream"           # live/replay SSE
 curl -X GET  "localhost:8000/notebooks/mynb/runs/mynb-my-token/citation-turn?source_id=s1&locator=whole"
 ```
@@ -121,6 +126,7 @@ already makes. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariant 29.
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no provider-swappable LLM configuration
-beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
-no Guide/Audio panel in the web UI yet, no `/audio` API endpoint, and no progress streaming or a
-live view into a run's reasoning. Those are follow-up work.
+beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview, no
+video/audio source ingestion, no ATLAS rubric/eval/RL-export member (unlike this project's sibling
+tools), no trace-file retention policy, and no desktop app packaging (Tauri is the intended eventual
+shell, not yet built). Those are follow-up work.
