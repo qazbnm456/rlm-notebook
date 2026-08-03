@@ -44,6 +44,10 @@ dependencies = [
     # `rlm-notebook audio` works out of the box. Same "ship a working default, not just a pluggable
     # interface" reasoning as the OCR backends above.
     "edge-tts>=7.2.8",
+    # YouTube caption ingestion (parsers/youtube.py) — captions only, never video/audio download.
+    # Pure Python, no ffmpeg requirement for this path (verified during design). Core, not an
+    # opt-in extra, same "ship a working default" reasoning as OCR/TTS above.
+    "yt-dlp>=2024.1",
 ]
 
 [project.optional-dependencies]
@@ -54,6 +58,12 @@ dependencies = [
 api = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
+    # Starlette's multipart form parsing (POST /notebooks/{id}/sources/upload, invariant 30) needs
+    # this at runtime but neither fastapi nor starlette declare it as a hard dependency — it was a
+    # transitive dependency of something else in this graph, silently, until adding yt-dlp shifted
+    # dependency resolution enough that it stopped being pulled in and the upload tests broke with
+    # no code change of their own. Pinned explicitly now rather than relying on it arriving by luck.
+    "python-multipart>=0.0.9",
 ]
 
 [dependency-groups]

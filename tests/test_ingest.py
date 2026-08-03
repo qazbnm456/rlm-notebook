@@ -42,6 +42,28 @@ def test_ingest_one_pdf(tmp_path):
     assert source.blocks[0].locator == "page:1"
 
 
+def test_ingest_one_dispatches_a_youtube_url_to_parse_youtube_not_parse_web(monkeypatch):
+    """A YouTube URL also satisfies `is_url()` — `is_youtube_url` must be checked FIRST in
+    `ingest_one`, or every YouTube link would silently mis-ingest as a generic web page via
+    `parse_web` (trafilatura against YouTube's own HTML shell, which has no transcript text)."""
+    calls = []
+
+    def fake_parse_youtube(url, source_id, **kwargs):
+        calls.append(url)
+        return Source(id=source_id, kind="youtube", origin=url, blocks=[SourceBlock(locator="ts:0:00", text="hi")])
+
+    def fake_parse_web(url, source_id, **kwargs):
+        raise AssertionError("a YouTube URL must never reach parse_web")
+
+    monkeypatch.setattr("rlm_notebook.ingest.parse_youtube", fake_parse_youtube)
+    monkeypatch.setattr("rlm_notebook.ingest.parse_web", fake_parse_web)
+
+    source = ingest_one("https://www.youtube.com/watch?v=dQw4w9WgXcQ", "s1")
+
+    assert calls == ["https://www.youtube.com/watch?v=dQw4w9WgXcQ"]
+    assert source.kind == "youtube"
+
+
 def test_ingest_new_skips_existing_origins(tmp_path):
     a = tmp_path / "a.txt"
     a.write_text("hello a", encoding="utf-8")

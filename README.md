@@ -1,8 +1,9 @@
 # rlm-notebook
 
 `rlm-notebook` reads sources of any kind — plain text, web pages, PDFs (including scanned/OCR'd
-ones) — and uses an RLM ([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions
-grounded in them, with a citation you can check back against the original text yourself.
+ones), and YouTube video captions — and uses an RLM
+([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions grounded in them, with a
+citation you can check back against the original text yourself.
 
 **Status: six slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
 citation-grounded chat, a persistent multi-turn notebook, a Notebook Guide (summary/FAQ/
@@ -27,6 +28,7 @@ brew install deno             # the sandbox a live run executes in
 uv run rlm-notebook ask "what does the source say about X?" \
     --source ./paper.pdf \
     --source https://example.com/article \
+    --source https://www.youtube.com/watch?v=... \
     --source ./notes.txt
 ```
 
@@ -47,6 +49,14 @@ against the current sources regardless of what an earlier turn cited.
 Sources with a flagged prompt-injection pattern (see `injection_scan.py`) still answer normally;
 the flag is surfaced alongside the answer rather than blocking it, for as long as that source
 stays part of the notebook.
+
+A YouTube URL ingests that video's captions — official if available, else auto-generated — never
+the video or audio stream itself (no `ffmpeg`, no transcription model, no API key needed). A video
+with no captions at all is a clear ingestion error, not a silent empty source. **Note**: YouTube's
+Terms of Service prohibit automated access outside its own interfaces; fetching only captions is
+narrower/lower-risk than downloading media, but this project doesn't pretend the risk is zero —
+you accept it by using this feature, the same posture any `yt-dlp`-based tool's users already
+carry (CLAUDE.md invariant 33).
 
 ```bash
 # generate a whole-notebook artifact instead of asking a question
@@ -132,7 +142,7 @@ restriction `sources` already enforces. `GET .../sources/{source_id}` returns a 
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
 materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
 citations of its own until it's promoted into a real source — see CLAUDE.md invariant 32. See
-`api.py`'s module docstring and CLAUDE.md invariants 20-32.
+`api.py`'s module docstring and CLAUDE.md invariants 20-33.
 
 ## Web UI
 
@@ -147,12 +157,14 @@ showing the trace turn where the model read that source span, a transparency mec
 stronger faithfulness claim than `citations.py` itself already makes. Every Chat answer can be
 saved as a note, and every note can later be promoted into a real, citable source — NotebookLM's
 own research loop of reading, noting, and deepening a notebook over successive turns. See
-`rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-32.
+`rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-33.
 
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no provider-swappable LLM configuration
-beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview, no
-video/audio source ingestion, no ATLAS rubric/eval/RL-export member (unlike this project's sibling
-tools), no trace-file retention policy, and no desktop app packaging (Tauri is the intended eventual
-shell, not yet built). Those are follow-up work.
+beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
+no directly-uploaded audio/video file ingestion or full audio transcription (YouTube's own
+CAPTIONS are supported — see above — but that's captions only, never a transcribed audio track),
+no ATLAS rubric/eval/RL-export member (unlike this project's sibling tools), no trace-file
+retention policy, and no desktop app packaging (Tauri is the intended eventual shell, not yet
+built). Those are follow-up work.
