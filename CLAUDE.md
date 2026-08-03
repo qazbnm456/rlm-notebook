@@ -474,12 +474,19 @@ assume any of them exist because an earlier design discussion mentioned them.
     `NotebookResponse` so a client distinguishes outcomes by diffing `sources`/`notes`, never by an
     ambiguous status code.
 
-    **A note id can be REUSED after a delete/promote shrinks `notebook.notes`** (`add_note`'s own
-    docstring) — unlike a source id (`sources` only ever grows, so `s{n}` is collision-free for a
-    notebook's whole lifetime), `n{len(notes)+1}` is not. Accepted, not fixed: nothing in this
-    project holds a note id across such a gap (unlike `run_id`, embedded in a trace file path) —
-    every note id a UI action uses is read fresh from the SAME `NotebookResponse` it was rendered
-    from, in one request/response round trip.
+    **A note id is assigned from the MAX id among currently-live notes, never from `len(notes) +
+    1`** (`notebook._next_note_id`) — a real bug, not a style preference. An independent completion
+    check found and reproduced live that `len(notes) + 1` lets TWO LIVE notes share one id the
+    moment a non-last note is deleted (e.g. notes `n1`/`n2`, delete `n1`, add a third — the old
+    scheme computed `n2` again, colliding with the note still alive under that exact id); since
+    `delete_note`/`promote_note` both act BY id, the collision made either one silently affect
+    BOTH same-id notes at once — a promoted note's colliding sibling was discarded with no source
+    ever created for it and no error raised. `_next_note_id` fixes this at the root (derived from
+    the max id actually in use, so a new id can never collide with one still alive); `delete_note`/
+    `promote_note` ALSO now remove exactly the first matching note by index rather than filtering
+    every id-equal match, as defense in depth on top of the id fix, not instead of it. An id CAN
+    still be reused once NO live note holds it (e.g. every note gets deleted, then a new one is
+    added) — that case is genuinely safe and unchanged.
 
     **`DELETE /notebooks/{id}/notes/{note_id}` is the first `DELETE` route in this API** — every
     other mutator here is a `POST`. Uses `_load_notebook_or_404` (an existing note can only be

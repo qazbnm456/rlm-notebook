@@ -22,7 +22,7 @@ from rlm_notebook.notebook import (
     save_notebook,
     slug,
 )
-from rlm_notebook.schema import Answer, ChatTurn, Notebook, Source, SourceBlock
+from rlm_notebook.schema import Answer, ChatTurn, Note, Notebook, Source, SourceBlock
 
 
 def _source(id_: str, origin: str = "x") -> Source:
@@ -340,12 +340,46 @@ def test_promote_note_raises_on_unknown_id():
         promote_note(notebook, "does-not-exist")
 
 
-def test_add_note_can_reuse_an_id_after_a_delete_shrinks_the_list():
-    """Documented, accepted behavior (see `add_note`'s docstring) — unlike a source id, a note id
-    is NOT collision-free for the notebook's whole lifetime, since `notes` can shrink."""
+def test_add_note_can_reuse_an_id_once_no_live_note_holds_it():
+    """Safe id reuse: deleting the note that WAS `"n2"` frees that id for reuse, since no other
+    live note holds it afterward."""
     notebook = Notebook(id="mynb")
     add_note(notebook, "first")
     add_note(notebook, "second")  # id "n2"
     delete_note(notebook, "n2")
     reused = add_note(notebook, "third")
     assert reused.id == "n2"
+
+
+def test_add_note_never_collides_with_a_still_live_note_after_deleting_an_earlier_one():
+    """The real bug an independent review found in the original `len(notes) + 1` id scheme: adding
+    notes n1/n2, deleting the EARLIER one (n1, not the most recent), then adding a third used to
+    reuse "n2" — colliding with the note that was still alive under that exact id. Confirms the fix
+    (`_next_note_id` deriving from the max id actually in use, not the count) never lets that
+    happen, regardless of which note gets deleted."""
+    notebook = Notebook(id="mynb")
+    add_note(notebook, "first")  # n1
+    add_note(notebook, "second")  # n2
+    delete_note(notebook, "n1")  # n2 is still alive
+    third = add_note(notebook, "third")
+    assert third.id != "n2"  # must not collide with the still-live note
+    assert [n.id for n in notebook.notes] == ["n2", third.id]
+    assert len({n.id for n in notebook.notes}) == 2  # no duplicate ids
+
+
+def test_delete_note_removes_only_the_first_matching_note_by_index():
+    """Defense in depth, verified directly: even if two notes somehow shared an id (bypassing
+    `add_note`'s own now-collision-free scheme), `delete_note` removes exactly one, not both."""
+    notebook = Notebook(id="mynb")
+    notebook.notes = [Note(id="n2", text="first"), Note(id="n2", text="second")]
+    delete_note(notebook, "n2")
+    assert [n.text for n in notebook.notes] == ["second"]
+
+
+def test_promote_note_promotes_only_the_first_matching_note_by_index():
+    """Same defense-in-depth guarantee as `delete_note`, for `promote_note`."""
+    notebook = Notebook(id="mynb")
+    notebook.notes = [Note(id="n2", text="first"), Note(id="n2", text="second")]
+    source = promote_note(notebook, "n2")
+    assert source.blocks[0].text == "first"
+    assert [n.text for n in notebook.notes] == ["second"]

@@ -611,10 +611,16 @@ questions with verifiable citations, and get a distilled research artifact out.
   would have leaked the button onto generated artifacts a user never curates into notes. Fixed
   before any code was written: the button lives in `renderTurn` (Chat's own call site) instead.
 
-  **A second, smaller correction from the same audit**: a note id can be REUSED after a
-  delete/promote shrinks `notes` (`n{len+1}` isn't collision-free for a notebook's whole lifetime
-  the way `s{n}` is, since sources only ever grow) — accepted and documented (invariant 32) rather
-  than engineered away, since nothing in this project holds a note id across such a gap.
+  **A real bug found by the independent post-implementation completion check, fixed before
+  merge**: the original `n{len(notes)+1}` id scheme let two LIVE notes share one id the moment a
+  non-last note was deleted (delete `n1` out of `[n1, n2]`, add a third — the old scheme reused
+  `n2`, colliding with the note still alive under that id) — reproduced live, and confirmed to
+  cause a real silent data loss: promoting one of a colliding pair discarded the other with no
+  source ever created and no error raised. Fixed at the root with `_next_note_id` (derives the
+  next id from the MAX id actually in use, not the count, so a new id can never collide with one
+  still alive); `delete_note`/`promote_note` also now remove exactly the first matching note by
+  index rather than filtering every id-equal match, as defense in depth on top of the id fix, not
+  instead of it (invariant 32). An id can still be safely reused once NO live note holds it.
 
   **Deliberately NOT in this slice**: note editing (delete-and-recreate is the only revision path),
   rich-text/markdown notes, note-to-note linking or tagging, and retroactively re-citing past `ask`
