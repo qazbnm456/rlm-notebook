@@ -499,3 +499,42 @@ questions with verifiable citations, and get a distilled research artifact out.
   stream and citation-turn endpoints inherit invariant 25's no-auth posture as a materially
   different, sharper exposure than every other endpoint (they can surface full ingested source
   text, not just metadata/prose) — stated explicitly in CLAUDE.md, not left implicit.
+
+- **Ninth slice: file upload + paste-text ingestion, wiring up the Sources panel's previously-inert
+  "File" and "Paste text" tabs.** Prompted by a Gemini-Notebook feature-parity assessment that
+  named this the single highest-priority gap: a browser user dragging a PDF into the Sources panel
+  used to hit an `alert()` and nothing happened — NotebookLM's single most common operation.
+
+  **`POST /notebooks/{id}/sources/upload`** (new) and `add_sources`'s new `texts` field are a
+  genuinely different, safe mechanism alongside invariant 26's local-path ban, never a way around
+  it — the server only ever receives opaque bytes/text the caller already had, never a path it
+  reads from its own filesystem. `ingest.ingest_uploaded_file` dispatches on the claimed filename's
+  suffix (`.pdf`/`.txt`/`.md` only, anything else a clear 422) and reuses the two parsers that
+  already existed unchanged; `ingest.ingest_pasted_text` gives pasted text a readable-snippet-plus-
+  content-hash origin (a bare hash was found, during design, to be a real UX regression — the
+  Sources list renders `origin` verbatim as its only label).
+
+  **A real, verified-before-landing security fix**: the upload size cap (`RN_MAX_UPLOAD_BYTES`,
+  default 50MB) doesn't work the way the first draft assumed. Declaring the endpoint the natural
+  FastAPI way (`file: UploadFile = File(...)`) makes FastAPI itself parse the entire multipart body
+  BEFORE the handler (or any in-handler check) ever runs, for ANY route shaped that way, regardless
+  of `Content-Length` — confirmed live against the installed version (a 5MB body was already fully
+  spooled to disk the instant a test handler started, with an accurate `Content-Length` header,
+  not just in a chunked-encoding edge case). Starlette's own `max_part_size` never applies to file
+  parts either. Fixed by taking `request: Request` directly instead — `Content-Length` is checked
+  BEFORE ever calling `request.form()`, so an oversized declared size is rejected with the body
+  never read off the socket at all; a missing `Content-Length` (chunked encoding) is refused
+  outright (411), not accepted with a disclosed gap. Verified live (a standalone test app, a 5MB
+  POST against a 1000-byte cap) before this was believed rather than just reasoned about.
+
+  **Deliberately NOT gated behind `NotebookConfig.from_env()`**: `config.max_upload_bytes()` is a
+  standalone function — gating it on a full model config (which raises `SystemExit` whenever
+  `RN_MAIN_MODEL` is unset) would make uploading a source fail with "server misconfigured" for a
+  reason that has nothing to do with what the caller is trying to do. Caught while designing this,
+  not left for an audit to find — `add_sources` already established this same discipline for the
+  URL-based path.
+
+  **Deliberately NOT in this slice**: Word/Slides/Docs native-format parsing (would need new parser
+  dependencies — this only wires up the two parsers that already existed), multi-file batch upload,
+  YouTube/audio source ingestion, and a source-text viewer (still open gaps from the same
+  feature-parity assessment, not attempted here).

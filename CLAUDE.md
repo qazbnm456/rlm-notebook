@@ -40,12 +40,17 @@ invariant 29), all 3 phases of its blueprint now shipped: a real end-user produc
 (Sources/Chat/Studio with Guide tabs, a podcast player, and a live "what is the model doing right
 now" ticker fused with citations), NOT a replay-only trace console like the sibling projects'
 `studio/`s. The API is the FIRST place a run is subprocess-isolated (`runner.py`/`worker.py`) rather
-than in-process; `cli.py`'s synchronous in-process invocation is unaffected and unchanged. Guide/
-Audio artifacts still aren't cached onto a notebook or made citable as sources for later `ask`
-turns, there's still no trace-file retention policy anywhere in this project, and there's still no
-multi-worker `uvicorn` deployment story for `_ACTIVE_RUNS`/`_RUN_PROCESSES`. Each of these is its
-own follow-up slice; do not assume any of them exist because an earlier design discussion mentioned
-them.
+than in-process; `cli.py`'s synchronous in-process invocation is unaffected and unchanged. A
+post-launch addendum (invariant 30) then wired the Sources panel's previously-inert "Paste text"
+and "File" tabs to the API — `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md` bytes) and
+`add_sources`'s new `texts` field — the first Gemini-Notebook feature-parity gap closed after a
+deliberate assessment named it the highest-priority one. Guide/Audio artifacts still aren't cached
+onto a notebook or made citable as sources for later `ask` turns, there's still no trace-file
+retention policy anywhere in this project, there's still no multi-worker `uvicorn` deployment story
+for `_ACTIVE_RUNS`/`_RUN_PROCESSES`, and Word/Slides/Docs native-format parsing, YouTube/audio
+source ingestion, and a source-text viewer (click a citation and jump to the highlighted original,
+not just the reasoning trace) remain unbuilt. Each of these is its own follow-up slice; do not
+assume any of them exist because an earlier design discussion mentioned them.
 
 ## Invariants — do not break
 
@@ -376,5 +381,46 @@ them.
     API — unlike metadata-only or model-authored-prose responses, a trace can contain full ingested
     source text the model echoed while reading it; both inherit invariant 25's no-auth posture as a
     sharper version of the same accepted risk, not a new category of it.
+
+30. **`POST /notebooks/{id}/sources/upload` and `add_sources`'s `texts` field never reopen
+    invariant 26's local-path ban — they add a genuinely different, safe mechanism alongside it,
+    never a way around it.** Invariant 26 forbids a local-path STRING because the server would read
+    an arbitrary file off its own machine; file upload is the opposite shape — the server only ever
+    receives opaque bytes the caller already had, plus a claimed filename used solely for
+    extension-based kind detection (`.pdf`/`.txt`/`.md` only, `ingest.ingest_uploaded_file`) and
+    display. Pasted text has no path at all — `ingest.ingest_pasted_text` gives it a
+    content-derived origin (a readable snippet plus a hash, not a bare hash — a bare hash was found
+    during design to be a real UX regression, since the Sources list renders `origin` verbatim as
+    its only label).
+
+    **The upload size cap does not work the way a first draft assumed, and the fix was verified
+    live before landing.** Declaring the endpoint the natural FastAPI way
+    (`file: UploadFile = File(...)`) would make FastAPI itself parse the ENTIRE multipart body,
+    inside its own request-handling code, BEFORE the handler (or any in-handler `Content-Length`
+    check) ever runs — confirmed against the installed version: a 5MB body was already fully read
+    and spooled to disk the instant the handler started, with an ACCURATE `Content-Length` header,
+    not just in a chunked-encoding edge case. Starlette's own `max_part_size` never applies to file
+    parts either, only plain form fields — so there is no framework-level backstop at all regardless
+    of any app-level cap declared the obvious way. Fixed by taking `request: Request` directly
+    (no `File(...)` parameter), so FastAPI never eagerly parses anything — `upload_source` checks
+    `Content-Length` FIRST and only calls `request.form()` once that check already clears
+    `config.max_upload_bytes()` (`RN_MAX_UPLOAD_BYTES`, default 50MB). A missing `Content-Length`
+    (chunked transfer encoding) is refused outright (411), not accepted with a disclosed gap — there
+    is no safe way to bound an unknown-length body before reading it. Verified live (a standalone
+    test app, a 5MB POST against a 1000-byte cap) that the fixed shape genuinely never calls
+    `request.form()` when the declared size already exceeds the cap, before this was believed rather
+    than just reasoned about.
+
+    **Deliberately NOT gated behind `NotebookConfig.from_env()`.** `config.max_upload_bytes()` is a
+    standalone function, not a `NotebookConfig` field — `from_env()` raises `SystemExit` (a 500 via
+    `_config()`) whenever `RN_MAIN_MODEL` is unset, correct for `ask`/`guide`/`audio` (they actually
+    run a model) but would be a real bug here: uploading a source has nothing to do with whether a
+    model is configured, and `add_sources` (the existing URL-based path) already reflects this by
+    never calling `_config()` either. Caught while designing this, not left for a later audit.
+
+    **Scope, deliberately not attempted here**: Word/Slides/Docs native-format parsing (would need
+    new parser dependencies — this only wires up the two parsers that already existed, PDF and
+    plain text/markdown); multi-file batch upload (matches the Sources panel's single-file
+    `<input>`, no `multiple` attribute).
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

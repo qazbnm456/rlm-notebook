@@ -42,10 +42,8 @@
           <textarea id="source-text" rows="4" placeholder="Paste text to ingest…"></textarea>
         </div>
         <div class="tab-body" data-kind-body="file" hidden>
-          <input type="file" id="source-file" />
-          <p class="hint">File upload isn't wired to the API yet — see the source-kind
-            extensibility note in the blueprint. This tab exists so the layout doesn't need
-            reworking once it is.</p>
+          <input type="file" id="source-file" accept=".pdf,.txt,.md" />
+          <p class="hint">PDF, TXT, or Markdown — one file per upload.</p>
         </div>
 
         <button type="submit" class="btn btn-primary btn-block">Add source</button>

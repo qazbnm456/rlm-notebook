@@ -100,6 +100,11 @@ curl -X POST localhost:8000/notebooks/mynb/audio -H "Content-Type: application/j
     -d '{"run_id": "my-token"}'
 curl -X GET  "localhost:8000/notebooks/mynb/runs/mynb-my-token/stream"           # live/replay SSE
 curl -X GET  "localhost:8000/notebooks/mynb/runs/mynb-my-token/citation-turn?source_id=s1&locator=whole"
+
+# Paste text (add_sources' texts field) and file upload (a separate multipart endpoint):
+curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application/json" \
+    -d '{"texts": ["some text pasted straight in, no URL or path needed"]}'
+curl -X POST localhost:8000/notebooks/mynb/sources/upload -F "file=@./paper.pdf"
 ```
 
 Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable subprocess — unlike
@@ -108,19 +113,21 @@ cancelled outright. `/audio` is two host-side steps: script generation runs the 
 subprocess way (and is the only half that's cancellable), then TTS synthesis runs in-process
 afterward — no audio is ever persisted to disk, the response is JSON with the audio base64-encoded
 in it. The trace stream and citation-turn lookup are a materially different exposure than every
-other endpoint here (they can surface full ingested source text, not just metadata/prose) — see
-`api.py`'s module docstring and CLAUDE.md invariants 20-29.
+other endpoint here (they can surface full ingested source text, not just metadata/prose). File
+upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) never accepts a
+local-path string — only bytes the caller already had — so it doesn't reopen the local-path
+restriction `sources` already enforces. See `api.py`'s module docstring and CLAUDE.md
+invariants 20-30.
 
 ## Web UI
 
 Once the server above is running, open `http://localhost:8000/` in a browser: a real end-user
-product surface (source management, citation-grounded chat, a Studio panel with Guide tabs and a
-podcast player, and a live "what is the model doing right now" reasoning ticker), not a developer
-trace console. Zero build step — it's served directly out of `rlm_notebook/web/` by the same
-FastAPI app. Paste-text and file-upload source ingestion are visible but say plainly they're not
-connected to the API yet, rather than silently failing. Every citation in an answer, a Guide tab,
-or a podcast transcript is clickable — it shows the trace turn where the model read that source
-span, a transparency mechanism, never a stronger faithfulness claim than `citations.py` itself
+product surface (source management — URL, pasted text, or file upload — citation-grounded chat, a
+Studio panel with Guide tabs and a podcast player, and a live "what is the model doing right now"
+reasoning ticker), not a developer trace console. Zero build step — it's served directly out of
+`rlm_notebook/web/` by the same FastAPI app. Every citation in an answer, a Guide tab, or a podcast
+transcript is clickable — it shows the trace turn where the model read that source span, a
+transparency mechanism, never a stronger faithfulness claim than `citations.py` itself
 already makes. See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariant 29.
 
 ## What this is not (yet)
