@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+from typing import ClassVar
 
 import pytest
 
@@ -187,6 +188,50 @@ def test_add_sources_extends_without_duplicating(client):
     assert resp.status_code == 200
     origins = [s["origin"] for s in resp.json()["sources"]]
     assert origins == ["https://example.com/a", "https://example.com/b"]
+
+
+def test_add_sources_accepts_pasted_text(client):
+    resp = client.post("/notebooks/mynb/sources", json={"texts": ["some pasted text"]})
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert len(body["sources"]) == 1
+    assert body["sources"][0]["kind"] == "text"
+    assert body["sources"][0]["origin"].startswith("pasted:some pasted text #")
+
+
+def test_add_sources_dedupes_identical_pasted_text_within_one_call(client):
+    resp = client.post(
+        "/notebooks/mynb/sources", json={"texts": ["same text", "same text", "same text"]}
+    )
+    assert resp.status_code == 200
+    assert len(resp.json()["sources"]) == 1
+
+
+def test_add_sources_dedupes_identical_pasted_text_across_calls(client):
+    client.post("/notebooks/mynb/sources", json={"texts": ["same text"]})
+    resp = client.post("/notebooks/mynb/sources", json={"texts": ["same text", "different text"]})
+
+    assert resp.status_code == 200
+    assert len(resp.json()["sources"]) == 2
+
+
+def test_add_sources_rejects_blank_pasted_text(client):
+    resp = client.post("/notebooks/mynb/sources", json={"texts": ["real text", "   "]})
+
+    assert resp.status_code == 422
+    assert load_notebook("mynb") is None  # rejected before anything was persisted
+
+
+def test_add_sources_combines_urls_and_pasted_text_in_one_call(client):
+    resp = client.post(
+        "/notebooks/mynb/sources",
+        json={"sources": ["https://example.com/a"], "texts": ["pasted content"]},
+    )
+
+    assert resp.status_code == 200
+    kinds = {s["kind"] for s in resp.json()["sources"]}
+    assert kinds == {"web", "text"}
 
 
 def test_add_sources_rejects_local_file_paths(client, tmp_path):
@@ -543,6 +588,116 @@ def test_audio_translates_a_synthesis_failure_into_502_and_cleans_up_the_temp_fi
     # (audit round 2's fix: the finally must cover the failure path, not just the success path).
     tmp_path = provider.calls[0][2]
     assert not tmp_path.exists()
+
+
+# --- /notebooks/{id}/sources/upload ----------------------------------------------------------------
+
+
+class _FakeRequestDeclaredOversized:
+    """A minimal request double with a declared Content-Length already over the cap, and a
+    `.form()` that fails the test if it's ever called — the exact thing the audit found the
+    original design DIDN'T actually prevent (FastAPI's own `File(...)` binding parses the whole
+    body before the handler runs, regardless of any in-handler check). Taking `request: Request`
+    directly is what lets this test prove the body is never touched at all."""
+
+    headers: ClassVar = {"content-length": "999999999"}
+
+    async def form(self):
+        raise AssertionError("form() must not be called once Content-Length already exceeds the cap")
+
+
+def test_upload_source_rejects_before_ever_reading_the_body_when_content_length_exceeds_cap():
+    with pytest.raises(api.HTTPException) as exc_info:
+        asyncio.run(api.upload_source("mynb", _FakeRequestDeclaredOversized()))
+    assert exc_info.value.status_code == 413
+
+
+class _FakeRequestNoContentLength:
+    headers: ClassVar = {}
+
+    async def form(self):
+        raise AssertionError("form() must not be called when Content-Length is missing")
+
+
+def test_upload_source_rejects_a_missing_content_length_with_411():
+    with pytest.raises(api.HTTPException) as exc_info:
+        asyncio.run(api.upload_source("mynb", _FakeRequestNoContentLength()))
+    assert exc_info.value.status_code == 411
+
+
+def test_upload_source_creates_and_persists_a_notebook(client):
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("notes.txt", b"hello from an uploaded file", "text/plain")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["id"] == "mynb"
+    assert body["sources"][0]["kind"] == "text"
+    assert body["sources"][0]["origin"] == "notes.txt"
+    assert load_notebook("mynb") is not None
+
+
+def test_upload_source_pdf():
+    fitz = pytest.importorskip("fitz")
+    doc = fitz.open()
+    doc.new_page().insert_text((72, 72), "hello uploaded pdf")
+    data = doc.tobytes()
+    client = TestClient(api.app)
+
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("report.pdf", data, "application/pdf")},
+    )
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["sources"][0]["kind"] == "pdf"
+    assert body["sources"][0]["origin"] == "report.pdf"
+
+
+def test_upload_source_dedupes_by_filename(client):
+    client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("notes.txt", b"first version", "text/plain")},
+    )
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("notes.txt", b"a different version, same filename", "text/plain")},
+    )
+
+    assert resp.status_code == 200
+    assert len(resp.json()["sources"]) == 1  # second upload was a no-op — same origin
+
+
+def test_upload_source_rejects_an_unsupported_file_type(client):
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("image.png", b"not really an image", "image/png")},
+    )
+
+    assert resp.status_code == 422
+    assert load_notebook("mynb") is None  # rejected before anything was persisted
+
+
+def test_upload_source_rejects_a_body_that_exceeds_the_declared_cap(client, monkeypatch):
+    monkeypatch.setenv("RN_MAX_UPLOAD_BYTES", "10")
+
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("notes.txt", b"this is much longer than ten bytes", "text/plain")},
+    )
+
+    assert resp.status_code == 413
+
+
+def test_upload_source_reports_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_slug(client):
+    resp = client.post(
+        "/notebooks/!!!/sources/upload",
+        files={"file": ("notes.txt", b"hello", "text/plain")},
+    )
+    assert resp.status_code == 400
 
 
 # --- /notebooks/{id}/cancel -----------------------------------------------------------------------

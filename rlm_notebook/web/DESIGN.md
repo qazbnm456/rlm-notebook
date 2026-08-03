@@ -101,13 +101,18 @@ yet opens as an empty, unpersisted one, matching `notebook.load_or_create`'s own
 real the first time a source is added. Right: the Paper/Study theme toggle (`☀`/`☾`).
 
 ### 5.2 Sources (left rail, ~280px)
-A kind-agnostic "Add source" form: URL / paste-text / file tabs (blueprint §7 — built extensible now
-so a future video/audio ingestion slice doesn't need a UI rework). Only the URL tab is wired to the
-API in Phase 1 (`POST /notebooks/{id}/sources` accepts http(s) URLs only, CLAUDE.md invariant 26);
-paste-text and file both surface an honest "not wired yet" message rather than silently failing or
-pretending to work. Below: the source list, one `.source-item` per source — kind, origin (word-broken,
-never truncated into an unreadable middle), and any `flags` from `injection_scan.py` shown as an amber
-warning line, never hidden and never blocking (CLAUDE.md invariant 6).
+A kind-agnostic "Add source" form: URL / paste-text / file tabs (blueprint §7 — built extensible so
+a future video/audio ingestion slice doesn't need a UI rework). All three are wired to the API: URL
+posts to `POST /notebooks/{id}/sources` (`{sources: [...]}`, http(s) only — CLAUDE.md invariant 26
+stays exactly as strict), paste-text posts to the SAME endpoint with `{texts: [...]}` (a
+post-launch addendum — see `docs/design/web-ui-blueprint.md`'s "Post-launch addendum"), and file
+upload POSTs `multipart/form-data` to `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md`,
+one file per request) — never a local-path string, which is what keeps it from reopening invariant
+26's local-path ban. Below: the source list, one `.source-item` per source — kind, origin
+(word-broken, never truncated into an unreadable middle; a pasted text's origin is a readable
+snippet plus a content hash, an uploaded file's origin is its filename), and any `flags` from
+`injection_scan.py` shown as an amber warning line, never hidden and never blocking (CLAUDE.md
+invariant 6).
 
 ### 5.3 Chat (center, fills remaining width)
 Turn history, oldest first, scrolled to bottom on append. A question renders as a right-aligned
@@ -239,3 +244,7 @@ request's own result — the ticker is strictly secondary.
 11. Reloading the page and reopening a notebook whose history predates Phase 3 (no `run_id` on
     those turns) shows those old turns with plain, non-clickable citations and no `⌁` pill — a
     graceful degradation, not a broken affordance.
+12. Switching to the "Paste text" tab and submitting real text adds a source whose origin is a
+    readable snippet, not a bare hash; switching to "File" and selecting a real `.pdf`/`.txt`/`.md`
+    file uploads and ingests it, with the Sources list showing the original filename as the origin.
+    Selecting an unsupported file type shows a clear inline error, not a silent failure.

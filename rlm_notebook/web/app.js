@@ -281,32 +281,48 @@ function initSourcesPanel() {
       return;
     }
     const activeKind = document.querySelector("#source-kind-tabs .tab.is-active").dataset.kind;
-    let value = "";
-    if (activeKind === "url") {
-      value = document.getElementById("source-url").value.trim();
-    } else if (activeKind === "text") {
-      // The API only accepts http(s) URLs (CLAUDE.md invariant 26) — paste-text ingestion needs
-      // its own backend affordance this phase doesn't add. The tab exists (blueprint §7) so the
-      // layout doesn't need reworking once one does.
-      alert("Paste-text ingestion isn't wired to the API yet.");
-      return;
-    } else {
-      alert("File upload isn't wired to the API yet.");
-      return;
-    }
-    if (!value) return;
+    const nb = encodeURIComponent(state.notebookId);
 
     const submitBtn = form.querySelector("button[type=submit]");
     submitBtn.disabled = true;
     try {
-      const notebook = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/sources`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sources: [value] }),
-      });
+      let notebook;
+      if (activeKind === "url") {
+        const value = document.getElementById("source-url").value.trim();
+        if (!value) return;
+        notebook = await api(`/notebooks/${nb}/sources`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sources: [value] }),
+        });
+        document.getElementById("source-url").value = "";
+      } else if (activeKind === "text") {
+        const value = document.getElementById("source-text").value.trim();
+        if (!value) return;
+        notebook = await api(`/notebooks/${nb}/sources`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ texts: [value] }),
+        });
+        document.getElementById("source-text").value = "";
+      } else {
+        const fileInput = document.getElementById("source-file");
+        const file = fileInput.files[0];
+        if (!file) return;
+        const formData = new FormData();
+        formData.append("file", file);
+        // Deliberately no `headers` here — the browser must set its own multipart boundary,
+        // which a manually-set Content-Type would break. `api()` never sets one itself (it's a
+        // thin `fetch` wrapper; each JSON call site sets its own headers explicitly), so this
+        // reuses it exactly as-is rather than needing a second, bespoke fetch call.
+        notebook = await api(`/notebooks/${nb}/sources/upload`, {
+          method: "POST",
+          body: formData,
+        });
+        fileInput.value = "";
+      }
       state.sources = notebook.sources;
       store.emit("sources:changed", { sources: state.sources });
-      document.getElementById("source-url").value = "";
     } catch (err) {
       alert(`Could not add source: ${err.message}`);
     } finally {

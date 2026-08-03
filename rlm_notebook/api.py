@@ -4,7 +4,8 @@ rather than in-process, so concurrent requests can't block each other and a long
 request can be reliably cancelled (`killpg` on the whole process group) — see CLAUDE.md's
 execution-model invariant. `cli.py`'s synchronous in-process invocation is completely unaffected.
 
-Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend),
+Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend — URLs and/or
+pasted text), `POST /notebooks/{id}/sources/upload` (a `.pdf`/`.txt`/`.md` file's raw bytes),
 `GET /notebooks/{id}`, `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
 `POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
 `GET /notebooks/{id}/runs/{run_id}/stream` (live reasoning-trace SSE), and
@@ -14,6 +15,8 @@ already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
 (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). No audio is ever
 persisted to disk past one request — no file-serving endpoint, no retention policy needed.
+`/sources/upload` never accepts a local-path STRING (invariant 26 stays exactly as strict) — only
+opaque bytes the caller already had, plus a claimed filename used for kind detection and display.
 
 `ask`/`guide`/`audio` all accept an optional client-supplied `run_id` (a `RunOptions` body field) —
 the CLIENT picks the run id, not the server, so it can open the trace stream before/alongside firing
@@ -50,7 +53,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
@@ -58,12 +61,13 @@ from pydantic import BaseModel, ValidationError
 from . import runner
 from .audio import GeneratePodcastScript
 from .citations import verify_citations
-from .config import NotebookConfig
+from .config import NotebookConfig, max_upload_bytes
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
-from .ingest import is_url
+from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
 from .notebook import (
     corpus_of,
+    existing_origins,
     extend_with_sources,
     history_text,
     list_notebook_summaries,
@@ -240,6 +244,9 @@ async def list_notebooks() -> NotebookListResponse:
 
 class SourcesRequest(BaseModel):
     sources: list[str] = []
+    #: Pasted text, ingested via `ingest.ingest_pasted_text` — a content-derived origin, never a
+    #: path or URL, so this never touches invariant 26's local-path restriction at all.
+    texts: list[str] = []
 
 
 class ChatTurnResponse(BaseModel):
@@ -302,6 +309,11 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
             f"the API only accepts http(s) URLs as sources, not local file paths — rejected: "
             f"{non_urls!r}. Use the CLI (`rlm-notebook ask --source <path>`) to add a local file.",
         )
+    blank_texts = [i for i, t in enumerate(body.texts) if not t.strip()]
+    if blank_texts:
+        raise HTTPException(
+            422, f"each entry in 'texts' must be non-empty pasted text (blank at index {blank_texts})"
+        )
     try:
         notebook = load_or_create(notebook_id)
     except ValidationError as exc:
@@ -316,6 +328,78 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
         extend_with_sources(notebook, body.sources)
     except (FetchError, ValueError, OSError) as exc:
         raise HTTPException(422, f"could not ingest a source: {type(exc).__name__}: {exc}") from exc
+
+    # Pasted text: same same-call-duplicate-guard discipline `ingest_new` already established for
+    # URLs/paths (a `seen` set that grows as this loop runs, not just a static starting snapshot).
+    seen = existing_origins(notebook)
+    for text in body.texts:
+        source = ingest_pasted_text(text.strip(), source_id=f"s{len(notebook.sources) + 1}")
+        if source.origin in seen:
+            continue
+        seen.add(source.origin)
+        notebook.sources.append(with_injection_flags(source))
+
+    save_notebook(notebook)
+    return _notebook_response(notebook)
+
+
+@app.post("/notebooks/{notebook_id}/sources/upload", response_model=NotebookResponse)
+async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
+    """Upload a file's raw bytes (`.pdf`/`.txt`/`.md`) as a new source — safe unlike a local-path
+    string (invariant 26): the server only ever receives opaque bytes the caller already had, never
+    a path it reads from its own filesystem.
+
+    **Size-cap enforcement, empirically verified before landing this** (a prior draft's plan didn't
+    actually enforce anything — see `docs/design/web-ui-blueprint.md`'s "Post-launch addendum" for
+    the full audit finding). Deliberately does NOT declare `file: UploadFile = File(...)` as a
+    parameter — FastAPI parses the ENTIRE multipart body itself, inside its own request-handling
+    code, BEFORE any handler with a `File`/`Form` parameter ever runs, for ANY route shaped that
+    way, regardless of `Content-Length` — confirmed live against the installed version. Taking
+    `request: Request` instead means THIS code decides when (or whether) to parse the body at all:
+    `Content-Length` is checked FIRST, and `request.form()` is only ever called once that check
+    already cleared the cap. A missing `Content-Length` (chunked transfer encoding) is refused
+    outright (411) rather than accepted with a disclosed gap — there's no safe way to bound an
+    unknown-length body before reading it, so this project doesn't try to."""
+    cap = max_upload_bytes()
+    content_length = request.headers.get("content-length")
+    if content_length is None:
+        raise HTTPException(411, "Content-Length header is required for file uploads")
+    try:
+        declared_size = int(content_length)
+    except ValueError:
+        raise HTTPException(400, f"invalid Content-Length header {content_length!r}")
+    if declared_size > cap:
+        raise HTTPException(413, f"upload declares {declared_size} bytes, exceeding the {cap}-byte limit")
+
+    form = await request.form()
+    upload = form.get("file")
+    if upload is None or not hasattr(upload, "filename"):
+        raise HTTPException(422, "expected a multipart 'file' field")
+    data = await upload.read()
+    if len(data) > cap:
+        raise HTTPException(413, f"upload is {len(data)} bytes, exceeding the {cap}-byte limit")
+    filename = upload.filename or "upload"
+
+    try:
+        notebook = load_or_create(notebook_id)
+    except ValidationError as exc:
+        raise HTTPException(
+            409,
+            f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
+            f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
+        ) from exc
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
+
+    if filename in existing_origins(notebook):
+        return _notebook_response(notebook)  # no-op — same dedupe semantics as a re-added path/URL
+
+    try:
+        source = ingest_uploaded_file(data, filename, source_id=f"s{len(notebook.sources) + 1}")
+    except ValueError as exc:
+        raise HTTPException(422, f"could not ingest {filename!r}: {exc}") from exc
+
+    notebook.sources.append(with_injection_flags(source))
     save_notebook(notebook)
     return _notebook_response(notebook)
 

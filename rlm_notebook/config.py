@@ -30,6 +30,9 @@ _KNOWN_OCR_PROVIDERS = ("local", "vision_llm")
 _DEFAULT_TTS_VOICE_HOST_A = "en-US-GuyNeural"
 _DEFAULT_TTS_VOICE_HOST_B = "en-US-JennyNeural"
 
+#: Cap on one uploaded file's byte size (`api.py`'s `POST /notebooks/{id}/sources/upload`).
+_DEFAULT_MAX_UPLOAD_BYTES = 50_000_000
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -144,6 +147,17 @@ class NotebookConfig:
             tts_voice_host_b=(os.getenv("RN_TTS_VOICE_HOST_B") or _DEFAULT_TTS_VOICE_HOST_B).strip(),
             run_timeout_seconds=_env_float("RN_RUN_TIMEOUT_SECONDS", 300.0),
         )
+
+
+def max_upload_bytes() -> int:
+    """`RN_MAX_UPLOAD_BYTES`, read INDEPENDENTLY of `NotebookConfig.from_env()` — deliberately not
+    a field on `NotebookConfig` at all. `from_env()` raises `SystemExit` (a 500 via `api._config()`)
+    whenever `RN_MAIN_MODEL` is unset; that's correct for `ask`/`guide`/`audio`, which actually run
+    a model, but would be a real bug for a file-upload endpoint, which has nothing to do with
+    whether a model is configured — `add_sources` (the existing URL-based ingestion path) already
+    reflects this by never calling `_config()` either. Caught while designing the upload endpoint,
+    not left for an audit to find."""
+    return _env_int("RN_MAX_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES)
 
 
 def setup(config: NotebookConfig) -> NotebookConfig:
