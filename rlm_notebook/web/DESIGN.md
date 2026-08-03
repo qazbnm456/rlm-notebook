@@ -104,16 +104,20 @@ real the first time a source is added. Right: the Paper/Study theme toggle (`☀
 A kind-agnostic "Add source" form: URL / paste-text / file tabs (blueprint §7 — built extensible so
 a future video/audio ingestion slice doesn't need a UI rework). All three are wired to the API: URL
 posts to `POST /notebooks/{id}/sources` (`{sources: [...]}`, http(s) only — CLAUDE.md invariant 26
-stays exactly as strict), paste-text posts to the SAME endpoint with `{texts: [...]}` (a
-post-launch addendum — see `docs/design/web-ui-blueprint.md`'s "Post-launch addendum"), and file
-upload POSTs `multipart/form-data` to `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md`,
-one file per request) — never a local-path string, which is what keeps it from reopening invariant
-26's local-path ban. Below: the source list, one `.source-item` per source — kind, origin
+stays exactly as strict; a YouTube link is ingested transparently by the SAME field, dispatched
+server-side by `ingest.ingest_one` — no separate UI affordance needed, just a `<p class="hint">`
+under the URL input naming that YouTube links work and are captions-only, per invariant 33),
+paste-text posts to the SAME endpoint with `{texts: [...]}` (a post-launch addendum — see
+`docs/design/web-ui-blueprint.md`'s "Post-launch addendum"), and file upload POSTs
+`multipart/form-data` to `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md`, one file per
+request) — never a local-path string, which is what keeps it from reopening invariant 26's
+local-path ban. Below: the source list, one `.source-item` per source — kind, origin
 (word-broken, never truncated into an unreadable middle; a pasted text's origin is a readable
-snippet plus a content hash, an uploaded file's origin is its filename), and any `flags` from
-`injection_scan.py` shown as an amber warning line, never hidden and never blocking (CLAUDE.md
-invariant 6). Clicking a `.source-item` opens the source-viewer modal (§5.7) for that source, no
-highlight target.
+snippet plus a content hash, an uploaded file's origin is its filename, a YouTube source's origin
+is the video URL itself), and any `flags` from `injection_scan.py` shown as an amber warning line,
+never hidden and never blocking (CLAUDE.md invariant 6). Clicking a `.source-item` opens the
+source-viewer modal (§5.7) for that source, no highlight target — a YouTube source's blocks render
+there with their `"ts:<mm:ss>"` locators, the same as any other source's blocks.
 
 ### 5.3 Chat (center, fills remaining width)
 Turn history, oldest first, scrolled to bottom on append. A question renders as a right-aligned

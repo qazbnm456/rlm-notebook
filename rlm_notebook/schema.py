@@ -11,7 +11,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-SourceKind = Literal["text", "web", "pdf"]
+SourceKind = Literal["text", "web", "pdf", "youtube"]
 
 
 class SourceBlock(BaseModel):

@@ -502,4 +502,67 @@ assume any of them exist because an earlier design discussion mentioned them.
     independent pre-implementation audit before any code was written, not found live afterward:
     don't move this button call into the shared function even as a "simplification."
 
+33. **YouTube source ingestion (`parsers/youtube.py`) fetches CAPTIONS ONLY — never the video or
+    audio stream.** A deliberate, user-confirmed MVP scope decision (two real technical forks —
+    captions-only vs. full audio-download-plus-transcription, and if the latter, local Whisper vs.
+    a cloud API — were put to the user directly rather than assumed); no `ffmpeg`, no Whisper, no
+    transcription API key. A YouTube video with neither official nor auto-generated captions is a
+    clean, loud ingestion-time error (`CaptionError`), never a silent empty/partial source. Full
+    audio transcription, if ever wanted, is a separate, later, independently-mergeable follow-up —
+    this invariant does not half-build it.
+
+    **A real, accepted ToS/legal caveat, not glossed over**: YouTube's Terms of Service prohibit
+    automated access outside interfaces it provides; `yt-dlp` (a core, not opt-in, dependency —
+    same "ship a working default" reasoning as OCR/TTS, invariants 7/15) operates in the same
+    long-standing gray area every YouTube-downloading tool does. Fetching only the caption track is
+    narrower/lower-risk than downloading media, but is not risk-free — the risk is accepted by
+    whoever DEPLOYS this project, not invented by it. `README.md` states this explicitly.
+
+    **`CaptionError` is a `ValueError` subclass, found necessary by this feature's own
+    pre-implementation audit before any code was written.** `cli._prepare` and `api.add_sources`
+    both catch ingestion failures as `except (FetchError, ValueError, OSError)`; a bare
+    `RuntimeError` (the first draft's plan) would satisfy neither, landing a captionless video as
+    an unhandled 500 (API) / raw traceback (CLI) instead of the clean error this invariant's
+    opening promises. Verified live and with a dedicated test
+    (`test_add_sources_reports_422_not_500_on_a_captionless_youtube_video`) — don't reopen this by
+    giving a future ingestion-failure exception a base class outside that tuple without updating
+    both call sites.
+
+    **`parsers/youtube.py`'s WebVTT parsing (`_parse_vtt`) is built against REAL caption dumps, and
+    two real bugs were found and fixed against that real data before this shipped, not assumed
+    correct from reasoning alone.** (1) A first design keeping only each cue's LAST non-blank line
+    correctly extracts an auto-caption "building" cue's current text, but WRONGLY drops real
+    content from a genuine multi-line OFFICIAL dialogue cue (verified against a real official
+    track: a cue's two display-wrapped lines are both real dialogue, not an "old line / new line"
+    pair) — fixed by keying the extraction rule on whether a cue's raw text contains ANY `<...>`
+    tag markup at all (a reliable signal: official subtitles never carry `<c>`/timestamp tags,
+    auto-captions emit them ONLY on a building cue): a tagged cue keeps its last non-blank
+    stripped line; an untagged cue joins ALL its non-blank lines. (2) The cue-boundary check
+    originally treated a whitespace-only line the same as a truly empty separator line
+    (`lines[i].strip() != ""`) — but real auto-caption VTT uses a SINGLE-SPACE line as part of a
+    cue's own two-line payload (the "old" half of the rolling-karaoke pair), so that check
+    silently dropped entire cues. Fixed: cue-boundary detection checks EXACT emptiness
+    (`lines[i] != ""`); content-extraction still treats a whitespace-only line as blank CONTENT —
+    two different notions of "blank" at two different steps, not the same check reused. Both bugs
+    were caught by running the real parser against real fetched VTT data, not by reasoning about
+    the algorithm in the abstract — `tests/test_parsers_youtube.py`'s fixtures are real captured
+    dumps for this reason, and a live end-to-end run (`parse_youtube` against a real public video,
+    both the official AND auto-generated caption paths) was re-verified after each fix.
+
+    **A `"ts:<mm:ss>"` (or `"ts:<h:mm:ss>"`) locator prefix, alongside the existing `"whole"`
+    (text/web) and `"page:<n>"` (pdf) conventions** — coarser than a single caption cue (a fixed
+    `_CHUNK_SECONDS = 120` window), the same "start coarse, refine later if it turns out to
+    matter" precedent the Scope note already applies to text/web's own single `"whole"` locator.
+    Locator is fully opaque everywhere it matters (`citations.py`/`instructions.py`'s
+    `CITATION_RULES` never parse or pattern-match it) — this new prefix breaks nothing.
+
+    **`_fetch_caption_track` reuses `parsers/web.py`'s already-hardened, already-audited `_opener`
+    (built with `_SafeRedirectHandler`) directly, rather than a bespoke unguarded fetch** — an
+    independent audit's recommendation: the caption URL is resolved by `yt-dlp` from YouTube's own
+    official `timedtext` API response, never extracted from untrusted source content, so it
+    doesn't carry `parse_web`'s attacker-controlled-redirect threat model invariant 2 defends
+    against — but reusing the existing hardened opener costs nothing and removes the
+    (already-judged-small) residual risk entirely rather than reasoning it away. `web.py` itself
+    is UNCHANGED by this reuse.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

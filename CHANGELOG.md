@@ -627,3 +627,61 @@ questions with verifiable citations, and get a distilled research artifact out.
   turns after a note they referenced gets promoted (a note was never a citable source before
   promotion, so there's nothing to retroactively fix). YouTube/audio source ingestion is the one
   remaining gap from the feature-parity assessment.
+
+- **Twelfth slice: YouTube caption ingestion.** The last of the four gaps named by the same
+  Gemini-Notebook feature-parity assessment. Pasting a YouTube URL used to silently mis-ingest as
+  a generic web page (`parse_web` against YouTube's own HTML shell, which has no transcript text
+  at all — the page loads captions via client-side JS, not server-rendered markup).
+
+  **MVP scope, decided WITH the user, not guessed.** Two real technical forks existed: captions-
+  only via `yt-dlp` vs. full audio-download-plus-transcription, and — had the latter been chosen —
+  local Whisper vs. a cloud transcription API. The user picked captions-only: no video/audio
+  download, no `ffmpeg`, no Whisper, no transcription API key. A video with neither official nor
+  auto-generated captions is a clean ingestion-time error, not a silent partial ingestion; full
+  audio transcription remains a separate, later, independently-mergeable follow-up.
+
+  **A real ToS/legal caveat, disclosed and accepted, not glossed over**: YouTube's Terms of
+  Service prohibit automated access outside its own interfaces; `yt-dlp` (new, but a CORE
+  dependency — pure Python, no `ffmpeg` needed for this path, same "ship a working default"
+  reasoning as OCR/TTS) operates in the same long-standing gray area every YouTube-downloading
+  tool does. Fetching only captions is narrower/lower-risk than downloading media, but not
+  risk-free — the risk is accepted by whoever deploys this project.
+
+  **`parsers/youtube.py`** (new): `is_youtube_url` dispatches ahead of the existing generic
+  `is_url` → `parse_web` fallback in `ingest.ingest_one`, so `cli.py`'s `--source` and `api.py`'s
+  `POST /sources` both get this for free with no per-entry-point change. `parse_youtube` fetches a
+  caption track via `yt-dlp` (`skip_download: True` — no video/audio ever touches disk), parses
+  WebVTT into `(start, text)` cues, collapses auto-caption's "rolling karaoke" duplication, and
+  chunks into `~120`-second blocks with a new `"ts:<mm:ss>"` locator prefix.
+
+  **Two real bugs found and fixed against REAL caption data, not assumed correct from reasoning
+  alone** (invariant 33 has the full account): a first design that kept only each cue's last
+  non-blank line correctly handled auto-captions but WRONGLY dropped real content from genuine
+  multi-line official dialogue cues — fixed by keying the extraction rule on whether a cue
+  contains ANY `<...>` tag markup (official subtitles never carry tags; auto-captions emit them
+  only on a "building" cue). A second bug treated a whitespace-only line the same as a truly
+  empty cue-separator line, silently dropping cues whose own payload legitimately includes a
+  single-space line (real auto-caption VTT does this) — fixed by checking exact emptiness for
+  cue-boundary detection, while still treating whitespace-only as blank CONTENT once extracting
+  text. Both fixes re-verified live against a real public video's official AND auto-generated
+  caption tracks, not just the hand-written test fixtures.
+
+  **A real pre-implementation-audit catch**: `CaptionError` was first drafted as a bare
+  `RuntimeError`; `cli._prepare`/`api.add_sources` both catch ingestion failures as
+  `except (FetchError, ValueError, OSError)`, so a captionless video would have escaped as an
+  unhandled 500/traceback instead of the clean error this slice promises. Fixed by making
+  `CaptionError` a `ValueError` subclass — found and fixed before any code was written, verified
+  live afterward with a dedicated test.
+
+  **A separate, unrelated dependency gap surfaced (not caused) by adding `yt-dlp`**:
+  `python-multipart` (needed by `POST /notebooks/{id}/sources/upload`'s multipart form parsing,
+  invariant 30) had never been an explicit dependency — it arrived transitively, silently, until
+  `yt-dlp` shifted dependency resolution enough that it stopped being pulled in and the upload
+  tests broke with no code change of their own. Pinned explicitly in the `api` extra now.
+
+  **Deliberately NOT in this slice**: any video/audio download (the user's explicit MVP decision),
+  a captionless video, a non-YouTube video URL, or a directly-uploaded audio file (all out of
+  scope); timestamp-precise single-cue citation granularity (the 120-second chunking window is a
+  deliberate coarser grain, matching text/web's own single-locator precedent); playlist/channel
+  ingestion. This closes out the four-gap Gemini-Notebook feature-parity assessment that started
+  with file upload.

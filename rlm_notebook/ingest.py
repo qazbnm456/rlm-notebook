@@ -13,6 +13,7 @@ from .injection_scan import scan_source
 from .parsers.pdf import parse_pdf
 from .parsers.text import parse_text
 from .parsers.web import parse_web
+from .parsers.youtube import is_youtube_url, parse_youtube
 from .schema import Source
 
 #: Suffixes `ingest_uploaded_file` will parse — anything else is refused loudly (a 422 naming this
@@ -34,6 +35,8 @@ def with_injection_flags(source: Source) -> Source:
 
 
 def ingest_one(value: str, source_id: str) -> Source:
+    if is_youtube_url(value):
+        return parse_youtube(value, source_id)
     if is_url(value):
         return parse_web(value, source_id)
     path = Path(value)

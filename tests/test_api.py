@@ -253,6 +253,25 @@ def test_add_sources_reports_422_on_a_real_ingestion_failure(client):
     assert resp.status_code == 422
 
 
+def test_add_sources_reports_422_not_500_on_a_captionless_youtube_video(client, monkeypatch):
+    """`CaptionError` (`parsers/youtube.py`) is a `ValueError` subclass specifically so this lands
+    as the SAME clean 422 `add_sources` already gives any other ingestion failure — found by this
+    feature's own pre-implementation audit before any code was written: a bare `RuntimeError`
+    would satisfy neither `add_sources`'s nor `cli._prepare`'s `except (FetchError, ValueError,
+    OSError)`, escaping as an unhandled 500 instead."""
+    from rlm_notebook.parsers.youtube import CaptionError
+
+    def _fake_parse_youtube(url, source_id, **kwargs):
+        raise CaptionError(f"no captions available for {url!r}")
+
+    monkeypatch.setattr("rlm_notebook.ingest.parse_youtube", _fake_parse_youtube)
+
+    resp = client.post(
+        "/notebooks/mynb/sources", json={"sources": ["https://www.youtube.com/watch?v=none"]}
+    )
+    assert resp.status_code == 422
+
+
 def test_add_sources_reports_409_on_a_corrupted_notebook_file(client, tmp_path):
     path = tmp_path / "notebooks" / "mynb.json"
     path.parent.mkdir(parents=True)
