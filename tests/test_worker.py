@@ -1,6 +1,6 @@
 """`worker.py`'s internal functions, tested directly (in-process) rather than through a real spawned
 subprocess — that's what `test_runner.py` covers, using tiny throwaway scripts rather than the full
-dspy/rlm-kit stack, to keep the offline suite fast and credential-free.
+dspy/rlm-harness stack, to keep the offline suite fast and credential-free.
 """
 
 from __future__ import annotations

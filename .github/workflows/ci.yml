@@ -44,7 +44,7 @@ jobs:
         with:
           enable-cache: true
       - name: Lint
-        # PINNED deliberately, matching rlm-kit/ctx-distillery — an unpinned `uvx ruff check .`
+        # PINNED deliberately, matching rlm-harness/ctx-distillery — an unpinned `uvx ruff check .`
         # resolves the latest ruff at run time and can redden CI with nobody having touched a line
         # of code. Bump this pin on purpose, and land the resulting fixes in the SAME commit.
         run: uvx ruff@0.16.0 check .

@@ -3,7 +3,7 @@ a timeline, and a single key insight. Same citation-grounded `RLMTask` pattern a
 (`task.py`): `signature` names one input field, `sources` (the corpus blob), and one output field,
 with no `question`/`history` since these describe the corpus as a whole rather than answer one
 question. Everything else (retry, sandbox selection, budget caps, tracing) is inherited from
-`rlm_kit.RLMTask`, exactly as `AnswerQuestion` inherits it.
+`rlm_harness.RLMTask`, exactly as `AnswerQuestion` inherits it.
 """
 
 from __future__ import annotations
@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from rlm_kit import RLMTask
-from rlm_kit.tools.validation import make_schema_validator
+from rlm_harness import RLMTask
+from rlm_harness.tools.validation import make_schema_validator
 
 from .instructions import CITATION_RULES, validate_before_submit_rule
 from .schema import FAQ, KeyInsight, Summary, Timeline

@@ -1,4 +1,4 @@
-"""rlm-notebook — an RLM-driven research notebook built on rlm-kit.
+"""rlm-notebook — an RLM-driven research notebook built on rlm-harness.
 
 Public surface for this slice::
 

@@ -1,5 +1,5 @@
 """`AnswerQuestion` wiring, driven through a REAL offline forward pass — no live model, no Deno, no
-network. Mirrors the sibling projects' own `test_task.py` pattern: `rlm_kit.testing.ScriptedInterpreter`
+network. Mirrors the sibling projects' own `test_task.py` pattern: `rlm_harness.testing.ScriptedInterpreter`
 + `scripted_lm` drive `dspy.RLM.aforward` for real, so the planner -> validate_answer -> SUBMIT chain
 executes (the tool's own tracing runs) at zero cost.
 """
@@ -13,9 +13,9 @@ import pytest
 
 dspy = pytest.importorskip("dspy")
 
-import rlm_kit.runtime as rt
-from rlm_kit import RLMConfig
-from rlm_kit.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
+import rlm_harness.runtime as rt
+from rlm_harness import RLMConfig
+from rlm_harness.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
 
 from rlm_notebook.schema import Answer
 from rlm_notebook.task import AnswerQuestion
@@ -42,7 +42,7 @@ def _configure() -> None:
 
 def test_answer_question_tools_are_repl_safe():
     """CLAUDE.md invariant: every tool this task exposes must have explicit named params (no
-    *args/**kwargs — see rlm_kit.testing.assert_repl_safe's docstring for why)."""
+    *args/**kwargs — see rlm_harness.testing.assert_repl_safe's docstring for why)."""
     for tool in AnswerQuestion.tools:
         assert_repl_safe(tool)
 

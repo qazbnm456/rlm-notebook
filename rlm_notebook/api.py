@@ -694,9 +694,9 @@ async def audio(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> AudioRe
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
     audio. Two host-side steps, not one (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum):
     `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
-    only step that touches `dspy`/`rlm_kit`, and the only one cancellable via
+    only step that touches `dspy`/`rlm_harness`, and the only one cancellable via
     `POST .../cancel` — then TTS synthesis (`tts.py`) runs AFTER that subprocess returns, IN-PROCESS
-    here, since `tts.py` imports neither `dspy` nor `rlm_kit` (same precedent as `api.py` already
+    here, since `tts.py` imports neither `dspy` nor `rlm_harness` (same precedent as `api.py` already
     importing the Guide/`AnswerQuestion` RLMTask classes at module load, purely for `_dotted()`'s
     introspection — never calling `.arun()` on them itself; only `worker.py` does).
 
@@ -801,9 +801,9 @@ def _translate_trace_event(event: dict) -> dict:
 
 async def _tail_trace_events(run_id: str):
     """Yields translated event dicts as they appear in `traces/{run_id}.jsonl` — safe to poll while
-    a worker subprocess is actively writing it: `TraceRecorder.record()` (rlm-kit) writes exactly
+    a worker subprocess is actively writing it: `TraceRecorder.record()` (rlm-harness) writes exactly
     one complete `json.dumps(event) + "\\n"` per call, flushed immediately, serialized under its
-    own lock — verified directly against `rlm_kit/trace.py` during this phase's own
+    own lock — verified directly against `rlm_harness/trace.py` during this phase's own
     pre-implementation audit, not assumed. Buffers any trailing partial line so a read that catches
     a write mid-flight never yields a torn line.
 
@@ -886,7 +886,7 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
     verification cannot make that stronger claim): finding the marker text proves the model's REPL
     saw it at some point, never that this specific occurrence is what the model relied on for the
     citation. A `sub_call`'s `input` field is also truncated to 4000 characters upstream
-    (`rlm_kit.sub_lm`) — a marker beyond that point in a long escalation prompt won't be found in
+    (`rlm_harness.sub_lm`) — a marker beyond that point in a long escalation prompt won't be found in
     THAT event, though it may still turn up in another one.
 
     404s (never crashes) when the trace file doesn't exist at all — `traces/` has no retention

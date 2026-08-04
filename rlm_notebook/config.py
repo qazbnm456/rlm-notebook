@@ -1,10 +1,10 @@
 """Configuration for rlm-notebook — the `RN_*` env surface `.env.example` documents.
 
 Mirrors the sibling projects' `config.py` convention (see `ctx-distillery/ctx_distillery/config.py`):
-its own env prefix rather than sharing rlm-kit's `RLM_*` surface directly, so this project's env
-names stay stable even if rlm-kit's own defaults change, and a live run's config is fully visible
-in one place. No `dspy` import, and no `rlm_kit` import at module scope — `from_env()` is plain
-stdlib so it can be exercised without paying for the model stack; `setup()` imports rlm-kit lazily,
+its own env prefix rather than sharing rlm-harness's `RLM_*` surface directly, so this project's env
+names stay stable even if rlm-harness's own defaults change, and a live run's config is fully visible
+in one place. No `dspy` import, and no `rlm_harness` import at module scope — `from_env()` is plain
+stdlib so it can be exercised without paying for the model stack; `setup()` imports rlm-harness lazily,
 at the point it is actually about to configure a model.
 """
 
@@ -18,7 +18,7 @@ from dataclasses import dataclass
 PINNED_INTERPRETER = "pyodide"
 
 #: Default cap on the assembled corpus blob (CLAUDE.md invariant 8) — a `chars`, not `tokens`,
-#: budget, matching rlm-kit's own `max_output_chars` convention. This is a memory-safety cap on the
+#: budget, matching rlm-harness's own `max_output_chars` convention. This is a memory-safety cap on the
 #: pyodide/deno sandbox, not a tuning knob; raise it only once real usage shows headroom.
 _DEFAULT_MAX_CORPUS_CHARS = 8_000_000
 
@@ -76,7 +76,7 @@ class NotebookConfig:
 
     #: The RLM's main model, driving the REPL loop. Required for a live run.
     main_model: str = ""
-    #: The sub LM rlm-kit hands to `llm_query`. Defaults to the main model.
+    #: The sub LM rlm-harness hands to `llm_query`. Defaults to the main model.
     sub_model: str = ""
     api_key: str | None = None
     base_url: str | None = None
@@ -106,7 +106,7 @@ class NotebookConfig:
     tts_voice_host_b: str = _DEFAULT_TTS_VOICE_HOST_B
 
     #: `api.py`-specific: how long `runner.wait_result` waits for a subprocess run before
-    #: cancelling it (`killpg`) and reporting a timeout — a backstop distinct from rlm-kit's own
+    #: cancelling it (`killpg`) and reporting a timeout — a backstop distinct from rlm-harness's own
     #: `max_iterations`/`max_llm_calls` budget (which bounds the RLM loop's *steps*, not wall-clock
     #: time; a slow model/network can still run long past a small iteration budget). `cli.py`'s
     #: in-process commands don't use this at all — only the subprocess-isolated API path does.
@@ -161,17 +161,17 @@ def max_upload_bytes() -> int:
 
 
 def setup(config: NotebookConfig) -> NotebookConfig:
-    """Configure rlm-kit (main + sub LM) for this process, and return `config` unchanged.
+    """Configure rlm-harness (main + sub LM) for this process, and return `config` unchanged.
 
     Mirrors the sibling projects' `setup(config)` shape: `AnswerQuestion` reads the process-wide
-    config through `rlm_kit.runtime.get_config()` when no `config=` is passed, so without this call
+    config through `rlm_harness.runtime.get_config()` when no `config=` is passed, so without this call
     a live run would silently inherit `RLMConfig.from_env()`'s own `RLM_*` defaults rather than the
     `RN_*` values the operator set.
     """
-    import rlm_kit
-    from rlm_kit.config import RLMConfig
+    import rlm_harness
+    from rlm_harness.config import RLMConfig
 
-    rlm_kit.configure(
+    rlm_harness.configure(
         RLMConfig(
             main_model=config.main_model,
             sub_model=config.sub_model,

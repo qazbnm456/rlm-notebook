@@ -1,5 +1,5 @@
 """Notebook Guide tasks (`guide.py`), driven through REAL offline forward passes — same pattern as
-`test_task.py`: `rlm_kit.testing.ScriptedInterpreter` + `scripted_lm` drive `dspy.RLM.aforward` for
+`test_task.py`: `rlm_harness.testing.ScriptedInterpreter` + `scripted_lm` drive `dspy.RLM.aforward` for
 real, no live model, no Deno, no network.
 """
 
@@ -12,9 +12,9 @@ import pytest
 
 dspy = pytest.importorskip("dspy")
 
-import rlm_kit.runtime as rt
-from rlm_kit import RLMConfig
-from rlm_kit.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
+import rlm_harness.runtime as rt
+from rlm_harness import RLMConfig
+from rlm_harness.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
 
 from rlm_notebook.guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from rlm_notebook.schema import FAQ, KeyInsight, Summary, Timeline

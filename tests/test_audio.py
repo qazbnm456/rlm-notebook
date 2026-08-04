@@ -1,5 +1,5 @@
 """`GeneratePodcastScript` (`audio.py`), driven through a REAL offline forward pass — same pattern
-as `test_task.py`/`test_guide.py`: `rlm_kit.testing.ScriptedInterpreter` + `scripted_lm` drive
+as `test_task.py`/`test_guide.py`: `rlm_harness.testing.ScriptedInterpreter` + `scripted_lm` drive
 `dspy.RLM.aforward` for real, no live model, no Deno, no network.
 """
 
@@ -12,9 +12,9 @@ import pytest
 
 dspy = pytest.importorskip("dspy")
 
-import rlm_kit.runtime as rt
-from rlm_kit import RLMConfig
-from rlm_kit.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
+import rlm_harness.runtime as rt
+from rlm_harness import RLMConfig
+from rlm_harness.testing import ScriptedInterpreter, assert_repl_safe, call, scripted_lm, submit
 
 from rlm_notebook.audio import GeneratePodcastScript
 from rlm_notebook.schema import PodcastScript

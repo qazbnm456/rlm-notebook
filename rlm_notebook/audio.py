@@ -11,8 +11,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from rlm_kit import RLMTask
-from rlm_kit.tools.validation import make_schema_validator
+from rlm_harness import RLMTask
+from rlm_harness.tools.validation import make_schema_validator
 
 from .instructions import CITATION_RULES, validate_before_submit_rule
 from .schema import PodcastScript

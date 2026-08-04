@@ -1,7 +1,7 @@
 """Web page ingestion: fetch (host-side, one-shot) + extract main content with trafilatura.
 
 CLAUDE.md invariant 1: the fetch happens exactly ONCE, here, during ingestion — this module is
-never handed to the RLM as a `tools=` entry. Reuses `rlm_kit.tools.fetch`'s pure SSRF-guard
+never handed to the RLM as a `tools=` entry. Reuses `rlm_harness.tools.fetch`'s pure SSRF-guard
 functions (`is_safe_url`, `resolved_host_is_safe`), not `make_fetch_tool` itself — that factory
 builds a live RLM *tool*, which is exactly what invariant 1 says this call site must never become.
 """
@@ -13,7 +13,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 import trafilatura
-from rlm_kit.tools.fetch import is_safe_url, resolved_host_is_safe
+from rlm_harness.tools.fetch import is_safe_url, resolved_host_is_safe
 
 from ..schema import Source, SourceBlock
 
@@ -38,7 +38,7 @@ class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
 
     The default opener follows a `Location` header unconditionally, which would let a single 3xx
     response bounce an initially-safe URL to an internal/loopback/metadata target with no further
-    check — `rlm_kit.tools.fetch`'s own docstring calls this out explicitly ("call it INSIDE your
+    check — `rlm_harness.tools.fetch`'s own docstring calls this out explicitly ("call it INSIDE your
     fetcher at connection time, and on every redirect hop"); found by an independent review of the
     first version of this module, which fetched with the default opener and had no per-hop check.
     """

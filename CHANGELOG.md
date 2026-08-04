@@ -6,7 +6,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 `rlm-notebook` is an RLM-driven research notebook, built on
-[`rlm-kit`](https://github.com/qazbnm456/rlm-kit): paste in sources of any kind, ask grounded
+[`rlm-harness`](https://github.com/qazbnm456/rlm-harness): paste in sources of any kind, ask grounded
 questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
@@ -19,13 +19,13 @@ questions with verifiable citations, and get a distilled research artifact out.
   **All sources become one blob, not a vector index.** `corpus.py` concatenates every ingested
   source into a single string tagged with `[[SRC:<id>|<locator>]]` markers and hands the whole thing
   to `AnswerQuestion` as one signature field — the model explores it in the sandboxed REPL
-  (`.find()`/slicing) rather than through embedding similarity search. This is rlm-kit's native
+  (`.find()`/slicing) rather than through embedding similarity search. This is rlm-harness's native
   mechanic (an RLM signature field *is* a REPL variable), not a new indexing layer; a vector-search
   fallback for corpora too large for one blob is deferred until real usage shows the size cap
   (invariant 8) actually binds.
 
   **No fetch/network tool is reachable at question-answering time.** Early designs considered
-  reusing `rlm_kit.tools.fetch.make_fetch_tool` as a live tool so the model could pull in more
+  reusing `rlm_harness.tools.fetch.make_fetch_tool` as a live tool so the model could pull in more
   context on demand; adversarial review found this turns a prompt-injected source into a live data
   exfiltration path, since the SSRF guard only blocks internal targets, not legitimate-looking
   external ones. Ingestion-time fetching is host-side and one-shot instead — see invariant 1. A
@@ -39,15 +39,15 @@ questions with verifiable citations, and get a distilled research artifact out.
   `source_id`/`locator` resolves to real corpus text; it does not attempt to verify the model's
   prose is faithful to that text, and no docstring or UI copy should imply otherwise (invariant 5).
   `AnswerQuestion` also validates its own draft against `Answer`'s schema in-REPL, before SUBMIT,
-  via `rlm_kit.tools.validation.make_schema_validator` — chosen over a post-hoc whole-run retry
-  because rlm-kit's own retry policy defaults to `max_retries=1` specifically because a full RLM
+  via `rlm_harness.tools.validation.make_schema_validator` — chosen over a post-hoc whole-run retry
+  because rlm-harness's own retry policy defaults to `max_retries=1` specifically because a full RLM
   re-run rarely fixes a persistent (rather than transient) coercion failure. Not yet verified
   against a real model, only an offline scripted one — see invariant 4's residual-risk note.
 
   **`injection_scan.py` flags, never blocks.** A deterministic heuristic scan runs at ingestion
   time; a flagged source's content still reaches the model and its answer still returns, with the
   flag surfaced as metadata alongside it (invariant 6) — this is a transparency mechanism, not a
-  gate, matching the reward-free/judgement-only posture this whole family of rlm-kit consumers
+  gate, matching the reward-free/judgement-only posture this whole family of rlm-harness consumers
   shares. Its rules favor recall over precision on purpose (invariant 6's note).
 
   **OCR ships enabled, not merely pluggable.** `parsers/pdf.py` uses `pymupdf4llm`'s built-in hybrid
@@ -251,7 +251,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   confirms it dies on cancellation, not just the worker's own PID (invariant 22) — this was the
   exact failure mode an earlier design round worried an over-eager `process.kill()` would miss.
 
-  **`api.py` never imports `dspy`/`rlm_kit` itself** (invariant 21) — only `worker.py`, inside the
+  **`api.py` never imports `dspy`/`rlm_harness` itself** (invariant 21) — only `worker.py`, inside the
   subprocess, does. A crash deep in the model stack takes down a worker subprocess, never the API
   server process.
 
@@ -373,9 +373,9 @@ questions with verifiable citations, and get a distilled research artifact out.
 
   **`/audio` is two host-side steps, not one, and deliberately doesn't touch `worker.py`/
   `runner.py` at all.** `GeneratePodcastScript` runs in the exact same isolated subprocess `ask`/
-  `guide` already use — the only step that touches `dspy`/`rlm_kit`, and the only one cancellable
+  `guide` already use — the only step that touches `dspy`/`rlm_harness`, and the only one cancellable
   via `POST .../cancel`. TTS synthesis (`tts.py`) then runs AFTER that subprocess returns,
-  IN-PROCESS inside `api.py` itself: `tts.py` imports neither `dspy` nor `rlm_kit`, so this doesn't
+  IN-PROCESS inside `api.py` itself: `tts.py` imports neither `dspy` nor `rlm_harness`, so this doesn't
   reopen invariant 21, and it's the same precedent `api.py` already sets by importing the Guide/
   `AnswerQuestion` RLMTask classes at module load purely for introspection, never calling `.arun()`
   on them itself.
@@ -451,7 +451,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   invariant 23), which would misfire the moment a second concurrent request on the same notebook
   overwrote the first's entry — fixed with a NEW, run-id-keyed `_RUN_PROCESSES` map, decoupled
   entirely from `_ACTIVE_RUNS`'s single-slot semantics. (3) The citation-lookup search's field list
-  was verified wrong against `rlm_kit.sub_lm`'s real `sub_call` payload shape (`input`/`raw`/
+  was verified wrong against `rlm_harness.sub_lm`'s real `sub_call` payload shape (`input`/`raw`/
   `processed`/etc, not `reasoning`/`code`/`output`) — fixed by searching a trace event's ENTIRE
   serialized payload rather than a hardcoded field list. A second, targeted audit round then found
   2 more real gaps in the collision-gate fix itself (a directory-existence race with a fresh
@@ -460,7 +460,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 
   **`GET /notebooks/{id}/runs/{run_id}/stream`** — one SSE endpoint serving both a live tail (the
   run is still in progress) and a replay (the run already finished) from the same polling loop,
-  verified safe against `rlm_kit/trace.py`'s actual write behavior: `TraceRecorder.record()` writes
+  verified safe against `rlm_harness/trace.py`'s actual write behavior: `TraceRecorder.record()` writes
   one complete, flushed JSON line per event under its own lock, so a reader that buffers any
   trailing partial line can never see a torn or interleaved line. Synthesizes a terminal event for
   a `killpg`-cancelled run whose `TraceRecorder.__exit__` never got to write `run_end`, the same fix
@@ -495,7 +495,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   anywhere in this project — a citation's "view reasoning" link is only as durable as a file
   nobody has committed to keeping (a missing trace degrades that ONE affordance, never the rest of
   the page); a `sub_call` event's `input` field is truncated to 4000 characters upstream
-  (`rlm_kit.sub_lm`), a real source of false negatives in the citation-turn search. The trace
+  (`rlm_harness.sub_lm`), a real source of false negatives in the citation-turn search. The trace
   stream and citation-turn endpoints inherit invariant 25's no-auth posture as a materially
   different, sharper exposure than every other endpoint (they can surface full ingested source
   text, not just metadata/prose) — stated explicitly in CLAUDE.md, not left implicit.

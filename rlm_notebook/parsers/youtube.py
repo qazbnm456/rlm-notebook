@@ -16,7 +16,7 @@ import urllib.request
 from urllib.parse import urlparse
 
 import yt_dlp
-from rlm_kit.tools.fetch import is_safe_url, resolved_host_is_safe
+from rlm_harness.tools.fetch import is_safe_url, resolved_host_is_safe
 
 from ..schema import Source, SourceBlock
 from .web import _opener

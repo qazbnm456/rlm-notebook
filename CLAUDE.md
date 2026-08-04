@@ -1,24 +1,24 @@
 # rlm-notebook — agent guide
 
-`rlm-notebook` is a downstream consumer of [`rlm-kit`](https://github.com/qazbnm456/rlm-kit): paste
+`rlm-notebook` is a downstream consumer of [`rlm-harness`](https://github.com/qazbnm456/rlm-harness): paste
 in sources of any kind (text, web pages, PDFs — including scanned/OCR'd ones), ask questions
 grounded in them with a citation you can verify, and get a distilled research artifact out the
 other end. See `README.md` for the overview.
 
-`rlm-kit` is pinned as a git dependency (see `pyproject.toml`). For local co-development against an
-in-progress rlm-kit checkout, install it editable over the top:
+`rlm-harness` comes from PyPI, pinned to an exact version (see `pyproject.toml`). For local
+co-development against an in-progress rlm-harness checkout, install it editable over the top:
 
 ```
-uv pip install -e ../rlm-kit
+uv pip install -e ../rlm-harness
 ```
 
 ## Verify
 
-- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-kit/ctx-distillery's pin — an
+- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-harness/ctx-distillery's pin — an
   unpinned `uvx ruff check .` resolves the latest ruff at run time and can redden CI with nobody
   having touched a line of code).
 - `uv run python -m pytest -q` — the whole suite, fully offline. The dspy-bearing test
-  (`test_task.py`) drives a REAL `dspy.RLM.aforward` through `rlm_kit.testing.ScriptedInterpreter` +
+  (`test_task.py`) drives a REAL `dspy.RLM.aforward` through `rlm_harness.testing.ScriptedInterpreter` +
   `scripted_lm`, so the planner → tools → SUBMIT chain executes for real (`importorskip("dspy")`).
   `test_api.py`/`tests/test_runner.py` need the `api` extra installed to be collected at all (CI's
   `uv sync --extra api` covers this — see `pyproject.toml`); without it they're silently absent
@@ -58,7 +58,7 @@ assume any of them exist because an earlier design discussion mentioned them.
    `parsers/web.py`'s fetcher is called exactly once, host-side, during ingestion — never handed to
    the model at question-answering time. A source's own content is untrusted (see invariant 6); if a
    fetch tool were reachable from the REPL, an instruction hidden in that content could steer the
-   model into exfiltrating notebook contents to an attacker-controlled URL, and `rlm_kit`'s SSRF
+   model into exfiltrating notebook contents to an attacker-controlled URL, and `rlm_harness`'s SSRF
    guard (`is_safe_url`) only blocks internal/loopback/metadata targets — it does not, and cannot,
    block a legitimate-looking external domain. If a later slice wants "fetch one more page on
    request," that is a separate, explicitly user-confirmed, non-agentic action — not a tool the
@@ -67,14 +67,14 @@ assume any of them exist because an earlier design discussion mentioned them.
    URL.** `_SafeRedirectHandler` runs `is_safe_url`/`resolved_host_is_safe` again on each `Location`
    target before following it. Without this, an initially-safe-looking URL could 302 to an
    internal/loopback/metadata address and the default `urllib` opener would follow it unchecked —
-   `rlm_kit.tools.fetch`'s own docstring names this exact gap ("call it INSIDE your fetcher at
+   `rlm_harness.tools.fetch`'s own docstring names this exact gap ("call it INSIDE your fetcher at
    connection time, and on every redirect hop"). Caught by an independent review of the first
    version of this module, which fetched with the default opener and had no per-hop check; verified
    against a real redirect target before landing the fix. Do not swap back to plain
    `urllib.request.urlopen`.
 3. **Ingestion is host-side only, never inside the sandbox.** `parsers/{text,web,pdf}.py` run
    before any `RLMTask` exists. `pypdfium2`, `trafilatura`, and the OCR backends (invariant 7) are
-   native/C-extension dependencies unsuited to the pyodide/deno sandbox rlm-kit builds by default —
+   native/C-extension dependencies unsuited to the pyodide/deno sandbox rlm-harness builds by default —
    and untrusted parsing logic has no reason to run inside the same trust boundary as the model's
    own code anyway. `corpus.py` only ever hands the RLM a plain string, already parsed.
 4. **The corpus blob uses `[[SRC:<id>|<locator>]]` markers, and EVERY citation-grounded task's
@@ -152,7 +152,7 @@ assume any of them exist because an earlier design discussion mentioned them.
    dependency; an independent audit found TWO of the three affected test files on the first pass
    named only one.
 8. **`corpus.py` enforces a size cap on the assembled blob and fails loudly, not silently, past
-   it.** The single-blob-as-REPL-variable design (rlm-kit's core mechanic) has a real memory
+   it.** The single-blob-as-REPL-variable design (rlm-harness's core mechanic) has a real memory
    ceiling in the pyodide/deno sandbox; a notebook that exceeds the cap must get a clear error at
    ingestion time, not a mysteriously failing/slow chat turn later. Known gap: `Corpus.blob()`
    currently concatenates every source in full *before* checking the length, so the cap catches an
@@ -247,7 +247,7 @@ assume any of them exist because an earlier design discussion mentioned them.
 21. **Every API request that runs an `RLMTask` does so in an isolated subprocess
     (`runner.py`/`worker.py`), never in-process.** This is a SEPARATE execution model from
     `cli.py`'s synchronous in-process one — the two coexist; `cli.py` is completely unaffected.
-    `worker.py` is the ONLY module in this project's process tree that imports `dspy`/`rlm_kit`
+    `worker.py` is the ONLY module in this project's process tree that imports `dspy`/`rlm_harness`
     from an API request path; `api.py` itself never does, so a crash deep in the model stack takes
     down a worker subprocess, never the API server process itself.
 22. **Cancellation works via `killpg` on the WHOLE process group (`start_new_session=True` when
@@ -372,7 +372,7 @@ assume any of them exist because an earlier design discussion mentioned them.
       component) and always prefixes it with `notebook_id` — never the client's raw value alone.
     - **`_run_isolated` exclusively creates `traces/{run_id}.jsonl` before spawning anything** —
       `os.open(path, O_CREAT|O_EXCL|O_WRONLY)`, mapped to a 409 on `FileExistsError`. Not
-      optional hardening: `TraceRecorder`'s own lock (`rlm_kit/trace.py`) is process-local and
+      optional hardening: `TraceRecorder`'s own lock (`rlm_harness/trace.py`) is process-local and
       gives ZERO cross-process serialization, so two concurrent requests landing on the same
       run_id — two browser tabs, a retried request, nothing in this no-auth API prevents it —
       would otherwise have two independent worker subprocesses append interleaved,
@@ -396,7 +396,7 @@ assume any of them exist because an earlier design discussion mentioned them.
       literal marker `[[SRC:<source_id>|<locator>]]`. Searching the whole payload rather than named
       fields is itself a fix: an earlier draft hardcoded `reasoning`/`code`/`output`, which a
       second audit round found is simply the WRONG field list for a `sub_call` event
-      (`rlm_kit.sub_lm`'s real keys are `kind`/`name`/`model`/`attempt`/`input`/`raw`/`processed`/
+      (`rlm_harness.sub_lm`'s real keys are `kind`/`name`/`model`/`attempt`/`input`/`raw`/`processed`/
       `error`) — a citation whose marker only appears in a sub-LM escalation would have silently
       404'd. `schema.ChatTurn.run_id` (new, optional, backward-compatible) is the ONE schema
       change this needed — Guide/Audio results still aren't persisted onto a notebook at all
@@ -414,7 +414,7 @@ assume any of them exist because an earlier design discussion mentioned them.
     model's REPL saw it, never that this occurrence is what the model relied on — the same
     "coordinate, not faithfulness" limit invariant 5 already states for citation verification
     generally), and a `sub_call` event's `input` field is truncated to 4000 characters upstream
-    (`rlm_kit.sub_lm`), a real (if partial) source of false negatives. The trace stream and
+    (`rlm_harness.sub_lm`), a real (if partial) source of false negatives. The trace stream and
     citation-turn endpoints are a MATERIALLY DIFFERENT exposure than every other endpoint in this
     API — unlike metadata-only or model-authored-prose responses, a trace can contain full ingested
     source text the model echoed while reading it; both inherit invariant 25's no-auth posture as a

@@ -134,7 +134,7 @@ def test_print_citations_leading_blank_line_is_its_own_output_not_the_caller_s()
 
 class _FakeTask:
     """A stand-in RLMTask instance — `.run(**kwargs)` returns a canned result without touching
-    dspy/rlm-kit at all, so these tests exercise `_cmd_ask`/`_cmd_guide`'s own output-formatting
+    dspy/rlm-harness at all, so these tests exercise `_cmd_ask`/`_cmd_guide`'s own output-formatting
     logic in isolation. `_fake_task(result)` below is the zero-arg factory `cli._GUIDE_TASKS[kind]`
     / `cli.AnswerQuestion` is called as (`SomeTask()`), returning an instance of this."""
 

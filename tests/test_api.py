@@ -948,7 +948,7 @@ def _write_trace(run_id: str, events: list[dict]) -> None:
     path = api._TRACE_DIR / f"{run_id}.jsonl"
     with path.open("w", encoding="utf-8") as fh:
         for i, event in enumerate(events):
-            full = {"schema": "rlm-kit/trace/v1", "run_id": run_id, "step_id": i, "ts": 0.0, **event}
+            full = {"schema": "rlm-harness/trace/v1", "run_id": run_id, "step_id": i, "ts": 0.0, **event}
             fh.write(json.dumps(full) + "\n")
 
 

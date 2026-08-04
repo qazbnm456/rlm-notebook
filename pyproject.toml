@@ -9,7 +9,7 @@ license-files = ["LICENSE"]
 authors = [{ name = "Boik Su" }]
 keywords = [
     "rlm",
-    "rlm-kit",
+    "rlm-harness",
     "notebook",
     "rag",
     "research",
@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "rlm-kit",
+    "rlm-harness==1.0.0",
     "pydantic>=2.9",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",
@@ -113,9 +113,3 @@ packages = ["rlm_notebook"]
 line-length = 110
 target-version = "py311"
 
-# rlm-kit is public but not on PyPI yet, so it comes in via a commit-pinned git source rather than a
-# normal PyPI dependency; uv.lock pins the exact commit. Never `pip install` it directly. For local
-# co-development against an in-progress rlm-kit checkout, overlay an editable install on top:
-# `uv pip install -e ../rlm-kit` (see CLAUDE.md).
-[tool.uv.sources]
-rlm-kit = { git = "https://github.com/qazbnm456/rlm-kit.git", branch = "main" }

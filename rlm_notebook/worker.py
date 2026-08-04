@@ -6,7 +6,7 @@ stdout as the result.
     (JSON `{"kwargs": {...}}` on stdin)
 
 This module is never invoked directly by a human — `runner.start_run` spawns it. It is the ONLY
-thing that runs inside the isolated subprocess; `api.py` never imports `dspy`/`rlm_kit` itself.
+thing that runs inside the isolated subprocess; `api.py` never imports `dspy`/`rlm_harness` itself.
 """
 
 from __future__ import annotations
@@ -67,7 +67,7 @@ def main(argv: list[str] | None = None) -> int:
 
     setup(NotebookConfig.from_env())
 
-    from rlm_kit.trace import TraceRecorder
+    from rlm_harness.trace import TraceRecorder
 
     try:
         with TraceRecorder(trace_path, run_id=run_id, meta={"task": dotted}):

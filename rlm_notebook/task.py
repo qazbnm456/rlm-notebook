@@ -2,10 +2,10 @@
 
 A thin `RLMTask` declaration, per the sibling projects' convention: `signature` names three input
 fields — `sources` (the corpus blob `Corpus.blob()` assembles, injected into the sandboxed REPL as
-a plain variable per rlm-kit's native mechanic — see `corpus.py`), `history` (prior turns in this
+a plain variable per rlm-harness's native mechanic — see `corpus.py`), `history` (prior turns in this
 notebook's conversation, as plain text — see `notebook.py:history_text`), and `question` — and one
 output field, `answer: Answer`. Everything else (retry, sandbox selection, budget caps, tracing) is
-inherited from `rlm_kit.RLMTask`.
+inherited from `rlm_harness.RLMTask`.
 """
 
 from __future__ import annotations
@@ -13,8 +13,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, ClassVar
 
-from rlm_kit import RLMTask
-from rlm_kit.tools.validation import make_schema_validator
+from rlm_harness import RLMTask
+from rlm_harness.tools.validation import make_schema_validator
 
 from .instructions import CITATION_RULES, validate_before_submit_rule
 from .schema import Answer

@@ -1,7 +1,7 @@
 """The corpus blob: every ingested `Source` concatenated into ONE string, tagged with
 `[[SRC:<id>|<locator>]]` markers, that becomes the RLM's `sources` signature field.
 
-This is rlm-kit's native mechanic, not a new indexing layer (see CHANGELOG.md's Unreleased entry):
+This is rlm-harness's native mechanic, not a new indexing layer (see CHANGELOG.md's Unreleased entry):
 an RLM signature field is injected into the sandboxed REPL as a plain variable, and the model
 explores it with `.find()`/slicing rather than through embedding similarity search. `Corpus` only
 ever produces a string — see CLAUDE.md invariant 3, ingestion (which produces the `Source` objects

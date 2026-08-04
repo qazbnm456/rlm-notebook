@@ -2,7 +2,7 @@
 
 `rlm-notebook` reads sources of any kind — plain text, web pages, PDFs (including scanned/OCR'd
 ones), and YouTube video captions — and uses an RLM
-([`rlm-kit`](https://github.com/qazbnm456/rlm-kit)) to answer questions grounded in them, with a
+([`rlm-harness`](https://github.com/qazbnm456/rlm-harness)) to answer questions grounded in them, with a
 citation you can check back against the original text yourself.
 
 **Status: six slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
@@ -162,7 +162,7 @@ own research loop of reading, noting, and deepening a notebook over successive t
 ## What this is not (yet)
 
 This is not the whole design. In particular: there is no provider-swappable LLM configuration
-beyond what `rlm-kit`'s own environment variables already give you, no generated Video Overview,
+beyond what `rlm-harness`'s own environment variables already give you, no generated Video Overview,
 no directly-uploaded audio/video file ingestion or full audio transcription (YouTube's own
 CAPTIONS are supported — see above — but that's captions only, never a transcribed audio track),
 no ATLAS rubric/eval/RL-export member (unlike this project's sibling tools), no trace-file

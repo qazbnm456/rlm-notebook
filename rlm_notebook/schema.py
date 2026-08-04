@@ -1,6 +1,6 @@
 """dspy-free data shapes shared across ingestion, the corpus blob, and the RLM task.
 
-Kept separate from `task.py` (which imports `rlm_kit.RLMTask`, and therefore `dspy`) for the same
+Kept separate from `task.py` (which imports `rlm_harness.RLMTask`, and therefore `dspy`) for the same
 reason ctx-distillery split its own `schema.py` out of `task.py`: importing these shapes from
 `corpus.py`/`citations.py`/a future CLI-only code path should never drag `dspy` in.
 """
