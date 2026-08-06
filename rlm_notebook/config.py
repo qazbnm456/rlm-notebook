@@ -33,6 +33,12 @@ _DEFAULT_TTS_VOICE_HOST_B = "en-US-JennyNeural"
 #: Cap on one uploaded file's byte size (`api.py`'s `POST /notebooks/{id}/sources/upload`).
 _DEFAULT_MAX_UPLOAD_BYTES = 50_000_000
 
+#: Trace-file retention (`traces.prune_traces`). A week of history is enough for the one affordance
+#: a trace actually serves after its run finishes — a citation's "view reasoning" link — without
+#: keeping full ingested source text on disk indefinitely behind an API with no auth (invariant 25).
+_DEFAULT_TRACE_RETENTION_DAYS = 7
+_DEFAULT_MAX_TRACE_FILES = 500
+
 
 def _env_int(name: str, default: int) -> int:
     raw = os.getenv(name)
@@ -57,6 +63,24 @@ def _env_float(name: str, default: float) -> float:
         raise SystemExit(f"{name}={raw!r} is not a number") from None
     if value <= 0:
         raise SystemExit(f"{name}={raw!r} must be a positive number (it is a timeout)")
+    return value
+
+
+def _env_int_allowing_zero(name: str, default: int) -> int:
+    """Like `_env_int`, but accepts `0`. `_env_int` refuses it deliberately — every value it reads
+    is a BUDGET (iterations, tokens, bytes), where zero means "do nothing" and is far more likely a
+    mistake than an intent. The retention knobs below are the opposite: `0` has a well-defined,
+    useful meaning there ("no limit — keep everything"), so they get their own reader rather than
+    loosening `_env_int` for values where zero really is a misconfiguration."""
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        value = int(raw.strip())
+    except ValueError:
+        raise SystemExit(f"{name}={raw!r} is not an integer") from None
+    if value < 0:
+        raise SystemExit(f"{name}={raw!r} must be zero (no limit) or a positive integer")
     return value
 
 
@@ -158,6 +182,23 @@ def max_upload_bytes() -> int:
     reflects this by never calling `_config()` either. Caught while designing the upload endpoint,
     not left for an audit to find."""
     return _env_int("RN_MAX_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES)
+
+
+def trace_retention_seconds() -> float:
+    """`RN_TRACE_RETENTION_DAYS` as seconds; `0` disables the age sweep (keep traces forever).
+
+    Read INDEPENDENTLY of `NotebookConfig.from_env()`, for the same reason `max_upload_bytes` is
+    (invariant 30): `from_env()` raises `SystemExit` whenever `RN_MAIN_MODEL` is unset, and trace
+    housekeeping — which runs at server startup, before any model call is in sight — has nothing to
+    do with whether a model is configured. A server started without model credentials should still
+    tidy up after itself rather than fail to start."""
+    return _env_int_allowing_zero("RN_TRACE_RETENTION_DAYS", _DEFAULT_TRACE_RETENTION_DAYS) * 86_400.0
+
+
+def max_trace_files() -> int:
+    """`RN_MAX_TRACE_FILES`; `0` disables the count sweep. Standalone for the same reason as
+    `trace_retention_seconds`."""
+    return _env_int_allowing_zero("RN_MAX_TRACE_FILES", _DEFAULT_MAX_TRACE_FILES)
 
 
 def setup(config: NotebookConfig) -> NotebookConfig:
