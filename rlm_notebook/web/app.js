@@ -7,6 +7,7 @@
 //   chat:turnAdded     { turn }
 //   chat:pending       { pending }
 //   notes:changed      { notes }
+//   notebook:titled    { title, notebookId }
 // Each pane subscribes only to what it renders from; no pane writes another pane's state directly.
 
 function createStore() {
@@ -27,6 +28,7 @@ const store = createStore();
 const state = {
   notebookId: null,
   title: null,
+  overview: null,
   sources: [],
   turns: [],
   notes: [],
@@ -342,6 +344,7 @@ async function openNotebook(notebookId) {
   notebookGeneration += 1;
   state.notebookId = notebook.id;
   state.title = notebook.title || null;
+  state.overview = notebook.overview || null;
   state.sources = notebook.sources;
   state.turns = notebook.turns;
   state.notes = notebook.notes || [];
@@ -432,6 +435,7 @@ function resetToNewNotebook() {
   notebookGeneration += 1;
   state.notebookId = null;
   state.title = null;
+  state.overview = null;
   state.sources = [];
   state.turns = [];
   state.notes = [];
@@ -716,180 +720,153 @@ function renderTurn(turn) {
   return wrapper;
 }
 
-// --- The "generate the research artifact" first action ---------------------------------------
+// --- The chat overview: the notebook's front page ---------------------------------------------
 //
-// Adding a source used to leave the screen doing nothing: Chat said "ask a question once you've
-// added a source", Studio said "pick a tab to generate it", and both were waiting on the user to
-// discover the next move. The guided feel of a notebook product comes from the artifact appearing
-// IN THE CONVERSATION and being something you can then ask follow-ups about — a Summary buried in a
-// right-hand tab is disconnected from the thread, so even finding it doesn't lead anywhere.
+// Adding a source used to leave the screen doing nothing — Chat said "ask a question once you've
+// added a source", Studio said "pick a tab to generate it", and both waited on the user to discover
+// the next move. The guided feel of a notebook product comes from the artifact appearing IN the
+// conversation and being something you ask follow-ups about; a Summary buried in a right-hand tab
+// is disconnected from the thread, so even finding it leads nowhere.
 //
-// Deliberately still an explicit button, NOT auto-generated on open. A guide run is a real RLM
-// loop, and the reason Phase 2 refused to auto-fetch on notebook open (burning a model call nobody
-// asked for) has not changed — what changed is that the action is now obvious instead of hidden
-// behind a tab nobody clicked.
+// THREE states, not two. The first version had only "generated in this page session" vs "not", on a
+// DOM flag — so every notebook opened showing the first-run button even mid-conversation (reported
+// with a screenshot), and adding a source DELETED the overview and reverted to that same button, so
+// "never generated" and "generated but the sources changed" rendered identically. Confiscating an
+// overview the user just paid an RLM run for, because they added a source, is worse than showing it
+// with a marker: it is still true about the sources it was computed from.
 //
-// The button lives in #chat-overview, NOT in #chat-empty. An independent review found the first
-// version put it in the empty-state node, which `chat:turnAdded` hides — so it vanished after the
-// first question and a returning user opening a notebook that already had turns could never reach
-// it at all. Since an overview is not persisted, that made it permanently unreachable for exactly
-// the notebooks most likely to want one.
+//   never generated          ->  the Generate button
+//   generated, current       ->  the overview + Save as note
+//   generated, sources moved ->  the overview, marked stale, + Regenerate  (+ Save as note: a stale
+//                                overview is precisely the one worth keeping before regenerating)
+//
+// `state.overview` comes from the server, which owns both the artifact and the `stale` verdict.
+// Deliberately still an explicit button, NOT auto-generated on open: a guide run is a real RLM loop
+// and Phase 2's rule (never spend one nobody asked for) is unchanged.
 let overviewToken = 0;
 
-function refreshChatOverview() {
-  const overview = document.getElementById("chat-overview");
-  if (overview._hasOverview) return; // don't clobber a generated one with the starter
-  overview.textContent = "";
-  overview.hidden = !state.sources.length;
+function renderChatOverview() {
+  const el = document.getElementById("chat-overview");
+  el.textContent = "";
+  el.hidden = !state.sources.length;
   if (!state.sources.length) return;
 
+  const overview = state.overview;
+  if (!overview) {
+    el.appendChild(overviewStarter("\u2728 Generate overview", "\u2026or just ask a question below."));
+    return;
+  }
+
+  const head = document.createElement("div");
+  head.className = "chat-overview-head";
+  head.textContent = overview.stale ? "Overview \u00b7 sources have changed since this" : "Overview";
+  el.appendChild(head);
+
+  el.appendChild(renderAnswerWithCitations(overview.text, overview.citations || [], overview.run_id));
+  // Guarded, as `renderTurn` already guards its own: on a fresh page load `tickerLogs` is empty, so
+  // an unconditional call would render a dead "0 steps" pill for every reloaded overview.
+  if (overview.run_id && tickerLogs.has(overview.run_id)) {
+    el.appendChild(renderTickerAffordance(overview.run_id));
+  }
+  el.appendChild(saveAsNoteButton(overview.text));
+
+  if (overview.starter_questions && overview.starter_questions.length) {
+    const label = document.createElement("div");
+    label.className = "chat-overview-head";
+    label.textContent = "Start with";
+    el.appendChild(label);
+    el.appendChild(starterQuestionRow(overview.starter_questions));
+  }
+
+  if (overview.stale) {
+    el.appendChild(overviewStarter("\u21bb Regenerate overview", ""));
+  }
+}
+
+function overviewStarter(labelText, hintText) {
   const wrap = document.createElement("div");
   wrap.className = "chat-starter";
-
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn btn-primary";
-  btn.textContent = "\u2728 Generate overview";
+  btn.textContent = labelText;
   btn.addEventListener("click", () => {
     btn.disabled = true;
     void generateOverview();
   });
   wrap.appendChild(btn);
-
-  const hint = document.createElement("div");
-  hint.className = "hint";
-  hint.textContent = "\u2026or just ask a question below.";
-  wrap.appendChild(hint);
-
-  overview.appendChild(wrap);
+  if (hintText) {
+    const hint = document.createElement("div");
+    hint.className = "hint";
+    hint.textContent = hintText;
+    wrap.appendChild(hint);
+  }
+  return wrap;
 }
 
-// Any change to the corpus makes a generated overview stale — the same rule `initStudioPanel`
-// already applies to its Guide cache ("stale the moment the corpus it was computed from changes,
-// not just when the notebook itself changes"). The first version only handled the notebook half.
-function invalidateChatOverview() {
-  const overview = document.getElementById("chat-overview");
-  overview._hasOverview = false;
-  overviewToken += 1; // also strands any generation still in flight
-  refreshChatOverview();
-}
-
-// Summary and FAQ run CONCURRENTLY, not in sequence: they are two independent RLM runs, so serial
-// execution would double the wait for no reason. (They land in one notebook's single `_ACTIVE_RUNS`
-// slot — invariant 23's documented limitation, meaning only the later one is cancellable. Both
-// still complete, their trace files can't collide since the run ids differ, and nothing here
-// depends on cancelling either.) FAQ is reused rather than adding a cheap ungrounded question
-// generator: its questions are already grounded in the sources by a task that exists, and starter
-// questions gesturing at something the sources don't cover would be worse than none.
-async function generateOverview() {
-  const overview = document.getElementById("chat-overview");
-  const generation = notebookGeneration;
-  const token = (overviewToken += 1);
-  const notebookId = state.notebookId;
-  if (!notebookId) return;
-  const live = () => generation === notebookGeneration && token === overviewToken;
-
-  overview.hidden = false;
-  overview.textContent = "";
-  const pending = document.createElement("div");
-  pending.className = "chat-overview-head";
-  pending.textContent = "Reading your sources\u2026";
-  overview.appendChild(pending);
-
-  // The run id the SERVER will derive — `_derive_run_id` prefixes the notebook id, and both trace
-  // endpoints reject anything that doesn't. Sending a bare uuid and then using that bare value
-  // client-side made every citation's "view reasoning" 404, 100% of the time: copied from
-  // `suggestTitle`, where a bare token is fine precisely because it is never used client-side.
-  const summaryToken = crypto.randomUUID();
-  const faqToken = crypto.randomUUID();
-  const summaryRun = `${notebookId}-${summaryToken}`;
-  const faqRun = `${notebookId}-${faqToken}`;
-
-  const call = (kind, runToken) =>
-    api(`/notebooks/${encodeURIComponent(notebookId)}/guide/${kind}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ run_id: runToken }),
-    });
-
-  // The live ticker, same secondary-layer contract as ask/guide/podcast: losing it never affects
-  // the request. Without opening it, `renderTickerAffordance` below would render a dead "0 steps".
-  void openTicker(notebookId, summaryRun, (event) => {
-    if (live() && event.summary) pending.textContent = event.summary;
-  });
-
-  // allSettled, not all: an FAQ failure must not cost the user the summary that succeeded — the
-  // same "never lose what already succeeded" discipline the transcript/TTS split already uses.
-  const [summary, faq] = await Promise.allSettled([
-    call("summary", summaryToken),
-    call("faq", faqToken),
-  ]);
-  if (!live()) return;
-
-  overview.textContent = "";
-  const head = document.createElement("div");
-  head.className = "chat-overview-head";
-  head.textContent = "Overview";
-  overview.appendChild(head);
-
-  if (summary.status === "fulfilled") {
-    overview.appendChild(
-      renderAnswerWithCitations(summary.value.text, summary.value.citations || [], summaryRun)
-    );
-    overview.appendChild(renderTickerAffordance(summaryRun));
-    // The overview is not persisted (no guide artifact is). Saving it as a note is the ONLY way to
-    // keep it — and, once promoted, the only way to make it citable by a later question. That is
-    // exactly the loop NotebookLM runs on, and every piece of it already existed here.
-    overview.appendChild(saveAsNoteButton(summary.value.text));
-  } else {
-    const err = document.createElement("div");
-    err.textContent = `(could not generate an overview: ${summary.reason.message})`;
-    overview.appendChild(err);
-  }
-
-  const label = document.createElement("div");
-  label.className = "chat-overview-head";
-  overview.appendChild(label);
-
-  if (faq.status !== "fulfilled") {
-    // Stated, not silent: half the action failed and the user should not have to guess why there
-    // are no starter questions.
-    label.textContent = `Starter questions unavailable (${faq.reason.message})`;
-    overview._hasOverview = true;
-    return;
-  }
-
-  const questions = (faq.value.items || []).map((item) => item.question).slice(0, 3);
-  if (!questions.length) {
-    label.textContent = "";
-    overview._hasOverview = true;
-    return;
-  }
-  label.textContent = "Start with";
-
+function starterQuestionRow(questions) {
   const row = document.createElement("div");
   row.className = "starter-questions";
   questions.forEach((question) => {
     const chip = document.createElement("button");
     chip.type = "button";
     chip.className = "starter-question";
-    // textContent, never innerHTML — a starter question is model-authored text derived from
-    // source content a prompt-injected source could influence (invariants 6 and 29).
+    // textContent, never innerHTML — model-authored text derived from source content a
+    // prompt-injected source could influence (invariants 6 and 29).
     chip.textContent = question;
     chip.addEventListener("click", () => {
-      // `requestSubmit()` submits as if by the form, so a DISABLED submit button never blocks it —
-      // an independent review found two chips clicked in a row produced two pending turns, one of
-      // which visibly vanished when the first answer rebuilt the history. The chips live outside
-      // the region `chat:pending` disables, so the guard has to be here.
+      // `requestSubmit()` submits as if by the form, so a DISABLED submit button never blocks it;
+      // the chips live outside the region `chat:pending` disables, so the guard has to be here.
       if (document.getElementById("ask-submit").disabled) return;
-      const input = document.getElementById("ask-input");
-      input.value = question;
+      document.getElementById("ask-input").value = question;
       document.getElementById("ask-form").requestSubmit();
     });
     row.appendChild(chip);
   });
-  overview.appendChild(row);
-  overview._hasOverview = true;
+  return row;
+}
+
+// One POST; the server runs Summary and FAQ concurrently and persists the result, so nothing is
+// lost if this tab closes while it runs.
+async function generateOverview() {
+  const el = document.getElementById("chat-overview");
+  const generation = notebookGeneration;
+  const token = (overviewToken += 1);
+  const notebookId = state.notebookId;
+  if (!notebookId) return;
+  const live = () => generation === notebookGeneration && token === overviewToken;
+
+  el.hidden = false;
+  el.textContent = "";
+  const pending = document.createElement("div");
+  pending.className = "chat-overview-head";
+  pending.textContent = "Reading your sources\u2026";
+  el.appendChild(pending);
+
+  // The server appends `-summary` to the run id it derives, so the ticker's target is predictable.
+  // Trace LINKS afterwards come from the server-returned `overview.run_id`, never a reconstruction.
+  const runToken = crypto.randomUUID();
+  void openTicker(notebookId, `${notebookId}-${runToken}-summary`, (event) => {
+    if (live() && event.summary) pending.textContent = event.summary;
+  });
+
+  try {
+    const notebook = await api(`/notebooks/${encodeURIComponent(notebookId)}/overview`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runToken }),
+    });
+    if (!live()) return;
+    state.overview = notebook.overview;
+    renderChatOverview();
+  } catch (err) {
+    if (!live()) return;
+    el.textContent = "";
+    const note = document.createElement("div");
+    note.textContent = `(could not generate an overview: ${err.message})`;
+    el.appendChild(note);
+    el.appendChild(overviewStarter("\u21bb Try again", ""));
+  }
 }
 
 function initChatPanel() {
@@ -900,12 +877,8 @@ function initChatPanel() {
   const submitBtn = document.getElementById("ask-submit");
 
   store.on("notebook:switched", () => {
-    const overview = document.getElementById("chat-overview");
-    overview._hasOverview = false;
-    overviewToken += 1;
-    overview.hidden = true;
-    overview.textContent = "";
-    refreshChatOverview();
+    overviewToken += 1; // a notebook switch strands any generation still in flight
+    renderChatOverview();
     history.innerHTML = "";
     // Un-hide the placeholder too: `chat:turnAdded` hides it, and without this a switch FROM a
     // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at
@@ -914,10 +887,13 @@ function initChatPanel() {
     history.appendChild(empty);
   });
 
-  // Chat's own reaction to the corpus changing: the "generate an overview" action only exists once
-  // there is something to summarise, and an already-generated overview is stale once it changes.
-  store.on("sources:changed", () => invalidateChatOverview());
-  refreshChatOverview();
+  // Chat's own reaction to the corpus changing. Re-render only — deliberately NOT a token bump:
+  // that would strand a generation the server has already persisted, leaving the user looking at
+  // the button after paying for two RLM runs sitting on disk (adding a source while the model works
+  // is the exact behaviour invariant 34 documents as real). The re-render flips the overview to
+  // stale on its own, because the server's `source_ids` no longer match.
+  store.on("sources:changed", () => renderChatOverview());
+  renderChatOverview();
 
   store.on("chat:turnAdded", ({ turn }) => {
     empty.hidden = true;

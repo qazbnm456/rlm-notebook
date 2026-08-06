@@ -1045,6 +1045,44 @@ questions with verifiable citations, and get a distilled research artifact out.
   cite. A toy source whose summary restated it verbatim instead hit the documented dedup no-op,
   which is the correct behaviour and worth having seen.
 
+- **Eighteenth slice: the overview persists, and goes stale instead of vanishing.** A user
+  re-opened a notebook holding a full conversation and still saw the first-run `✨ Generate
+  overview` button. The overview had never been persisted — it lived as a flag on a DOM node — so
+  every notebook opened in the "never generated" state. The second half was worse: adding a source
+  DELETED the overview and reverted to that same button, making "never generated" and "generated
+  but the sources moved since" render identically, and confiscating an artifact that cost a real
+  RLM run.
+
+  `schema.Overview` on `Notebook.overview` (optional, so old files still load), with the source ids
+  it was computed from as the staleness key — a comparison, not a timestamp. Three states, and the
+  stale one KEEPS the overview on screen with a marker plus `↻ Regenerate`, because it is still
+  true about the sources it was computed from. A deliberately narrow cut of the long-deferred
+  "guide artifacts aren't cached" item: the overview only, never the four Studio tabs.
+
+  Generation moved server-side (`POST /notebooks/{id}/overview`, running Summary and FAQ
+  concurrently), not because of provenance but because closing the tab between a client-side
+  generate and a store call would lose a paid-for run.
+
+  **A pre-implementation audit found 2 blockers and 6 should-fixes, all folded in before any code
+  was written** — both blockers were cases where the natural implementation is silently wrong.
+  Building the `Overview` inside the `mutate_notebook` closure would have captured the source ids
+  at PERSIST time, claiming coverage of a source the model never read. And forming
+  `<token>-summary` before slugging breaks twice: an absent `run_id` yields the literal
+  deterministic `None-summary`, so the first anonymous request wins the exclusive-create gate and
+  every later one 409s for as long as retention keeps the trace; and `slug`'s 120-char cap merges
+  the two suffixes for a long token (`slug("a"*119 + "-summary") == slug("a"*119 + "-faq")`,
+  verified). Both fixes are mutation-tested.
+
+  The audit also caught a PRE-EXISTING bug it would have made permanent: `stream_run` and
+  `citation_turn` compared the RAW notebook id against a run id `_derive_run_id` had slugged, so
+  every trace link was dead for `"my notebook"` or any non-Latin id (invariant 10). Harmless while
+  the affordance was ephemeral; a dead link on the front page once `Overview.run_id` persists.
+
+  Verified live end to end: generate → reload (survives, `stale: false`) → add a source (still
+  there, `stale: true`) → trace link still 200. Plus both blockers checked directly: two anonymous
+  requests in a row both 200 with distinct run ids, and a 121-character token no longer collapses
+  its two run ids into one.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

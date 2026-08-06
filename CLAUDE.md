@@ -909,4 +909,58 @@ assume any of them exist because an earlier design discussion mentioned them.
     schema validation behind it; the web UI renders it with `textContent`, never `innerHTML`, for
     the same reason every other model-derived string is (invariants 6 and 29).
 
+38. **The chat overview is the ONE guide artifact persisted onto a notebook (`schema.Overview`,
+    `Notebook.overview`), and it is marked STALE rather than deleted when the sources change.** A
+    user reported the symptom: re-opening a notebook that already held a conversation still showed
+    the first-run `✨ Generate overview` button, because the overview lived only as a front-end flag
+    on a DOM node. Worse, adding a source DELETED it and reverted to that same button — so "never
+    generated" and "generated but the sources moved since" rendered identically, and an overview
+    that cost a real RLM run vanished for adding a source. Three states now: never generated →
+    the button; current → the overview; stale → the overview, marked, plus `↻ Regenerate` (and
+    `+ Save as note` in BOTH generated states — a stale overview is precisely the one worth keeping
+    before regenerating).
+
+    A deliberately NARROW cut of the long-deferred "guide artifacts aren't cached onto a notebook"
+    scope item: the overview only, never the four Studio guide kinds. The overview is the notebook's
+    front page and is what a returning user expects to still be there; a Studio tab is an on-demand
+    tool and stays on demand. It does not make `+ Save as note` redundant — the field holds the
+    CURRENT overview and is replaced on regeneration, while a note is a copy the user chose to keep
+    and the only thing `promote_note` can turn into a citable source.
+
+    **`Overview.source_ids` is captured at RUN START, never at persist time.** Building the object
+    inside the `mutate_notebook` closure reads as the tidy thing to do and is silently wrong: a
+    source added while the run was in flight would be listed as covered by an overview the model
+    never read, and the staleness key would then claim "current" when it isn't. The object is built
+    OUTSIDE the lock from the snapshot and the closure is a pure delta (invariant 34). Honest
+    consequence, not a bug: adding a source mid-generation makes the overview land ALREADY STALE.
+    Same reasoning `ask` already uses for verifying citations against the snapshot corpus — "the
+    blob the model actually read". Staleness itself is SET-EQUALITY on source ids computed
+    server-side in `_notebook_response` (one definition, not one per consumer); nothing in this
+    project removes a source, so set/list/length checks are equivalent today, and the set is kept
+    because a future removal path would then break it in the SAFE direction.
+
+    **`/overview` suffixes its two run ids AFTER derivation** — `base = _derive_run_id(id, token)`
+    then `f"{base}-summary"`/`f"{base}-faq"`, with `token = body.run_id or uuid4().hex` capped at
+    `_RUN_TOKEN_MAX`. Forming `<token>-summary` first and slugging the result breaks twice, both
+    found by this slice's pre-implementation audit and both verified: `run_id` is OPTIONAL, so an
+    anonymous request yields the literal deterministic `None-summary` — the first request wins the
+    exclusive-create gate and every later one 409s until retention collects the trace, up to
+    `RN_TRACE_RETENTION_DAYS` later — and `slug`'s 120-character cap MERGES the two suffixes for a
+    long client-chosen token (`slug("a"*119 + "-summary") == slug("a"*119 + "-faq")`), 409ing one
+    run as a confusing half-failure. The cap also keeps the trace filename clear of a 255-byte
+    `NAME_MAX`, which the un-capped form sat exactly on.
+
+    **Generation is server-side, not a `PUT` of what the client already has.** The decisive reason
+    is NOT provenance (invariant 25 already lets any caller store arbitrary prose via `POST /notes`,
+    and the citations are re-verified on read regardless) — it is that closing the tab between the
+    guide response and a store call would LOSE a paid-for run, the same "never lose what already
+    succeeded" discipline invariants 19 and 37 encode. An FAQ failure persists the summary with no
+    starter questions; a summary failure persists nothing, because there is no overview without it.
+
+    **`stream_run` and `citation_turn` now compare `slug(notebook_id)`, not the raw id.** They
+    guarded with the raw form while `_derive_run_id` slugs it, so every trace link was dead for any
+    id the slug changes — `"my notebook"`, or any non-Latin id, which invariant 10 explicitly
+    supports. Pre-existing, and found by this slice's audit precisely because persisting
+    `Overview.run_id` would have made a dead link the notebook's front page.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

@@ -176,6 +176,29 @@ class Note(BaseModel):
     text: str
 
 
+class Overview(BaseModel):
+    """The notebook's front page: a Summary plus the FAQ questions offered as follow-ups.
+
+    The ONE guide artifact persisted onto a notebook (a deliberately narrow cut of the long-deferred
+    "guide artifacts aren't cached" scope item). The overview is what a returning user expects to
+    still be there; a Studio tab is an on-demand tool and stays on demand.
+    """
+
+    text: str
+    citations: list[Citation] = Field(default_factory=list)
+    starter_questions: list[str] = Field(default_factory=list)
+    #: The SUMMARY run, for the trace affordance. Outlives its trace file once
+    #: `RN_TRACE_RETENTION_DAYS` collects it — same as `ChatTurn.run_id`, degrading to no affordance
+    #: rather than a broken page, but this is now the most visible instance of that.
+    run_id: str | None = None
+    #: The source ids this was computed from, captured at RUN START — never at persist time. That
+    #: distinction is the whole staleness mechanism: a source added while the run was in flight was
+    #: never read by the model, so listing it here would claim coverage that doesn't exist. The
+    #: honest consequence is that such an overview lands ALREADY STALE. Same reasoning `ask` uses
+    #: for verifying citations against the snapshot corpus — "the blob the model actually read".
+    source_ids: list[str] = Field(default_factory=list)
+
+
 class Notebook(BaseModel):
     """Sources plus chat history that survive across `ask` invocations (see `notebook.py`). This is
     the whole persisted unit — one JSON file per notebook, no database."""
@@ -187,6 +210,9 @@ class Notebook(BaseModel):
     #: and defaulting to None, so every notebook written before this field existed still loads —
     #: the same backward-compatible precedent `ChatTurn.run_id` and `Notebook.notes` already set.
     title: str | None = None
+    #: The persisted chat overview, if one has been generated. Optional and defaulting to None, so
+    #: notebooks written before it existed still load (the precedent `run_id`/`notes`/`title` set).
+    overview: Overview | None = None
     sources: list[Source] = Field(default_factory=list)
     turns: list[ChatTurn] = Field(default_factory=list)
     notes: list[Note] = Field(default_factory=list)

@@ -101,6 +101,7 @@ from .schema import (
     Citation,
     KeyInsight,
     Notebook,
+    Overview,
     PodcastScript,
     Summary,
     Timeline,
@@ -176,6 +177,12 @@ _ACTIVE_RUNS: dict[str, runner.Run] = {}
 #: phase's own pre-implementation audit). Keyed by the run id itself, which `_run_isolated`'s own
 #: exclusive-create gate (below) guarantees is unique — two entries here can never collide.
 _RUN_PROCESSES: dict[str, asyncio.subprocess.Process | None] = {}
+
+#: Cap on a client-supplied run token. `_derive_run_id` prefixes the (slugged) notebook id and
+#: `/overview` then appends a literal `-summary`/`-faq`; without a cap the whole thing plus
+#: `.jsonl` lands exactly on a 255-byte filesystem NAME_MAX, which `_derive_run_id`'s own history
+#: records having already produced an unauthenticated 500 once.
+_RUN_TOKEN_MAX = 64
 
 #: How the trace-stream endpoint paces itself — see `_tail_trace_events`.
 _TRACE_POLL_INTERVAL = 0.2
@@ -354,9 +361,20 @@ class NoteResponse(BaseModel):
     text: str
 
 
+class OverviewResponse(BaseModel):
+    text: str
+    citations: list[CitationResponse]
+    starter_questions: list[str] = []
+    run_id: str | None = None
+    #: Computed HERE, not by the client: `_notebook_response` holds both halves, so the rule lives
+    #: in one place instead of being re-implemented by every future consumer.
+    stale: bool = False
+
+
 class NotebookResponse(BaseModel):
     id: str
     title: str | None = None
+    overview: OverviewResponse | None = None
     sources: list[dict]
     turns: list[ChatTurnResponse]
     notes: list[NoteResponse]
@@ -388,6 +406,29 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
             for t in notebook.turns
         ],
         notes=[NoteResponse(id=n.id, text=n.text) for n in notebook.notes],
+        overview=_overview_response(notebook, corpus),
+    )
+
+
+def _overview_response(notebook: Notebook, corpus) -> OverviewResponse | None:
+    """The persisted overview, with its citations RE-VERIFIED against the current corpus — the same
+    discipline every `ChatTurn` already gets on read (invariant 11's reasoning generalises: a stored
+    citation is a claim about a corpus that may have changed since).
+
+    `stale` is set-equality on the source ids, not a timestamp: it answers "was this computed from
+    what is in the notebook now" exactly, survives a restart, and needs no clock. Nothing in this
+    project ever REMOVES a source, so today set-equality, list-equality and a length check are
+    equivalent — the set is kept because a future removal path would then break it in the safe
+    direction (marks stale) rather than the unsafe one."""
+    overview = notebook.overview
+    if overview is None:
+        return None
+    return OverviewResponse(
+        text=overview.text,
+        citations=_citation_responses(overview.citations, corpus),
+        starter_questions=overview.starter_questions,
+        run_id=overview.run_id,
+        stale=set(overview.source_ids) != {s.id for s in notebook.sources},
     )
 
 
@@ -846,6 +887,74 @@ async def suggest_title(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) ->
     return _notebook_response(notebook)
 
 
+@app.post("/notebooks/{notebook_id}/overview", response_model=NotebookResponse)
+async def generate_overview(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> NotebookResponse:
+    """Generate the notebook's front page — a Summary plus FAQ questions offered as follow-ups —
+    and PERSIST it onto the notebook.
+
+    Server-side rather than a `PUT` of whatever the client already generated. The decisive reason
+    is not provenance (invariant 25 already lets any caller store arbitrary prose via `POST /notes`,
+    and the citations are re-verified on read anyway) — it is that closing the tab between the guide
+    response and a store call would LOSE a paid-for run, the same "never lose what already
+    succeeded" discipline invariants 19 and 37 encode.
+
+    **The persisted `source_ids` is the snapshot at RUN START, never at persist time.** Building the
+    `Overview` inside the `mutate_notebook` closure reads as the tidy thing to do and is silently
+    wrong: a source added while the run was in flight would be listed as covered by an overview the
+    model never read, and the staleness key would then claim "current" when it isn't. So the object
+    is built out here from the snapshot and the closure is a pure delta (invariant 34). The honest
+    consequence, not a bug: adding a source mid-generation makes the overview land ALREADY STALE.
+
+    **The two run ids are suffixed AFTER derivation.** Forming `<token>-summary` first and slugging
+    the result breaks twice: `run_id` is optional, so an anonymous request would produce the literal
+    deterministic id `None-summary` — the first request leaves a trace file and every later one 409s
+    on the exclusive-create gate for as long as retention keeps it — and `slug`'s 120-character cap
+    can merge the two suffixes for a long client-chosen token, 409ing one run as a confusing
+    half-failure. Both found by this slice's pre-implementation audit.
+
+    An FAQ failure persists the summary with no starter questions; a summary failure persists
+    nothing, because there is no overview without it."""
+    notebook = _load_notebook_or_404(notebook_id)
+    if not notebook.sources:
+        raise HTTPException(422, "cannot summarise a notebook with no sources yet")
+
+    corpus = corpus_of(notebook)
+    config = _config()
+    try:
+        blob = corpus.blob(max_chars=config.max_corpus_chars)
+    except CorpusTooLargeError as exc:
+        raise HTTPException(413, str(exc)) from exc
+
+    source_ids = [s.id for s in notebook.sources]  # the snapshot the model actually reads
+    base = _derive_run_id(notebook_id, (body.run_id or uuid.uuid4().hex)[:_RUN_TOKEN_MAX])
+    summary_run, faq_run = f"{base}-summary", f"{base}-faq"
+
+    summary, faq = await asyncio.gather(
+        _run_isolated(notebook_id, _dotted(GenerateSummary), {"sources": blob}, config, summary_run),
+        _run_isolated(notebook_id, _dotted(GenerateFAQ), {"sources": blob}, config, faq_run),
+        return_exceptions=True,
+    )
+    if isinstance(summary, BaseException):
+        raise summary  # no overview without a summary — surface the real error
+
+    parsed = Summary.model_validate(summary)
+    questions: list[str] = []
+    if not isinstance(faq, BaseException):
+        questions = [item.question for item in FAQ.model_validate(faq).items][:3]
+
+    overview = Overview(
+        text=parsed.text,
+        citations=parsed.citations,
+        starter_questions=questions,
+        run_id=summary_run,
+        source_ids=source_ids,
+    )
+    notebook = await _mutate_or_http(
+        notebook_id, lambda nb: setattr(nb, "overview", overview), create=False
+    )
+    return _notebook_response(notebook)
+
+
 @app.post("/notebooks/{notebook_id}/guide/{kind}")
 async def guide(notebook_id: str, kind: str, body: RunOptions = _NO_RUN_OPTIONS) -> dict:
     if kind not in _GUIDE_TASKS:
@@ -1081,7 +1190,11 @@ async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
     belongs to a different notebook."""
 
     async def _events():
-        if not run_id.startswith(f"{notebook_id}-"):
+        # `slug(notebook_id)`, not the raw id: `_derive_run_id` slugs it, so comparing the raw
+        # form made every trace link dead for any id the slug changes (e.g. "my notebook", or any
+        # non-Latin id, which invariant 10 explicitly supports). Found by an audit of the
+        # persistent-overview design, which would have made a dead link the notebook's front page.
+        if not run_id.startswith(f"{slug(notebook_id)}-"):
             yield f"data: {json.dumps({'step': None, 'kind': 'not_found', 'summary': f'run {run_id!r} does not belong to notebook {notebook_id!r}'})}\n\n"
             return
         async for event in _tail_trace_events(run_id):
@@ -1110,7 +1223,7 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
     traces on a policy (`RN_TRACE_RETENTION_DAYS`/`RN_MAX_TRACE_FILES`), so a citation's "view
     reasoning" link is durable for as long as that policy keeps its run's file and no longer. A
     missing trace degrades this ONE affordance, not the rest of the page."""
-    if not run_id.startswith(f"{notebook_id}-"):
+    if not run_id.startswith(f"{slug(notebook_id)}-"):  # slugged, same reason as `stream_run`
         raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
     trace_path = _TRACE_DIR / f"{run_id}.jsonl"
     if not trace_path.exists():

@@ -1341,3 +1341,81 @@ def test_the_stream_does_not_declare_a_reserved_run_dead(monkeypatch):
 
     assert still_waiting, "the stream declared a reserved-but-not-yet-spawned run dead"
     assert events[0]["summary"] == "run ended without a final event"
+
+
+# --- persistent overview --------------------------------------------------------------------
+
+
+def _overview_notebook(client, monkeypatch, result=None):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, result if result is not None else {"text": "an overview", "citations": []})
+
+
+def test_the_overview_persists_and_is_returned_on_read(client, monkeypatch):
+    """The defect this fixed: the overview lived only as a front-end flag, so EVERY notebook opened
+    showing the first-run button — even one mid-conversation (reported with a screenshot)."""
+    _overview_notebook(client, monkeypatch)
+
+    resp = client.post("/notebooks/mynb/overview", json={"run_id": "tok"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["overview"]["text"] == "an overview"
+
+    reopened = client.get("/notebooks/mynb").json()["overview"]
+    assert reopened is not None
+    assert reopened["stale"] is False
+
+
+def test_adding_a_source_marks_the_overview_stale_rather_than_deleting_it(client, monkeypatch):
+    """Confiscating an overview the user just paid an RLM run for, because they added a source, is
+    worse than showing it with a marker — it is still true about the sources it was computed from.
+    Before this, "never generated" and "generated but the sources changed" rendered identically."""
+    _overview_notebook(client, monkeypatch)
+    client.post("/notebooks/mynb/overview", json={"run_id": "tok"})
+
+    client.post("/notebooks/mynb/sources", json={"texts": ["a second source"]})
+
+    overview = client.get("/notebooks/mynb").json()["overview"]
+    assert overview is not None, "the overview was deleted instead of marked stale"
+    assert overview["stale"] is True
+
+
+def test_the_overview_run_id_is_suffixed_after_derivation(client, monkeypatch):
+    """Both halves of a blocker the pre-implementation audit found. Forming `<token>-summary` and
+    THEN slugging breaks twice: an absent `run_id` yields the literal deterministic `None-summary`
+    (so the first anonymous request wins the exclusive-create gate and every later one 409s until
+    retention collects the trace), and `slug`'s 120-char cap merges the two suffixes for a long
+    client-chosen token, 409ing one run as a confusing half-failure."""
+    _overview_notebook(client, monkeypatch)
+
+    first = client.post("/notebooks/mynb/overview", json={})
+    second = client.post("/notebooks/mynb/overview", json={})
+    assert first.status_code == 200 and second.status_code == 200, "an anonymous retry 409'd"
+    assert "None" not in (first.json()["overview"]["run_id"] or "")
+
+    long_token = "a" * 200
+    resp = client.post("/notebooks/mynb/overview", json={"run_id": long_token})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["overview"]["run_id"].endswith("-summary")
+
+
+def test_an_overview_is_refused_for_a_notebook_with_no_sources(client, monkeypatch):
+    _live_env(monkeypatch)
+    client.post("/notebooks/empty/notes", json={"text": "just a note"})
+    assert client.post("/notebooks/empty/overview", json={}).status_code == 422
+
+
+def test_the_persisted_overviews_citations_are_reverified_on_read(client, monkeypatch):
+    """Same discipline every ChatTurn already gets: a stored citation is a claim about a corpus that
+    may have changed since, so it is re-verified against the CURRENT one rather than trusted."""
+    _overview_notebook(
+        client,
+        monkeypatch,
+        {"text": "x", "citations": [{"source_id": "s99", "locator": "whole", "quote": "q"}]},
+    )
+
+    client.post("/notebooks/mynb/overview", json={"run_id": "tok"})
+
+    citation = client.get("/notebooks/mynb").json()["overview"]["citations"][0]
+    assert citation["verified"] is False
+    assert "s99" in citation["reason"]
