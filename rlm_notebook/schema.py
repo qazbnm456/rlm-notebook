@@ -37,7 +37,7 @@ class Source(BaseModel):
     origin: str
     blocks: list[SourceBlock]
     #: Deterministic prompt-injection heuristic flags from `injection_scan.py` (CLAUDE.md invariant
-    #: 5) — additive metadata, never a gate. Empty means "not flagged", not "verified clean".
+    #: 6) — additive metadata, never a gate. Empty means "not flagged", not "verified clean".
     flags: list[str] = Field(default_factory=list)
 
     def marker(self, locator: str) -> str:

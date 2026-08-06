@@ -136,7 +136,7 @@ class SuggestLanguage:
 class SuggestTitle:
     """`worker.py`-compatible: one `arun(**kwargs)` coroutine, nothing else.
 
-    `arun(sources=<corpus excerpt>, origins=<list[str]>) -> str`.
+    `arun(sources=<corpus excerpt>, origins=<list[str]>, language=<resolved language>) -> str`.
     """
 
     async def arun(

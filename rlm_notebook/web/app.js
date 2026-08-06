@@ -1266,7 +1266,7 @@ function renderPodcastUtterance(utterance, runId) {
 // range-request it, so seeking in a long episode doesn't re-download it, and reopening a notebook
 // costs no re-synthesis. The `cacheBust` token is what makes REGENERATING visible — the path is
 // stable per notebook, so without it the browser would keep serving the previous episode.
-function renderPodcast(body, { utterances, runId, audioSrc, stale }) {
+function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix }) {
   body.innerHTML = "";
 
   if (stale) {
@@ -1291,8 +1291,12 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale }) {
     .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
-  download.download = `${stem || "notebook"}.mp3`;
-  download.textContent = "\u2913 Download mp3";
+  // The extension follows the SERVED file, not a hardcoded guess: kokoro writes WAV and edge-tts
+  // writes MP3, so naming the download `.mp3` unconditionally would mislabel half of them. An audit
+  // found this listed among invariant 43's "handled" consequences when it was not.
+  const ext = (suffix || "").replace(/^\./, "");
+  download.download = ext ? `${stem || "notebook"}.${ext}` : stem || "notebook";
+  download.textContent = ext ? `\u2913 Download ${ext}` : "\u2913 Download audio";
   body.appendChild(download);
 
   if (runId && tickerLogs.has(runId)) body.appendChild(renderTickerAffordance(runId));
@@ -1322,6 +1326,7 @@ function initPodcastPlayer() {
       utterances: podcast.utterances,
       runId: podcast.run_id,
       audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file`,
+      suffix: podcast.audio_suffix,
       stale: podcast.stale,
     });
   });
@@ -1369,6 +1374,7 @@ function initPodcastPlayer() {
         // serving the episode it already has and "Regenerate" would look like it did nothing.
         audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file?v=${token}`,
         stale: false,
+        suffix: data.audio_suffix,
       });
     } catch (err) {
       body.classList.remove("is-pending");
@@ -1379,7 +1385,11 @@ function initPodcastPlayer() {
     }
   });
 
-  store.on("notebook:switched", clearPlayer);
+  // NO second `notebook:switched` subscriber here. There used to be one (`clearPlayer`), registered
+  // AFTER the render handler above — and `store.emit` runs subscribers in registration order, so it
+  // blanked the panel the render handler had just filled. A persisted episode therefore never
+  // appeared on notebook open, which is the entire point of persisting it. The render handler
+  // clears first itself.
 }
 
 // --- Notes section (Studio panel) ----------------------------------------------------------------

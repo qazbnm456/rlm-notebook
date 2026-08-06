@@ -95,10 +95,17 @@ were all considered and rejected first):
 ## 5. Components
 
 ### 5.1 Header
-Wordmark (`rlm-notebook`) left. Center: the notebook switcher — a text input with a `<datalist>`
-populated from `GET /notebooks`, an `Open` button (Enter also submits). A notebook that doesn't exist
-yet opens as an empty, unpersisted one, matching `notebook.load_or_create`'s own semantics — it becomes
-real the first time a source is added. Right: the Paper/Study theme toggle (`☀`/`☾`).
+
+56px, `--surface` with a blur. Left to right:
+
+- **Wordmark** (`#new-notebook`) — a real `<button>`, not a label: it starts an empty notebook.
+  Needs its own chrome reset, since the global `button` rule only resets font and colour.
+- **Notebook title** (`#notebook-title`) — the notebook's human name (invariant 37). Hidden when no
+  notebook is open. The id is a handle the user never has to invent or read.
+- **Notebook switcher** — an id input + `Open`, with a `datalist` of existing notebooks. The input
+  is rewritten from state on every switch, so it can never disagree with what the app is acting on.
+- **`.header-actions`** (right) — the settings ⚙ (`#settings-open`, invariant 41) and the theme
+  toggle. ONE wrapper owns the push-right; giving both buttons `margin-left: auto` misplaced them.
 
 ### 5.2 Sources (left rail, ~280px)
 A kind-agnostic "Add source" form: URL / paste-text / file tabs (blueprint §7 — built extensible so
@@ -128,7 +135,7 @@ citation's block highlighted — regardless of whether its `quote` matched inlin
 a row also carries a secondary `⌁ trace` icon (only when a run id is known) that opens the Phase 3
 trace detail (§5.5) instead, stopping the row's own click from also firing.
 A pending turn (the model is still running — this is a real, potentially tens-of-seconds-long RLM
-loop, invariant 21) shows LIVE, updating copy from the Phase 3 reasoning ticker (§5.6) in place of a
+loop, invariant 21) shows LIVE, updating copy from the Phase 3 reasoning ticker (§5.5) in place of a
 static "Thinking…" — the ticker is a secondary, opt-in layer; losing it (a dropped SSE connection)
 never blocks the request, which remains the sole source of the final answer. An error surfaces
 in-place as `(error) <message>`, never a silent disappearance of the question the user just asked.
@@ -144,9 +151,11 @@ cached Guide result is stale the instant the corpus it was computed from changes
 `insight` reuse `renderAnswerWithCitations` verbatim (same citation-highlighter treatment as Chat);
 `faq` renders one `.guide-item` block per Q/A pair; `timeline` renders one `.guide-item` per
 `{when, description}` event. Below: a `Generate podcast` button — `POST .../audio` runs a real RLM
-script-generation loop THEN a real network TTS call in series, so this is now the single slowest
+script-generation loop THEN a TTS call in series (a NETWORK call for edge-tts, fully local for
+kokoro — invariant 43), so this is the single slowest
 action in the product, with its own pending copy saying so — producing an `<audio controls>`
-element (backed by a `Blob`/`ObjectURL`, not a `data:` URI, so a multi-MB episode doesn't sit fully
+element (playing from `GET .../audio/file`, so a persisted episode replays without re-synthesis and a
+multi-MB episode doesn't sit fully
 base64-encoded in a DOM attribute for its whole lifetime) plus a transcript below it, one
 `.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
 collapse-when-empty (still deferred — no phase has needed it yet). Notes section: see §5.8.
@@ -228,9 +237,11 @@ and/or Notes from the mutating endpoint's own returned `NotebookResponse`, the s
 IS the new state" pattern the Sources panel's add-source form already uses.
 
 Every Chat answer (`renderTurn`, §5.3) carries a `+ Save as note` button — added by `renderTurn`
-ITSELF, never inside the shared `renderAnswerWithCitations`, which five OTHER call sites (every
-Guide kind, the podcast transcript) also use and must never show this button on. Posts the
-answer's own already-in-hand text to `POST /notebooks/{id}/notes`, no DOM scraping or re-fetch.
+that OPTS IN, via the shared `saveAsNoteButton` factory — never inside
+`renderAnswerWithCitations` itself, which six call sites use. TWO sites opt in: a Chat answer
+and the chat overview (§5.9). The line is the SURFACE, not who authored the text: things
+rendered in the chat thread are the user's to curate; a Studio tab's artifact and the podcast
+transcript are not (CLAUDE.md invariant 32).
 
 A note carries no citations of its own and is never re-verified against `sources` (CLAUDE.md
 invariant 5's coordinate-only guarantee doesn't extend to freeform notes) until it's promoted —
@@ -241,7 +252,7 @@ nothing in this section's UI should imply a note is "grounded" before that point
 `#chat-overview`, a block ABOVE `#chat-history` (never inside it: `ask` rebuilds the history list
 wholesale from `state.turns` after every answer, which would wipe anything else in there).
 
-Two states, one container:
+Three states, one container:
 
 - **No overview yet, sources present** — a primary `✨ Generate overview` button plus the hint
   "…or just ask a question below."
@@ -263,7 +274,8 @@ right-hand tab is disconnected from the thread, so even finding it leads nowhere
 never spend one nobody asked for) is unchanged — what changed is that the action is obvious rather
 than hidden behind a tab.
 
-**Not persisted**, matching every other guide artifact, and invalidated whenever the corpus changes
+**Persisted** (invariant 38 — a deliberately narrow cut of the never-cache-guide-artifacts rule,
+the overview only) and marked STALE rather than deleted whenever the corpus changes
 (the same rule the Studio cache follows: stale the moment the sources it was computed from change,
 not just when the notebook does).
 
@@ -296,7 +308,10 @@ let the citation-turn detail panel imply a stronger claim either — it shows WH
 something, never that the surrounding prose is faithful to it; don't collapse the Studio panel yet
 — no phase has needed it yet; don't auto-fetch a Guide kind on notebook open or on a bare tab switch
 — only first activation or an explicit regenerate; don't use a `data:` URI for the podcast player —
-a `Blob`/`ObjectURL` instead, revoked in the correct order (assign the new URL before revoking the
+a real URL on this server instead (`GET .../audio/file`). The episode is PERSISTED (invariant 42),
+so there is no object URL to revoke and no revocation order to get right — the rule that replaced
+this one is that the download link's extension follows the served FILE, since a provider may emit
+WAV (invariant 43). (Historically: assign the new URL before revoking the
 old one, never the reverse); don't let a dropped ticker connection block or alter the actual
 request's own result — the ticker is strictly secondary; don't let the source-viewer modal's fetch
 skip its `AbortController` guard — a stale response overwriting a fresher one's render is exactly
@@ -327,7 +342,8 @@ citable before it's promoted into a real source.
    while" pending copy, then a working `<audio controls>` player plus a transcript below it, each
    line highlighted the same way a Chat citation is. Regenerating replaces the player without ever
    leaving two object URLs alive at once (check via a memory profiler or simply confirming the old
-   `blob:` URL 404s after regenerating).
+   player still works after a page RELOAD, which is the point of persisting it, and that
+   regenerating replaces the audio rather than replaying the previous episode).
 9. Asking a question shows LIVE, updating ticker copy in the pending slot (not static "Thinking…")
    while the run is in flight; once it settles, a `⌁ N steps` pill appears next to the answer, and
    clicking it expands a plain-text log of what the ticker showed.

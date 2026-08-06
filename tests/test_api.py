@@ -731,7 +731,7 @@ def test_audio_returns_null_audio_when_script_has_no_utterances(client, monkeypa
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"utterances": [], "audio_base64": None}
+    assert body == {"utterances": [], "audio_base64": None, "audio_suffix": None}
     assert provider.calls == []  # synthesize() never called for an empty script
 
 

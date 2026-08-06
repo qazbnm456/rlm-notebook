@@ -6,6 +6,12 @@ tool the model can call. The provider is selected by `RN_TTS_PROVIDER` (default 
 free service needing no API key) so the tool works with no paid credentials out of the box —
 mirroring the OCR default (CLAUDE.md invariant 7): a capability this project's core value
 proposition depends on must not be pluggable-but-unusable by default.
+
+Two providers ship. `EdgeTTSProvider` is the default and concatenates raw MP3 streams; `kokoro`
+(invariant 43, the `kokoro` extra) is fully local and emits WAV. A provider therefore owns its own
+OUTPUT FORMAT and its own language→voice map — a voice name is provider-specific, and forcing a
+WAV-emitting model through an MP3 encoder would need the `ffmpeg`/`pydub` dependency invariant 17
+deliberately refused.
 """
 
 from __future__ import annotations
@@ -73,7 +79,7 @@ class EdgeTTSProvider:
     `asyncio.run(...)` internally. `asyncio.run()` raises `RuntimeError: cannot be called from a
     running event loop` if invoked from inside one — fine for today's synchronous CLI call site
     (`cli._cmd_audio`), but a future caller inside an async context (e.g. a FastAPI async handler,
-    should the planned API/UI slice call this directly rather than off-loading it to a worker
+    the API slice that DID call this routes around it via `asyncio.to_thread` (invariant 29); should any future caller directly rather than off-loading it to a worker
     thread/process) would need to route around this, not call `synthesize()` as-is. Flagging now
     so that future slice doesn't have to rediscover it.
     """

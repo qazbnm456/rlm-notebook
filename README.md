@@ -147,7 +147,9 @@ Every `ask`/`guide` request runs its `RLMTask` in its own isolated, killable sub
 `cli.py`'s in-process invocation — so one slow or stuck request can't block another, and can be
 cancelled outright. `/audio` is two host-side steps: script generation runs the same isolated-
 subprocess way (and is the only half that's cancellable), then TTS synthesis runs in-process
-afterward — no audio is ever persisted to disk, the response is JSON with the audio base64-encoded
+afterward. A generated episode IS persisted (one file per notebook, replaced on regenerate) and
+served by `GET .../audio/file`, so reopening a notebook plays it back without re-synthesising; the
+POST response also carries the audio base64-encoded
 in it. The trace stream and citation-turn lookup are a materially different exposure than every
 other endpoint here (they can surface full ingested source text, not just metadata/prose). File
 upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) never accepts a
@@ -156,7 +158,7 @@ restriction `sources` already enforces. `GET .../sources/{source_id}` returns a 
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
 materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
 citations of its own until it's promoted into a real source — see CLAUDE.md invariant 32. See
-`api.py`'s module docstring and CLAUDE.md invariants 20-34.
+`api.py`'s module docstring and CLAUDE.md invariants 20-43.
 
 Every write to a notebook — a source, a note, a chat turn — re-reads the notebook from disk under a
 per-notebook lock and applies just its own change, so a source you add while a question is still
@@ -187,9 +189,9 @@ This is not the whole design. In particular: there is no provider-swappable LLM 
 beyond what `rlm-harness`'s own environment variables already give you, no generated Video Overview,
 no directly-uploaded audio/video file ingestion or full audio transcription (YouTube's own
 CAPTIONS are supported — see above — but that's captions only, never a transcribed audio track),
-no ATLAS rubric/eval/RL-export member (unlike this project's sibling tools), no trace-file
-retention policy, and no desktop app packaging (Tauri is the intended eventual shell, not yet
-built). Those are follow-up work.
+no ATLAS rubric/eval/RL-export member (unlike this project's sibling tools), no authentication of
+any kind on the HTTP API (see above), and no desktop app packaging (Tauri is the intended eventual
+shell, not yet built). Those are follow-up work.
 
 ## Licensing
 

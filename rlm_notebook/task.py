@@ -1,9 +1,9 @@
 """`AnswerQuestion` — the RLM task this slice's `ask` command drives.
 
-A thin `RLMTask` declaration, per the sibling projects' convention: `signature` names three input
+A thin `RLMTask` declaration, per the sibling projects' convention: `signature` names four input
 fields — `sources` (the corpus blob `Corpus.blob()` assembles, injected into the sandboxed REPL as
 a plain variable per rlm-harness's native mechanic — see `corpus.py`), `history` (prior turns in this
-notebook's conversation, as plain text — see `notebook.py:history_text`), and `question` — and one
+notebook's conversation, as plain text — see `notebook.py:history_text`), `question`, and `output_language` (invariant 39) — and one
 output field, `answer: Answer`. Everything else (retry, sandbox selection, budget caps, tracing) is
 inherited from `rlm_harness.RLMTask`.
 """

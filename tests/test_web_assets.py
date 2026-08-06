@@ -160,3 +160,24 @@ def test_every_init_function_is_actually_called():
     assert not uncalled, (
         f"these init functions are defined but never called from the boot sequence: {uncalled}"
     )
+
+
+def test_no_event_is_subscribed_twice_inside_one_init_function():
+    """`store.emit` runs subscribers in registration order, so two handlers for the same event
+    inside one `init*` function are a silent ordering trap: the persisted podcast rendered on
+    `notebook:switched` and was then blanked by a `clearPlayer` subscriber registered a few lines
+    later, so an episode never appeared on notebook open — the entire point of persisting it.
+
+    Two subscribers for one event across DIFFERENT panels is normal and correct (each renders its
+    own region); two inside one function are almost always one undoing the other."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    # Split on top-level `function name(` so each block is one init function's body.
+    blocks = re.split(r"^function \w+\(", js, flags=re.MULTILINE)
+    offenders = []
+    for block in blocks:
+        events = re.findall(r'store\.on\("([\w:]+)"', block)
+        for event in set(events):
+            if events.count(event) > 1:
+                offenders.append(f"{event} subscribed {events.count(event)}x in one function")
+    assert not offenders, "\n".join(offenders)

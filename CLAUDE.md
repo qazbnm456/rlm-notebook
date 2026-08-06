@@ -29,7 +29,7 @@ uv pip install -e ../rlm-harness
 
 ## Scope note
 
-Fourteen slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
+Twenty-three slices in: ingestion (text / web / PDF, with local hybrid OCR), citation-grounded chat, a
 persistent multi-turn `Notebook` (sources + history surviving across `ask` invocations, one JSON
 file, no database), a Notebook Guide — `rlm-notebook guide {summary,faq,timeline,insight}`
 generates a whole-corpus artifact (`guide.py`) — an Audio Overview — `rlm-notebook audio` generates
@@ -48,15 +48,27 @@ deliberate assessment named it the highest-priority one. The three remaining gap
 assessment then closed in turn: a source-text viewer (`GET .../sources/{source_id}` plus a
 click-a-citation-see-the-passage modal, invariant 31), Notes (invariant 32), and YouTube caption
 ingestion (invariant 33); a separate slice replaced `pymupdf`/`pymupdf4llm` with `pypdfium2` over a
-real AGPL-vs-MIT license conflict (invariant 7). Most recently (invariant 34) the lost-update defect
-every write path shared was closed — a notebook write now re-reads the file under a per-notebook
-lock and applies its own delta, instead of persisting a snapshot read minutes earlier — and
-`traces/` got its first retention policy. Guide/Audio artifacts still aren't cached onto a notebook or made citable as sources for
-later `ask` turns, and there's still no multi-worker `uvicorn` deployment story for
-`_ACTIVE_RUNS`/`_RUN_PROCESSES` (the notebook FILE is now safe across processes; those in-memory
-maps are not). Word/Slides/Docs native-format parsing and full audio transcription (as opposed to
-YouTube captions, which ship) remain unbuilt. Each of these is its own follow-up slice; do not
-assume any of them exist because an earlier design discussion mentioned them.
+Invariant 34 then closed the lost-update defect every write
+path shared — a notebook write re-reads the file under a per-notebook lock and applies its own
+delta, instead of persisting a snapshot read minutes earlier — and gave `traces/` its first
+retention policy.
+
+Everything after that came from a user actually running the thing, and each carries its own
+invariant: running on a Claude subscription instead of an API key (35), a notebook that names itself
+so the first interaction isn't a naming puzzle (37), a persisted staleness-aware chat overview with
+clickable starter questions (38), model-authored prose following the READER's language rather than
+the documents' (39), podcast voices that follow that language (40), a settings page for presentation
+settings only (41), a persisted Audio Overview served as a real file (42), and a fully local TTS
+provider behind an extra (43). Notebook ids may also be non-Latin now (10).
+
+Still unbuilt: the four Studio guide kinds are NOT cached onto a notebook (only the overview is —
+invariant 38 is a deliberately narrow cut of that item), no guide artifact is citable as a source
+for a later `ask` turn without being promoted through a note (32), there is no multi-worker
+`uvicorn` deployment story for `_ACTIVE_RUNS`/`_RUN_PROCESSES` (the notebook FILE is safe across
+processes; those in-memory maps are not), the HTTP API still has NO authentication of any kind (25),
+and Word/Slides/Docs native-format parsing and full audio transcription (as opposed to YouTube
+captions, which ship) remain undone. Each of these is its own follow-up slice; do not assume any of
+them exist because an earlier design discussion mentioned them.
 
 ## Invariants — do not break
 
@@ -212,7 +224,8 @@ assume any of them exist because an earlier design discussion mentioned them.
     independently. One turn, one history entry — evidence that the instruction lands, not proof it
     holds as history grows. Do not restate this as a guarantee.
 12. **Extending an existing notebook with `--source` dedupes by origin, and never reassigns an
-    existing source's id.** `notebook.existing_origins` + `cli._ingest_new`'s `skip_origins` make
+    existing source's id.** `notebook.existing_origins` + `ingest.ingest_new`'s `skip_origins` (reached through
+    `notebook.ingest_sources_for`) make
     re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
     numbered starting from `len(notebook.sources) + 1`, so a source already cited in a saved
     `ChatTurn.answer` can never have its id silently repointed at different text on a later `ask`.
@@ -279,9 +292,14 @@ assume any of them exist because an earlier design discussion mentioned them.
 21. **Every API request that runs an `RLMTask` does so in an isolated subprocess
     (`runner.py`/`worker.py`), never in-process.** This is a SEPARATE execution model from
     `cli.py`'s synchronous in-process one — the two coexist; `cli.py` is completely unaffected.
-    `worker.py` is the ONLY module in this project's process tree that imports `dspy`/`rlm_harness`
-    from an API request path; `api.py` itself never does, so a crash deep in the model stack takes
-    down a worker subprocess, never the API server process itself.
+    **`worker.py` is the only place an `RLMTask` is ever RUN** — `.arun()` is called there and
+    nowhere else — so a crash deep in a model run takes down a worker subprocess, never the API
+    server. **The stronger claim this invariant used to make, that `api.py` never imports
+    `dspy`/`rlm_harness` at all, is FALSE and was verified false**: `api.py` imports the task
+    CLASSES (`task.py`, `guide.py`, `audio.py`, `naming.py`) for `_dotted()`'s introspection, and
+    those modules import `rlm_harness` at module scope, so `import rlm_notebook.api` loads both.
+    The protection that actually holds is about EXECUTION, not imports; don't restate the import
+    claim.
 22. **Cancellation works via `killpg` on the WHOLE process group (`start_new_session=True` when
     spawning), not just the worker's own PID.** Verified with a real test
     (`test_runner.py::test_cancel_kills_the_whole_process_group_not_just_the_leader`) that spawns
@@ -334,8 +352,10 @@ assume any of them exist because an earlier design discussion mentioned them.
     wants the API to accept file uploads, that needs its own explicit multipart-upload design — not
     quietly re-widening this check back to accept arbitrary paths.
 27. **Every endpoint that resolves a notebook by id catches BOTH `pydantic.ValidationError` (a
-    corrupted notebook file → 409) AND `ValueError` (an invalid id that `notebook.slug` reduces to
-    an empty token, e.g. `"!!!"` → 400) — not just the first.** An independent review reproduced an
+    corrupted notebook file → 409) AND `ValueError` (an id that `notebook.slug` reduces to an empty
+    token → 400) — not just the first.** **The original worked example, `"!!!"`, is SUPERSEDED by
+    invariant 10**: punctuation-only ids now hash to a valid filename, and only a genuinely empty or
+    whitespace-only id still takes this arm. An independent review reproduced an
     unhandled `ValueError` escaping as a raw 500 on all four id-taking endpoints
     (`GET /notebooks/{id}`, `sources`, `ask`, `guide/{kind}`) before this fix, using nothing more
     exotic than a notebook id made entirely of punctuation. `cancel` is unaffected (it never calls
@@ -390,14 +410,13 @@ assume any of them exist because an earlier design discussion mentioned them.
     response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
     uniform with every other endpoint.
 
-    **That non-persistence is exactly why the player carries an explicit `↓ Download mp3` link.**
-    The episode exists only as that tab's `Blob`, so a page reload loses it and there is nowhere
-    else to fetch it from — a user asked where the file was. `<audio controls>` does expose a
-    download in some browsers' overflow menu, which is neither discoverable nor uniform. The link
-    shares the player's object URL deliberately, so the existing assign-new-then-revoke-old ordering
-    keeps both valid together and neither outlives the other; the filename is SLUGGED from the
-    (model-authored) notebook title rather than interpolated, since `download` is an attribute the
-    browser turns into a path component.
+    **The `↓ Download mp3` link was added while that was true** — the episode existed only as that
+    tab's `Blob`, a page reload lost it, and `<audio controls>`'s overflow-menu download is neither
+    discoverable nor uniform (a user asked where the file was). **Invariant 42 later PERSISTED the
+    audio**, so the link points at `GET .../audio/file` now and there is no object URL to keep alive;
+    what survives from this paragraph is that the filename is SLUGGED from the (model-authored)
+    notebook title, since `download` is an attribute the browser turns into a path component — and
+    that its extension follows the served FILE, since a provider may emit WAV (invariant 43).
 
     Known, accepted limitation: only the script-generation half
     of `/audio` is cancellable — by the time synthesis begins, `_run_isolated`'s `finally` has
@@ -454,10 +473,11 @@ assume any of them exist because an earlier design discussion mentioned them.
       (`rlm_harness.sub_lm`'s real keys are `kind`/`name`/`model`/`attempt`/`input`/`raw`/`processed`/
       `error`) — a citation whose marker only appears in a sub-LM escalation would have silently
       404'd. `schema.ChatTurn.run_id` (new, optional, backward-compatible) is the ONE schema
-      change this needed — Guide/Audio results still aren't persisted onto a notebook at all
-      (unchanged scope), so their citation links only need to work within the current browser
-      session, which the client's own already-in-memory run id already satisfies with no server
-      round-trip. `citation_turn` checks `run_id` actually belongs to `notebook_id`
+      change this needed — Guide/Audio results were not persisted onto a notebook at the time, so their
+      citation links only needed to work within the current browser session, which the client's
+      own in-memory run id satisfied with no server round-trip. **Both are persisted now** —
+      `Overview.run_id` (invariant 38) and `Podcast.run_id` (invariant 42) — and each carries its
+      own run id for exactly this reason. `citation_turn` checks `run_id` actually belongs to `notebook_id`
       (`run_id.startswith(f"{notebook_id}-")`) — a follow-up completion check found `stream_run`
       lacked the same check, fixed in a small post-merge commit so both endpoints apply it
       consistently.
@@ -594,7 +614,7 @@ assume any of them exist because an earlier design discussion mentioned them.
     "simplification". It is now a small factory (`saveAsNoteButton`) so the opting-in sites share
     one implementation without the renderer growing one of its own.
 
-    **Two sites opt in: a Chat answer (`renderTurn`) and the chat overview (`generateOverview`).**
+    **Two sites opt in: a Chat answer (`renderTurn`) and the chat overview (`renderChatOverview`).**
     The original wording justified the restriction as "generated output is not something a user
     curates into notes" — which the product this project chases contradicts: NotebookLM's generated
     artifacts BECOME notes, and that is how they persist at all. The line that actually holds is
@@ -1053,8 +1073,11 @@ assume any of them exist because an earlier design discussion mentioned them.
     invariant 19 exists to prevent. A test asserts the shape of every id in the map as a cheap guard
     against a hand-edited one drifting.
 
-    **Precedence: an explicitly set `RN_TTS_VOICE_HOST_A`/`_B` beats the language default**, which
-    beats the shipped en-US cast. Explicitness is read from the RAW environment, never by comparing
+    **Precedence: an explicitly set `RN_TTS_VOICE_HOST_A`/`_B` beats the SETTINGS FILE (invariant
+    41), which beats the language default, which beats the shipped en-US cast.** The file rung
+    sits above the language default because both it and the env are a human saying "use this
+    voice"; below it, a voice chosen in the settings page would be inert for every language in
+    the map. Explicitness is read from the RAW environment, never by comparing
     against the default VALUE: an operator who deliberately sets `RN_TTS_VOICE_HOST_A=en-US-GuyNeural`
     on a Chinese notebook is making a choice, and a value-equality check would silently overrule it.
     The two voices resolve independently, so setting one and leaving the other keeps the un-set one
@@ -1082,8 +1105,10 @@ assume any of them exist because an earlier design discussion mentioned them.
     500) whenever `RN_MAIN_MODEL` is unset — and a settings page is what an operator opens WHEN the
     server is misconfigured. Same reasoning invariant 30 already applies to `max_upload_bytes`. This
     is also why the TTS provider is NOT on the page: it is a `NotebookConfig` field, so reporting it
-    would require exactly that call, and `tts._PROVIDERS` has one entry anyway — a control that
-    cannot take effect is worse than none.
+    would require exactly that call, . `tts._PROVIDERS` had one entry when that was decided, which made it also a control
+    that could not take effect; invariant 43 added a second, so only the `_config()` reason still
+    stands — and it is sufficient on its own. Exposing the provider would now be a real feature
+    request, blocked on giving it a standalone reader rather than on there being nothing to pick.
 
     **Validation is a character class at the boundary, refusing rather than coercing.**
     `clean_language` bounds length and strips control characters but NOT the character set, and 40
@@ -1134,8 +1159,8 @@ assume any of them exist because an earlier design discussion mentioned them.
     it cost the user their episode on every reload: the audio existed only as the browser tab's
     `Blob`. A user reported it after asking where the mp3 was.
 
-    **One file per notebook (`notebook.audio_path` → `<base_dir>/audio/<slug>.mp3`), replaced on
-    regenerate.** That is what makes retention a non-question: growth is bounded by how many
+    **One file per notebook (`notebook.audio_path` → `<base_dir>/audio/<slug><suffix>`, the suffix
+    being the PROVIDER's — invariant 43), replaced on regenerate.** That is what makes retention a non-question: growth is bounded by how many
     notebooks exist, not by how many times anyone pressed the button — unlike `traces/`, which
     needed invariant 34's whole sweep. A SUBDIRECTORY so `list_notebook_summaries`' `*.json` glob
     never sees it, and the same validated `slug` every other path here uses.

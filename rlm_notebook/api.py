@@ -12,12 +12,17 @@ block — the web UI's source viewer), `POST /notebooks/{id}/notes` (create a no
 note into a real source), `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guide/{kind}`,
 `POST /notebooks/{id}/audio`, `POST /notebooks/{id}/cancel`,
 `GET /notebooks/{id}/runs/{run_id}/stream` (live reasoning-trace SSE), and
-`GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup). `/audio` is two
+`GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup),
+`GET /notebooks/{id}/audio/file` (the persisted episode), `POST /notebooks/{id}/title` (name a
+notebook from its sources), `POST /notebooks/{id}/overview` (the chat overview), and
+`GET`/`PUT /settings` (presentation settings — invariant 41). `/audio` is two
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
 already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
-(`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). No audio is ever
-persisted to disk past one request — no file-serving endpoint, no retention policy needed.
+(`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). A generated episode IS persisted — one file per
+notebook, served by `GET /notebooks/{id}/audio/file`. That reverses Phase 2's original
+no-audio-past-one-request decision, which cost the user their episode on every reload; see CLAUDE.md
+invariant 42. Retention stays a non-question because the file is REPLACED on regenerate.
 `/sources/upload` never accepts a local-path STRING (invariant 26 stays exactly as strict) — only
 opaque bytes the caller already had, plus a claimed filename used for kind detection and display.
 
@@ -456,6 +461,10 @@ class PodcastResponse(BaseModel):
     utterances: list[AudioUtteranceResponse]
     run_id: str | None = None
     stale: bool = False
+    #: The extension of the file `GET .../audio/file` will serve — reported rather than left for the
+    #: client to guess, since it depends on WHICH provider generated this episode, not on which one
+    #: is configured now (invariant 43).
+    audio_suffix: str | None = None
 
 
 class NotebookResponse(BaseModel):
@@ -516,6 +525,7 @@ def _podcast_response(notebook: Notebook, corpus) -> PodcastResponse | None:
         ],
         run_id=podcast.run_id,
         stale=set(podcast.source_ids) != {s.id for s in notebook.sources},
+        audio_suffix=(found.suffix if (found := find_audio(notebook.id)) else None),
     )
 
 
@@ -1208,6 +1218,9 @@ class AudioUtteranceResponse(BaseModel):
 class AudioResponse(BaseModel):
     utterances: list[AudioUtteranceResponse]
     audio_base64: str | None = None
+    #: What `GET .../audio/file` will serve — the client must not guess it from the configured
+    #: provider (invariant 43).
+    audio_suffix: str | None = None
 
 
 @app.post("/notebooks/{notebook_id}/audio", response_model=AudioResponse)
@@ -1310,7 +1323,9 @@ async def audio(
     await _mutate_or_http(notebook_id, lambda nb: setattr(nb, "podcast", podcast), create=False)
 
     return AudioResponse(
-        utterances=utterances, audio_base64=base64.b64encode(audio_bytes).decode("ascii")
+        utterances=utterances,
+        audio_base64=base64.b64encode(audio_bytes).decode("ascii"),
+        audio_suffix=provider.suffix,
     )
 
 

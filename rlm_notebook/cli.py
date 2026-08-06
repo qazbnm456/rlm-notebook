@@ -45,6 +45,10 @@ from .tts import TTSError, get_tts_provider
 
 _SPEAKER_LABELS = {"host_a": "Host A", "host_b": "Host B"}
 
+#: `--out`'s default. Named so `_cmd_audio` can tell "the user chose this path" from "nobody did",
+#: and correct the extension only in the latter case — a provider may emit WAV rather than MP3.
+_DEFAULT_AUDIO_OUT = "podcast.mp3"
+
 _CLI_DESCRIPTION = """\
 Ask a question grounded in one or more sources, with citations you can verify — generate a
 whole-notebook artifact (a summary, an FAQ, a timeline, or a single key insight) — or generate a
@@ -302,6 +306,11 @@ def _cmd_audio(args) -> int:
             print()
 
         out_path = Path(args.out)
+        # `--out` defaults to `podcast.mp3`, but a provider may emit another format (kokoro writes
+        # WAV). Correct the extension rather than writing WAV bytes into a file named `.mp3` —
+        # unless the user named the path themselves, in which case their choice stands.
+        if args.out == _DEFAULT_AUDIO_OUT and out_path.suffix != provider.suffix:
+            out_path = out_path.with_suffix(provider.suffix)
         voice_map = tts_voice_map(config, language, provider)
         try:
             provider.synthesize(script, voice_map, out_path)
@@ -355,7 +364,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     _add_source_and_notebook_args(au)
     au.add_argument(
-        "--out", default="podcast.mp3",
+        "--out", default=_DEFAULT_AUDIO_OUT,
         help="output audio file path (default: podcast.mp3). Only written if the script is "
              "non-empty and synthesis succeeds; the transcript is always printed regardless",
     )

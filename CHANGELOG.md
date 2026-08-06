@@ -1253,6 +1253,38 @@ questions with verifiable citations, and get a distilled research artifact out.
   TTS call, written as `notebooks/audio/<slug>.wav` (2m53s, 24kHz), the previous `.mp3` removed, and
   served as `audio/wav` with range support.
 
+- **A code-vs-docs consistency audit across all sixteen commits, and one real bug it found.**
+  Requested after several slices had gone through pre-implementation design audits but no
+  post-implementation review. It found 7 blockers, 10 should-fixes and a page of nits.
+
+  **The bug: a persisted podcast never rendered on notebook open** — the entire point of persisting
+  it. `initPodcastPlayer` registered two `notebook:switched` handlers, and `store.emit` runs them in
+  registration order, so the later `clearPlayer` blanked the panel the first had just filled. The
+  invariant claiming "one `renderPodcast` serving both the just-generated and the reopened case"
+  was therefore false in practice. `tests/test_web_assets.py` now fails the build on two
+  subscriptions to the same event inside one `init*` function; mutation-tested.
+
+  **One invariant was simply FALSE, and verified false**: invariant 21 claimed `api.py` never
+  imports `dspy`/`rlm_harness`. It does, transitively, through the task classes it imports for
+  `_dotted()`'s introspection — `import rlm_notebook.api` loads both. The guarantee that actually
+  holds is about EXECUTION (no `RLMTask` is ever run in the API process), and it now says so.
+
+  **"No audio is ever persisted" survived in three places** after the previous slice reversed it —
+  `api.py`'s module docstring (which is also the OpenAPI description), README, and a paragraph of
+  invariant 29 whose neighbouring paragraph HAD been amended. Also fixed: invariant 40's voice
+  ladder was missing the settings-file rung invariant 39's had gained, invariant 41's stated reason
+  for excluding the TTS provider ("only one exists") stopped being true when kokoro landed,
+  invariant 27's worked example was superseded by invariant 10, the Scope note was nine invariants
+  behind, README still listed trace retention as unbuilt twenty-five lines after describing it, and
+  `DESIGN.md` still specified the Blob player, a two-state overview and a header without the title,
+  settings or wordmark button.
+
+  **Two format assumptions the previous slice claimed were "handled" were not**: the download link
+  hardcoded `.mp3` for a file that may be WAV, and the CLI's `--out` default did the same. The
+  server now REPORTS the episode's suffix rather than leaving the client to infer it from the
+  configured provider, and the CLI corrects its default extension only when the user did not choose
+  the path themselves.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
