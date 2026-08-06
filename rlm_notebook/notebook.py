@@ -15,10 +15,12 @@ docstrings before adding a new write path.
 
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import tempfile
 import threading
+import unicodedata
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -46,14 +48,47 @@ _SLUG_MAX = 120
 
 
 def slug(raw: str) -> str:
-    """A filesystem-safe notebook id: keep `[A-Za-z0-9._-]`, fold the rest to `-`, strip leading and
-    trailing `.`/`-` so it can never become a traversal segment (`..`, an absolute path, a nested
-    directory), and cap at `_SLUG_MAX` characters — re-stripping after the cut so a truncation
-    landing on a `-`/`.` never leaves a trailing separator. `--notebook` is user input and becomes a
-    path component; see CLAUDE.md's notebook-id invariant.
+    """A filesystem-safe FILENAME for a notebook id: keep `[A-Za-z0-9._-]`, fold the rest to `-`,
+    strip leading and trailing `.`/`-` so it can never become a traversal segment (`..`, an absolute
+    path, a nested directory), and cap at `_SLUG_MAX` characters — re-stripping after the cut so a
+    truncation landing on a `-`/`.` never leaves a trailing separator. `--notebook` and the API's
+    `{notebook_id}` are user input that becomes a path component; see CLAUDE.md's notebook-id
+    invariant.
+
+    **An id with no Latin characters at all falls back to a content hash rather than failing.** The
+    whitelist reduces `"模型要睡覺"` — or any Chinese/Japanese/Korean/Arabic/emoji-only name — to
+    the empty string, which `notebook_path` then rejects as an invalid id. A user reported exactly
+    that: naming a notebook in Chinese returned `400 invalid notebook id … reduces to an empty
+    token`, with nothing to suggest the name was the problem rather than the request. The hash is
+    deterministic (same name, same file), collision-resistant across different names, and stays
+    inside the same whitelist, so none of the traversal or length reasoning above changes.
+
+    This only ever affects the FILENAME. `Notebook.id` stores the id the user actually typed, and
+    `list_notebook_summaries` already reports that stored value rather than the filename stem — a
+    property it was given for this exact reason (`slug` being lossy), which is why non-Latin names
+    now round-trip through the UI with no further change.
+
+    A genuinely empty or whitespace-only id still returns `""`, and still fails loudly: "you gave me
+    nothing" is a real error, unlike "you gave me a name in your own language".
     """
     token = re.sub(r"[^A-Za-z0-9._-]+", "-", raw or "").strip("-.")
-    return token[:_SLUG_MAX].rstrip("-.")
+    token = token[:_SLUG_MAX].rstrip("-.")
+    if token:
+        return token
+    if not (raw or "").strip():
+        return ""
+    # NFC first: the same visible name typed in a browser (NFC) and pasted from a macOS filename
+    # (NFD) are different byte strings, so an un-normalized hash would silently give one user two
+    # notebooks with identical-looking names and no way to tell them apart.
+    #
+    # `surrogatepass`, not plain `encode()`: this function MUST be total. An unpaired surrogate
+    # (well-formed JSON per RFC 8259, accepted by `json.loads`, and produced by argv's
+    # `surrogateescape` decoding) otherwise raises `UnicodeEncodeError` here — and `api._derive_run_id`
+    # calls `slug()` DIRECTLY, outside every `notebook_path` error wrapper, so that surfaced as an
+    # unauthenticated 500 on `ask`/`guide`/`audio` via the `run_id` body field. Found and reproduced
+    # by an independent review of this very fallback; `slug` never raised before it existed.
+    normalized = unicodedata.normalize("NFC", raw)
+    return "nb-" + hashlib.sha256(normalized.encode("utf-8", "surrogatepass")).hexdigest()[:16]
 
 
 def notebook_path(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> Path:

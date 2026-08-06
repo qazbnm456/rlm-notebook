@@ -89,11 +89,14 @@ assume any of them exist because an earlier design discussion mentioned them.
    alike — `instructions.py`'s `CITATION_RULES` is the ONE copy of this rule, imported by both
    modules rather than hand-duplicated (see invariant 13). Without an explicit rule the model has
    no reason to preserve an ad hoc marker format across `.find()`/slice operations, and
-   `citations.py` (invariant 5) has nothing to verify against if it doesn't. **Residual risk, not
-   yet verified**: the offline tests (`test_task.py`, `test_guide.py`) drive a scripted LM whose
-   turns are fixed dicts — they prove the tool-wiring/SUBMIT chain works, not that a real model
-   reliably copies a marker verbatim out of a multi-MB string it must locate itself. Treat that as
-   unverified until a live run confirms it, not as covered.
+   `citations.py` (invariant 5) has nothing to verify against if it doesn't. **Residual risk, now
+   backed by ONE live run — not by the offline tests, and not proven**: `test_task.py`/
+   `test_guide.py` drive a scripted LM whose turns are fixed dicts, so they prove the
+   tool-wiring/SUBMIT chain works and nothing about whether a real model copies a marker verbatim
+   out of a string it must locate itself. A live run (invariant 35) finally showed one doing it: a
+   real model reproduced `[[SRC:s1|whole]]` exactly and `citations.py` verified it. That is one run
+   against one small corpus — it retires "never observed at all", not "reliable at multi-MB scale".
+   Do not restate this as a guarantee.
 5. **`citations.py` verifies coordinate existence only — never content faithfulness.** It confirms
    a claimed `source_id` exists and its `locator` resolves to real text in the corpus; it does NOT,
    and cannot cheaply, confirm the model's surrounding prose faithfully represents that text. Never
@@ -169,22 +172,45 @@ assume any of them exist because an earlier design discussion mentioned them.
    own pin (e.g. ctx-distillery's `PINNED_INTERPRETER`) — an operator who set `RN_INTERPRETER=local`
    believes something about this run that would not be true if the kit quietly corrected it; refusal
    makes the misconfiguration visible instead of teaching the wrong lesson.
-10. **A notebook id is sanitized (`notebook.slug`) before it becomes a filename.** `--notebook` is
-    user input and turns directly into `<notebooks_dir>/<slug(id)>.json`; the same
-    strip-to-`[A-Za-z0-9._-]`-then-cap-length treatment ctx-distillery's `cli._slug` gives a run id,
-    for the same reason — an unsanitized id could otherwise become a traversal segment (`..`, an
-    absolute path, a nested directory) or blow past a filesystem's path-component length limit.
+10. **A notebook id is sanitized (`notebook.slug`) before it becomes a filename, and an id the
+    whitelist empties falls back to a content hash rather than being rejected.** `--notebook` and
+    the API's `{notebook_id}` are user input that turns directly into
+    `<notebooks_dir>/<slug(id)>.json`; the same strip-to-`[A-Za-z0-9._-]`-then-cap-length treatment
+    ctx-distillery's `cli._slug` gives a run id, for the same reason — an unsanitized id could
+    otherwise become a traversal segment (`..`, an absolute path, a nested directory) or blow past a
+    filesystem's path-component length limit.
+
+    **`nb-<sha256[:16]>` when the whitelist leaves nothing.** `[A-Za-z0-9._-]` strips every CJK,
+    Arabic, Cyrillic and emoji character, so `"模型要睡覺"` reduced to the empty string and
+    `notebook_path` rejected it — a user hit exactly that (`400 invalid notebook id … reduces to an
+    empty token`) naming a notebook in Chinese, with nothing in the message to suggest the NAME was
+    the problem rather than the request. The hash is deterministic, collision-resistant, and inside
+    the same whitelist, so every traversal and length property above is unchanged — `".."` becomes
+    hex, which is further from a traversal token than the folded form was. It affects the FILENAME
+    only: `Notebook.id` stores what the user typed, and `list_notebook_summaries` already reports
+    that stored value rather than the filename stem (a property it was given for this exact reason),
+    so non-Latin names round-trip through the UI with no other change. A genuinely empty or
+    whitespace-only id still raises — "you gave me nothing" is a real error, "you gave me a name in
+    your own language" was not.
+
+    **This deliberately supersedes part of invariant 27**: `"!!!"` is an ordinary notebook now
+    rather than a 400, because once a Chinese name had to work there was no principled line left
+    between "punctuation only" and "non-Latin only". The unhandled 500 invariant 27 was created to
+    fix is still gone; that input simply no longer reaches the arm, and a genuinely empty id still
+    exercises it.
 11. **`history` (prior conversation turns) is context only — it is never itself a source of facts
     or citations.** `AnswerQuestion.instructions` says so explicitly, and nothing in `citations.py`
     special-cases a citation just because a similar one appeared in an earlier turn: every citation
     in every answer is verified fresh against the CURRENT `sources` blob (invariant 5), regardless
     of what history says was cited before. A past answer being wrong, or a source having been
-    removed since, must not be inherited into a new one. **Residual risk, not yet verified** (the
-    same class as invariant 4's): the offline test drives a scripted LM with a fixed
-    `history="(no prior turns in this conversation)"` — it cannot demonstrate that a real model,
-    handed a history containing an EARLIER citation, reliably treats that citation as inert context
-    rather than something to reuse or re-cite without re-deriving it from `sources`. Treat that as
-    unverified until a live run confirms it, not as covered.
+    removed since, must not be inherited into a new one. **Residual risk, now backed by ONE live run**
+    (the same class as invariant 4's): the offline test drives a scripted LM with a fixed
+    `history="(no prior turns in this conversation)"`, so it cannot demonstrate anything about a
+    real model handed a history that already contains a citation. A live second turn (invariant 35)
+    did: asked a follow-up that needed `history` to resolve what "those two launches" referred to,
+    the model used it for exactly that and still re-derived its citation from `sources`, verifying
+    independently. One turn, one history entry — evidence that the instruction lands, not proof it
+    holds as history grows. Do not restate this as a guarantee.
 12. **Extending an existing notebook with `--source` dedupes by origin, and never reassigns an
     existing source's id.** `notebook.existing_origins` + `cli._ingest_new`'s `skip_origins` make
     re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
@@ -745,5 +771,86 @@ assume any of them exist because an earlier design discussion mentioned them.
     re-read makes unnecessary), a multi-worker `uvicorn` story for `_ACTIVE_RUNS`/`_RUN_PROCESSES`
     (invariant 23's in-memory maps are untouched — the notebook FILE is now safe across processes,
     the in-memory run registries still are not), and any retention policy for `notebooks/` itself.
+
+35. **A model string prefixed `claude-agent-sdk/` routes that role onto the user's Claude Pro/Max
+    SUBSCRIPTION, and it works ONLY because `config.setup` injects the LM — `rlm_harness.configure`
+    does not route on the prefix itself.** `runtime.configure` calls `dspy.LM(cfg.main_model)` /
+    `dspy.LM(cfg.sub_model)` unconditionally for any seat left unsupplied, so a `claude-agent-sdk/…`
+    string handed to it alone reaches litellm as a provider that does not exist. `setup` builds a
+    `rlm_harness.ClaudeAgentLM` per sentinel role and passes it through `configure`'s public
+    `main_lm=`/`sub_lm=` seam; every non-sentinel role is still built from the `RN_*` proxy config,
+    byte-for-byte as before. The sentinel string ALSO stays in `RLMConfig` — inert for an injected
+    seat, but it is what labels the trace and the log.
+
+    Same sentinel, same placement, same lazy-import discipline as the sibling `cve-reverser`, which
+    shipped this pattern first — deliberately copied rather than re-invented in a second spelling.
+    `SUBSCRIPTION_PREFIX` lives in `config.py` (a naming convention, in the module that stays free
+    of `dspy`/`rlm_harness` at import time) and `_maybe_subscription_lm` imports `ClaudeAgentLM`
+    LAZILY, inside the sentinel branch only, so an API-key-only install never touches the optional
+    SDK. `config.setup` is the ONE place either entry point configures a model — `cli.py` in-process
+    and `worker.py` inside the API's isolated subprocess both call it — so a single change covers
+    both execution models.
+
+    **`RN_SUB_MODEL` inheriting the sentinel from `RN_MAIN_MODEL` is correct HERE, and is exactly
+    what `cve-reverser` had to reject.** That project's generator is a separate tool that must stay
+    on its own endpoint, so inheritance was a hazard it gates against; this project has no such
+    role, so an unset `RN_SUB_MODEL` simply putting the sub-LM on the subscription too is the
+    intended behavior. Pinned by a test so the divergence stays deliberate.
+
+    `claude-agent-sdk` is the `subscription` extra, MIRRORED as a `subscription-sdk` dev group with
+    `[tool.uv] default-groups`. Not redundancy: an extra is not synced by default, so a bare
+    `uv sync` PRUNES the SDK back out and the next subscription run dies with an `ImportError`
+    nobody caused — `cve-reverser` hit this for real and documented the same mirror. The SDK also
+    needs the Claude Code CLI installed and logged in, a runtime prerequisite no package manifest
+    can express. `ClaudeAgentLM` refuses to construct when `ANTHROPIC_API_KEY` is set (the CLI
+    silently prefers it over subscription OAuth, which would quietly bill API credit) — an upstream
+    guard, verified live here, not something this project implements.
+
+    **This is the path on which this project's FIRST real live run happened**, and with it the
+    first actual evidence for invariants 4 and 11, both of which had carried an explicit "residual
+    risk, not yet verified" note since the first slice: a real model copied a `[[SRC:s1|whole]]`
+    marker verbatim out of the corpus blob and `citations.py` verified it, and a follow-up turn
+    that depended on `history` to resolve "those two launches" still re-derived its citation from
+    `sources` and verified independently. Those notes are now backed by a run, not just by design
+    intent — but a single run is evidence, not proof, so do not rewrite them into unconditional
+    guarantees.
+
+36. **`rlm_notebook/web/`'s `hidden`-toggled elements must never be given an author `display` rule
+    without a matching `[hidden]` rule, and `tests/test_web_assets.py` fails the build if one
+    is.** `hidden` works through the UA stylesheet's `[hidden] { display: none }`, which ANY author
+    `display` declaration outranks — author styles beat UA styles regardless of specificity. This
+    shipped broken in the source-viewer slice: `.modal-overlay { display: flex }` left the overlay
+    permanently visible, and `inset: 0` plus `z-index: 1000` then swallowed every click on the
+    page, so the ENTIRE UI was dead from the first paint and the ✕ looked unclickable (closing set
+    an attribute that no longer changed anything). Found by a user opening the page — invisible to
+    every layer this project can otherwise test, since the Python suite never renders and a unit
+    test of `closeSourceViewer()` would pass against the broken stylesheet: the JS was always
+    correct. Hence a SOURCE-TREE assertion, which runs in the normal suite with no browser. The
+    same file also pins invariant 29's "never `innerHTML` with an interpolated string" (and its
+    `outerHTML`/`insertAdjacentHTML`/`document.write` siblings), which until now relied entirely on
+    reviewers remembering it.
+
+    **There were TWO instances, and the first fix shipped with a false justification.**
+    `.ticker-detail` carried the identical `display: flex`-without-`[hidden]` defect from Phase 3,
+    leaving the reasoning-step log permanently expanded with a dead `⌁ N steps` pill. The
+    `.modal-overlay` fix's commit message and this invariant's first draft both argued a citation
+    detail should toggle "because the ticker in the same page already does" — it never did. An
+    independent review caught both the missed instance and the claim built on it. The first version
+    of `test_web_assets.py` could not have caught it either: it harvested element ids from
+    `index.html`, and `.ticker-detail` is built with `createElement`. It now keys on CSS CLASSES,
+    which the markup and the JS spell the same way, and asserts up front that it can still see both
+    known instances — so a future extraction failure fails the build instead of passing vacuously.
+
+    **A re-click on an already-open citation detail COLLAPSES it** (`showCitationTurn`'s
+    `_shownKey` check) rather than blanking the panel to "Loading…" and re-fetching the identical
+    payload, which read as a flash with nothing ever closing. Keyed on WHICH citation is shown, so
+    clicking a different one while open switches to it instead of closing. The key includes
+    `quote`, not just `source_id|locator`: text and web sources emit a single block with locator
+    `"whole"`, so every citation into one such source shares that pair, and clicking a second one
+    would CLOSE the panel rather than switch. Collapsing also bumps the staleness token, so an
+    in-flight response cannot repopulate a panel the user just closed. **Known gap, stated rather than papered over:
+    this project has no JavaScript test runner at all (zero-build vanilla JS, by design — invariant
+    29), so interactive UI state like this has no test seam. A source-tree assertion can catch the
+    stylesheet class of bug above; it cannot catch a toggle that stops toggling.**
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

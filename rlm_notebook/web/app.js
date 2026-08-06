@@ -170,8 +170,29 @@ function renderTickerAffordance(runId) {
 // checked before writing the DOM — discards a stale response rather than an AbortController, since
 // this is a plain GET with no cleanup the browser needs told about.
 async function showCitationTurn(runId, citation, detailArea) {
+  // Clicking the SAME citation again collapses the panel, rather than blanking it to "Loading…"
+  // and re-fetching the identical payload — which is what it used to do, and read as a flash with
+  // nothing ever closing. (An earlier version of this comment justified the change by saying the
+  // ticker affordance in this same page "already toggles on re-click". It did not — `.ticker-detail`
+  // carried the same display-vs-hidden defect, fixed alongside this. Both now toggle.)
+  // Keyed on WHICH citation is showing: clicking a DIFFERENT one while open must switch to it, not
+  // close the panel. `quote` is part of the key because `source_id|locator` alone is NOT unique —
+  // text and web sources emit a single block with locator "whole", so every citation into one such
+  // source shares that pair, and an answer citing it three times would have clicking the second
+  // row CLOSE the panel instead of switching. Found by an independent review.
+  const key = `${citation.source_id}|${citation.locator}|${citation.quote}`;
+  if (!detailArea.hidden && detailArea._shownKey === key) {
+    detailArea.hidden = true;
+    detailArea._shownKey = null;
+    // Bump the token on the way out so an in-flight response can't repopulate a panel the user
+    // has just closed (the same staleness guard the fetch below relies on, applied to collapse).
+    detailArea._requestToken = (detailArea._requestToken || 0) + 1;
+    return;
+  }
+
   const token = (detailArea._requestToken || 0) + 1;
   detailArea._requestToken = token;
+  detailArea._shownKey = key;
   detailArea.hidden = false;
   detailArea.textContent = "Loading…";
   try {
@@ -317,6 +338,7 @@ async function openNotebook(notebookId) {
     // Doesn't exist yet — that's fine, it's created lazily on the first add-source call.
     notebook = { id: trimmed, sources: [], turns: [], notes: [] };
   }
+  notebookGeneration += 1;
   state.notebookId = notebook.id;
   state.sources = notebook.sources;
   state.turns = notebook.turns;
@@ -328,6 +350,13 @@ async function openNotebook(notebookId) {
   refreshNotebookList();
 }
 
+// Everything that mutates a notebook acts on `state.notebookId`, which is set only by
+// `openNotebook`. The id box is a REQUEST, not the current state — typing a new name in it and
+// pressing "Add source" without pressing Open used to silently write into whatever notebook was
+// already open, with the box on screen showing a different name entirely. Reported by a user, who
+// hit it as "I can't create a second notebook without reloading the page". Two fixes, together:
+// the box is now rewritten from `state` on every switch so it can never disagree with what the app
+// is acting on, and the wordmark is a real button that starts an empty one.
 function initNotebookSwitch() {
   const input = document.getElementById("notebook-input");
   const openBtn = document.getElementById("notebook-open");
@@ -338,7 +367,40 @@ function initNotebookSwitch() {
       openNotebook(input.value);
     }
   });
+  document.getElementById("new-notebook").addEventListener("click", () => {
+    input.value = "";
+    input.focus();
+    resetToNewNotebook();
+  });
+  store.on("notebook:switched", ({ notebookId }) => {
+    input.value = notebookId;
+  });
   refreshNotebookList();
+}
+
+// Bumped by EVERY notebook switch (open or reset). Async renders that resolve after a switch must
+// check it and drop their result: an independent review found three that didn't, and the new
+// one-click wordmark made them trivially reachable — asking a question then switching had the
+// answer's follow-up GET build `/notebooks/null`, render `(error) 404 … 'null'` into the fresh
+// blank notebook and kill the placeholder; the Guide fetch cached the OLD notebook's artifact
+// UNDER the new one (so it reappeared on every later tab switch); and the podcast rendered the old
+// episode after clearPlayer() had already run. The existing per-fetch guards (sourceViewerAbort,
+// detailArea._requestToken) only protect against a newer request of the SAME kind, not against the
+// notebook changing underneath.
+let notebookGeneration = 0;
+
+// A blank slate: no notebook selected, every panel cleared. Deliberately does NOT invent an id —
+// `state.notebookId` stays null until the user names one (or, once auto-naming lands, until the
+// first source is added), and every mutating call already refuses to run without one.
+function resetToNewNotebook() {
+  notebookGeneration += 1;
+  state.notebookId = null;
+  state.sources = [];
+  state.turns = [];
+  state.notes = [];
+  store.emit("notebook:switched", { notebookId: "" });
+  store.emit("sources:changed", { sources: [] });
+  store.emit("notes:changed", { notes: [] });
 }
 
 // --- Sources panel --------------------------------------------------------------------------------
@@ -588,6 +650,10 @@ function initChatPanel() {
 
   store.on("notebook:switched", () => {
     history.innerHTML = "";
+    // Un-hide the placeholder too: `chat:turnAdded` hides it, and without this a switch FROM a
+    // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at
+    // all. Latent before the wordmark button made "go to an empty notebook" a one-click action.
+    empty.hidden = false;
     history.appendChild(empty);
   });
 
@@ -613,6 +679,8 @@ function initChatPanel() {
 
     // The CLIENT picks the run id (blueprint P3.1) — a server-generated one would never reach us
     // until the request was already over, too late to open a live ticker against it.
+    const generation = notebookGeneration;
+    const askedNotebookId = state.notebookId;
     const token = crypto.randomUUID();
     const runId = `${state.notebookId}-${token}`;
 
@@ -634,7 +702,11 @@ function initChatPanel() {
       });
       // Re-render the whole history from the server's own record rather than mutating the
       // pending row in place — the server is the source of truth for what actually got persisted.
-      const notebook = await api(`/notebooks/${encodeURIComponent(state.notebookId)}`);
+      // Capture the id BEFORE awaiting: re-reading `state.notebookId` here would build
+      // `/notebooks/null` if the user started a new notebook while the answer was in flight.
+      if (generation !== notebookGeneration) return;
+      const notebook = await api(`/notebooks/${encodeURIComponent(askedNotebookId)}`);
+      if (generation !== notebookGeneration) return;
       state.turns = notebook.turns;
       history.innerHTML = "";
       history.appendChild(empty);
@@ -739,6 +811,7 @@ function initStudioPanel() {
       body.appendChild(note);
       return;
     }
+    const generation = notebookGeneration;
     const token = crypto.randomUUID();
     const runId = `${state.notebookId}-${token}`;
     body.classList.add("is-pending");
@@ -752,6 +825,7 @@ function initStudioPanel() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: token }),
       });
+      if (generation !== notebookGeneration) return;  // switched away — never cache into the new one
       cache.set(kind, { result: data, runId });
       body.classList.remove("is-pending");
       renderCached(kind, cache.get(kind));
@@ -834,6 +908,7 @@ function initPodcastPlayer() {
       return;
     }
     generateBtn.disabled = true;
+    const generation = notebookGeneration;
     const token = crypto.randomUUID();
     const runId = `${state.notebookId}-${token}`;
     body.classList.add("is-pending");
@@ -849,6 +924,7 @@ function initPodcastPlayer() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: token }),
       });
+      if (generation !== notebookGeneration) return;  // switched away — the old episode is not theirs
       body.classList.remove("is-pending");
       body.innerHTML = "";
 

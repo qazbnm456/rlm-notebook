@@ -877,3 +877,113 @@ questions with verifiable citations, and get a distilled research artifact out.
   (the notebook FILE is now safe across processes; those in-memory maps still are not), any
   retention policy for `notebooks/` itself, and every remaining feature-backlog item (Guide/Audio
   artifacts as citable sources, Word/Slides/Docs parsing, full audio transcription).
+
+- **Fifteenth slice: run on a Claude subscription instead of an API key — and this project's FIRST
+  real live run.** Prompted by trying to actually start the thing: it turned out nothing here had
+  ever been exercised against a real model. Every slice to date was verified offline or against a
+  mocked runner.
+
+  **`claude-agent-sdk/<id>` as a model-string sentinel** (`config.SUBSCRIPTION_PREFIX`) routes that
+  role onto the user's Claude Pro/Max subscription through rlm-harness's `ClaudeAgentLM`. The
+  crucial detail, confirmed by reading `rlm_harness/runtime.py` rather than assumed: **`configure`
+  does NOT route on the prefix.** It calls `dspy.LM(cfg.main_model)` unconditionally for any seat
+  left unsupplied, so the sentinel alone reaches litellm as a nonexistent provider — it works only
+  because `config.setup` injects a pre-built LM through the public `main_lm=`/`sub_lm=` seam.
+  Because `worker.py` calls the same `setup`, one change covers both the CLI's in-process path and
+  the API's isolated subprocess.
+
+  **Copied from the sibling `cve-reverser`, which shipped this pattern first** — same sentinel,
+  same placement of the constant in the dspy-free config module, same lazy import of the adapter
+  inside the sentinel branch only (so an API-key-only install never touches the optional SDK), same
+  `subscription` extra MIRRORED as a `subscription-sdk` dev group under `[tool.uv] default-groups`.
+  That mirror is not redundancy: an extra is not synced by default, so a bare `uv sync` prunes the
+  SDK back out and the next subscription run dies with an `ImportError` nobody caused. Deliberately
+  not re-invented in a second spelling.
+
+  **One deliberate divergence from cve-reverser, pinned by a test**: an unset `RN_SUB_MODEL`
+  inheriting the sentinel from `RN_MAIN_MODEL` is a HAZARD there (its generator is a separate tool
+  that must stay on its own endpoint) and simply correct here, since this project has no such role.
+
+  **First live evidence for invariants 4 and 11**, both of which had carried an explicit "residual
+  risk, not yet verified" note since the first slice — the offline tests drive a scripted LM, which
+  proves the tool-wiring, never that a real model behaves. A real model copied a `[[SRC:s1|whole]]`
+  marker verbatim out of the corpus blob and `citations.py` verified it; a follow-up turn that
+  needed `history` to resolve "those two launches" still re-derived its citation from `sources` and
+  verified independently. It also answered a deliberately planted trap correctly (Voyager 2 launched
+  first despite the name), so it was reading the corpus rather than reciting general knowledge. One
+  run is evidence, not proof — the invariants' notes are updated, not deleted.
+
+  **A real product defect this surfaced, recorded but NOT fixed here**: an authentication failure
+  reaches the client as `RLMTaskError: Failed to produce a valid 'answer' after 1 attempts` —
+  indistinguishable from a model that genuinely failed to produce valid output — and the trace file
+  records only that same string, because `rlm_harness._retry` wraps the cause with `raise ... from`
+  and the `__cause__` never reaches `TraceRecorder`. Diagnosing it required abandoning the API and
+  re-running through the CLI to see a traceback, a route no browser user has. Surfacing the cause
+  in the trace, and separating "misconfigured" from "the model failed", is its own follow-up.
+
+- **Web UI: two real bugs found by opening the page, both fixed.** Neither was reachable by any
+  test this project had.
+
+  **The entire UI was dead from the first paint.** `.modal-overlay { display: flex }` outranks the
+  UA stylesheet's `[hidden] { display: none }` — author styles beat UA styles regardless of
+  specificity — so the source-viewer overlay was permanently visible, and with `inset: 0` and
+  `z-index: 1000` it swallowed every click on the page. The ✕ looked unclickable because closing
+  set an attribute that no longer changed anything. Shipped this way in the source-viewer slice.
+  Fixed with the `.modal-overlay[hidden]` rule that must accompany any such `display` declaration.
+
+  **The same defect had a SECOND instance, and the first fix shipped with a false justification.**
+  `.ticker-detail` carried the identical `display: flex`-without-`[hidden]` bug from Phase 3,
+  leaving the reasoning-step log permanently expanded with a dead `⌁ N steps` pill — and the
+  `.modal-overlay` fix argued that a citation detail should toggle "because the ticker already
+  does", which it never did. An independent review caught the missed instance and the claim built
+  on it. Both are fixed; the tripwire below now keys on CSS classes so it can see elements built
+  with `createElement`, and asserts up front that it still detects both known instances.
+
+  **A re-click on an open citation detail now collapses it** instead of blanking the panel to
+  "Loading…" and re-fetching the identical payload, which read as a flash with nothing ever
+  closing. Keyed on which citation is shown — including its `quote`, since text and web sources all
+  use locator `"whole"` and `source_id|locator` alone would make clicking a second citation into
+  the same source CLOSE the panel rather than switch. Collapsing bumps the staleness token so an
+  in-flight response cannot repopulate a panel the user just closed.
+
+  **`tests/test_web_assets.py`** (new) asserts on the SOURCE TREE, because the stylesheet bug is
+  invisible to every layer otherwise testable here: the Python suite never renders a page, and a
+  unit test of `closeSourceViewer()` would have passed against the broken stylesheet — the JS was
+  always correct. **Its first version was itself reviewed and found badly wrong**, every fault the
+  same shape — it only looked at what was easy to parse. It harvested ids from `index.html` only,
+  so it could not see either `createElement`-built element, including the one carrying a live
+  unfixed instance of the very bug it claimed to prevent; it matched `X.hidden` by bare variable
+  name, giving three confirmed false positives waiting on the next styling change; and its
+  comment-stripping never ran, because a `{` inside a CSS comment splits that comment across two
+  regex blocks. Rewritten to key on CSS CLASSES — the axis the hazard lives on, spelled identically
+  by the markup and the JS. Both instances are now mutation-verified, the demonstrated false
+  positive no longer fires, and the `innerHTML` check covers its `outerHTML`/`insertAdjacentHTML`/
+  `document.write` siblings too. **Stated gap**: there is no JavaScript test runner here at all (zero-build
+  vanilla JS, by design), so interactive UI state — a toggle that stops toggling — still has no
+  test seam. A source-tree assertion cannot reach it.
+
+- **Three more UX defects, all reported by a user actually using the thing.**
+
+  **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
+  whitelist strips every CJK/Arabic/Cyrillic/emoji character, so `"模型要睡覺"` reduced to the
+  empty string and came back as `400 invalid notebook id … reduces to an empty token` — a message
+  that says nothing about the name being the problem. `slug` now falls back to `nb-<sha256[:16]>`
+  for any id the whitelist empties: deterministic, collision-resistant, inside the same whitelist,
+  and affecting the FILENAME only (`Notebook.id` keeps what the user typed, and
+  `list_notebook_summaries` already reported the stored id rather than the filename stem — a
+  property it was given for exactly this reason). Verified end to end against the running server: a
+  Chinese-named notebook accepts sources, lists under its own name, and lands on disk as
+  `nb-55de69c77d45b935.json`. A genuinely empty id still 400s. **Deliberate consequence, not a
+  regression**: `"!!!"` is an ordinary notebook now rather than a 400 (invariant 27's arm), since
+  once a Chinese name had to work there was no principled line left between "punctuation only" and
+  "non-Latin only" — the unhandled 500 that invariant was created to fix is still gone.
+
+  **Editing the notebook-id box without pressing Open silently wrote to the previously-opened
+  notebook**, with the box on screen showing a different name entirely — reported as "I can't
+  create a second notebook without reloading the page", and visible in the user's screenshot as an
+  error naming a notebook that was no longer in the box. Everything mutating acts on
+  `state.notebookId`, which only `openNotebook` sets. Two fixes together: the box is rewritten from
+  state on every switch so it can never disagree with what the app is acting on, and the wordmark
+  is now a real button that starts an empty notebook. That also surfaced a latent bug it made
+  one-click reachable — switching from a notebook with turns to an empty one left a blank chat
+  panel with no placeholder, because `chat:turnAdded` hides it and nothing un-hid it.

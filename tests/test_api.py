@@ -284,26 +284,64 @@ def test_add_sources_reports_409_on_a_corrupted_notebook_file(client, tmp_path):
     assert resp.status_code == 409
 
 
-@pytest.mark.parametrize("bad_id", ["!!!", "...", "---"])
-def test_endpoints_report_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_slug(
-    client, monkeypatch, bad_id
+@pytest.mark.parametrize("odd_id", ["!!!", "...", "---", "\u6a21\u578b\u8981\u7761\u89ba"])
+def test_an_id_outside_the_latin_whitelist_is_a_usable_notebook_not_a_400(
+    client, monkeypatch, odd_id
 ):
-    """`notebook.slug(bad_id)` reduces to an empty token, and `notebook_path` raises `ValueError` —
-    found by an independent review: every endpoint reaching `load_notebook`/`load_or_create` used
-    to catch `pydantic.ValidationError` only, so this `ValueError` escaped as an unhandled 500
-    instead of a clean 4xx. Checks all four endpoints that take a notebook id, not just one.
-    (`"////"` is deliberately NOT in this list: Starlette's default path converter doesn't match a
-    literal `/` inside a single path segment, so that payload 404s at the ROUTING layer before
-    ever reaching a handler — a different, already-safe code path, not this one.)"""
+    """These used to reduce to an empty slug and 400. A user reported the consequence: naming a
+    notebook in Chinese returned `400 invalid notebook id … reduces to an empty token`. `slug` now
+    falls back to `nb-<hash>` for any id the whitelist empties, so all of these are ordinary
+    notebooks — the read endpoints 404 (nothing there yet) and the write endpoints succeed.
+
+    This SUPERSEDES the earlier "400 not 500" test for these payloads; the 500 that invariant 27
+    was created to fix is still gone, it is just no longer reachable by this input at all. Only a
+    genuinely empty id still raises, which `test_an_empty_notebook_id_is_still_a_400` covers.
+    (`"////"` is deliberately absent: Starlette's path converter doesn't match a literal `/` inside
+    one segment, so it 404s at the ROUTING layer, a different and already-safe path.)"""
     _live_env(monkeypatch)
-    assert client.get(f"/notebooks/{bad_id}").status_code == 400
-    assert client.post(f"/notebooks/{bad_id}/sources", json={"sources": []}).status_code == 400
-    assert client.post(f"/notebooks/{bad_id}/ask", json={"question": "x"}).status_code == 400
-    assert client.post(f"/notebooks/{bad_id}/guide/summary").status_code == 400
-    assert client.get(f"/notebooks/{bad_id}/sources/s1").status_code == 400
-    assert client.post(f"/notebooks/{bad_id}/notes", json={"text": "x"}).status_code == 400
-    assert client.delete(f"/notebooks/{bad_id}/notes/n1").status_code == 400
-    assert client.post(f"/notebooks/{bad_id}/notes/n1/promote").status_code == 400
+    assert client.get(f"/notebooks/{odd_id}").status_code == 404
+    assert client.post(f"/notebooks/{odd_id}/sources", json={"texts": ["hi"]}).status_code == 200
+    assert client.get(f"/notebooks/{odd_id}").json()["id"] == odd_id  # the id round-trips verbatim
+
+
+def test_an_empty_notebook_id_is_still_a_400_on_every_id_taking_endpoint(client, monkeypatch):
+    """"You gave me nothing" stays a real client error — only "you gave me a name in your own
+    language" stopped being one. Invariant 27's mapping (`ValueError` -> 400, never an unhandled
+    500) is what this pins, and it sweeps EVERY id-taking endpoint rather than a sample: an
+    independent review pointed out that rewriting the old test for the new rule had quietly dropped
+    `ask`/`guide`/`sources/{id}`/`promote` from the sweep, which is the coverage invariant 27 was
+    created by (a review finding four endpoints that had each independently forgotten the arm)."""
+    _live_env(monkeypatch)
+    blank = "%20%20"
+    assert client.get(f"/notebooks/{blank}").status_code == 400
+    assert client.post(f"/notebooks/{blank}/sources", json={"texts": ["hi"]}).status_code == 400
+    assert client.post(f"/notebooks/{blank}/ask", json={"question": "x"}).status_code == 400
+    assert client.post(f"/notebooks/{blank}/guide/summary").status_code == 400
+    assert client.get(f"/notebooks/{blank}/sources/s1").status_code == 400
+    assert client.post(f"/notebooks/{blank}/notes", json={"text": "x"}).status_code == 400
+    assert client.delete(f"/notebooks/{blank}/notes/n1").status_code == 400
+    assert client.post(f"/notebooks/{blank}/notes/n1/promote").status_code == 400
+
+
+def test_a_lone_surrogate_run_id_is_not_a_500(client, monkeypatch):
+    """`run_id` is a plain JSON body field, and RFC 8259 permits unpaired surrogate escapes that
+    `json.loads` accepts. `_derive_run_id` calls `notebook.slug()` DIRECTLY, outside every
+    `notebook_path` error wrapper — so when `slug` gained a `raw.encode("utf-8")` it stopped being
+    total and this became an unauthenticated 500, reproduced by an independent review. `slug` must
+    never raise for any `str`."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []})
+
+    # Sent as raw bytes, not `json=`: httpx refuses to ENCODE a lone surrogate, so the escape has
+    # to travel as JSON source text and be decoded server-side by `json.loads`, which accepts it.
+    resp = client.post(
+        "/notebooks/mynb/ask",
+        content=rb'{"question": "x", "run_id": "\ud800"}',
+        headers={"Content-Type": "application/json"},
+    )
+
+    assert resp.status_code != 500, resp.text
 
 
 def test_get_notebook_404_when_missing(client):
@@ -815,9 +853,11 @@ def test_upload_source_rejects_a_body_that_exceeds_the_declared_cap(client, monk
     assert resp.status_code == 413
 
 
-def test_upload_source_reports_400_not_500_on_a_notebook_id_that_reduces_to_an_empty_slug(client):
+def test_upload_source_reports_400_not_500_on_an_empty_notebook_id(client):
+    """`"!!!"` is a valid notebook id since the non-Latin fix, so the payload that exercises this
+    handler's `ValueError` -> 400 arm is now a genuinely empty one."""
     resp = client.post(
-        "/notebooks/!!!/sources/upload",
+        "/notebooks/%20%20/sources/upload",
         files={"file": ("notes.txt", b"hello", "text/plain")},
     )
     assert resp.status_code == 400

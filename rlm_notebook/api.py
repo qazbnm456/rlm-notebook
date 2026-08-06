@@ -658,7 +658,10 @@ def _derive_run_id(notebook_id: str, client_token: str | None) -> str:
     exclusive-create gate is what actually ENFORCES uniqueness — this function only picks the
     candidate id, it doesn't guarantee it's free."""
     token = slug(client_token) if client_token else uuid.uuid4().hex[:8]
-    return f"{notebook_id}-{token}"
+    # The notebook_id half is slugged too. It becomes `traces/{run_id}.jsonl`, and a raw id long
+    # enough (or containing a separator the route did admit) produced `OSError: File name too long`
+    # at the exclusive-create below — an unauthenticated 500. Found by an independent review.
+    return f"{slug(notebook_id)}-{token}"
 
 
 async def _run_isolated(

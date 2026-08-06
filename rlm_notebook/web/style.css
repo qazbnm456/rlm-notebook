@@ -197,7 +197,17 @@ input:focus {
   backdrop-filter: blur(6px);
 }
 
+/* A real <button> since it starts a new notebook, so it needs the chrome reset every other button
+   here gets from .btn/.tab/.theme-toggle — the global `button` rule only resets font and color, so
+   without this the brand paints as a grey beveled ButtonFace box with cursor: default (i.e. not
+   even reading as clickable). Caught by an independent review, not by looking at it. */
 .wordmark {
+  appearance: none;
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
   font-weight: 700;
   font-size: 1.05rem;
   letter-spacing: -0.01em;
@@ -719,6 +729,16 @@ input:focus {
   color: var(--text-faint);
 }
 
+/* The SECOND instance of the hidden-vs-display defect (see .modal-overlay below for the mechanism).
+   This one shipped from Phase 3 and made the step log render permanently expanded with a dead
+   `⌁ N steps` pill. It was missed when the first instance was fixed, and — worse — the commit
+   message and CLAUDE.md for that fix both cited "the ticker already toggles on re-click" as the
+   reason a citation detail should toggle too. It never toggled. An independent review caught both
+   the miss and the false justification. */
+.ticker-detail[hidden] {
+  display: none;
+}
+
 /* --- Source viewer modal --- */
 /* The first stacking-context component in this codebase's web/ — an explicit z-index is set
    deliberately rather than relying on paint order, since nothing here can be assumed about how a
@@ -734,6 +754,19 @@ input:focus {
   justify-content: center;
   z-index: 1000;
   padding: 2rem;
+}
+
+/* MUST come with the `display: flex` above, not be treated as optional polish. `hidden` is the ONLY
+   thing app.js uses to open and close this overlay, and the attribute works by way of the UA
+   stylesheet's `[hidden] { display: none }` — which ANY author `display` declaration outranks,
+   whatever its specificity, because author styles always beat UA styles. Without this rule the
+   overlay is permanently visible: `inset: 0` plus `z-index: 1000` then swallows every click on the
+   page, and the ✕ appears dead because closing sets an attribute that no longer changes anything.
+   That is exactly how this shipped in the source-viewer slice, and it made the whole UI unusable
+   from the first paint. Any future element that is both `hidden`-toggled and given a `display`
+   rule needs the same pair — `tests/test_web_assets.py` fails the build if one is added without it. */
+.modal-overlay[hidden] {
+  display: none;
 }
 
 .modal {

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 import time
@@ -10,6 +11,7 @@ import pytest
 from pydantic import ValidationError
 
 from rlm_notebook.notebook import (
+    _SLUG_MAX,
     EPHEMERAL_ID,
     add_note,
     append_sources,
@@ -65,20 +67,26 @@ def test_slug_never_produces_a_path_separator(raw):
     # The real safety property: joining `result` onto base_dir can never escape it. An
     # all-separator/all-dot input reduces to an empty slug, which `notebook_path` refuses outright
     # rather than silently writing to `base_dir` itself.
-    if not result:
-        with pytest.raises(ValueError):
-            notebook_path(raw, base_dir="notebooks")
-    else:
-        assert notebook_path(raw, base_dir="notebooks").parent == Path("notebooks")
+    # Since the non-Latin fix, an all-separator/all-dot input no longer reduces to an empty slug —
+    # it falls back to `nb-<hash>`, which is hex and therefore even further from a traversal token
+    # than the folded form was. Either way the join stays inside base_dir, which is the property.
+    assert notebook_path(raw, base_dir="notebooks").parent == Path("notebooks")
 
 
 def test_slug_caps_length():
     assert len(slug("x" * 500)) <= 120
 
 
-def test_notebook_path_raises_on_empty_slug(tmp_path):
-    with pytest.raises(ValueError):
-        notebook_path("...", base_dir=tmp_path)
+def test_a_punctuation_only_id_is_now_a_hashed_filename_not_an_error(tmp_path):
+    """A DELIBERATE change of behavior, not a relaxed test. Invariant 27 made `"!!!"` a clean 400
+    instead of a raw 500, and that crash is still gone — but once a non-Latin name had to stop
+    being an error (a user hit `400 … reduces to an empty token` naming a notebook in Chinese),
+    there was no principled line left between "punctuation only" and "Chinese only": both are just
+    strings outside `[A-Za-z0-9._-]` that a user typed on purpose. Both now hash. The traversal
+    property is strictly BETTER than before, since `".."` becomes `nb-<hash>` rather than being
+    rejected — see `test_slug_never_produces_a_path_separator`."""
+    assert slug("...").startswith("nb-")
+    assert notebook_path("...", base_dir=tmp_path).parent == Path(tmp_path)
 
 
 def test_load_notebook_returns_none_when_missing(tmp_path):
@@ -323,10 +331,11 @@ def test_mutate_notebook_creates_when_asked(tmp_path):
 
 
 def test_mutate_notebook_still_rejects_an_id_that_slugs_to_nothing(tmp_path):
-    """Invariant 27's 400s must survive the rewrite: an all-punctuation id has to fail the same way
-    through the locked write path as it does through every unlocked reader."""
+    """Invariant 27's 400s must survive the rewrite: an id that reduces to nothing has to fail the
+    same way through the locked write path as it does through every unlocked reader. Since the
+    non-Latin fix, only a genuinely EMPTY id reduces to nothing — `"!!!"` now hashes."""
     with pytest.raises(ValueError):
-        mutate_notebook("!!!", lambda nb: None, base_dir=tmp_path, create=True)
+        mutate_notebook("   ", lambda nb: None, base_dir=tmp_path, create=True)
 
 
 def test_the_notebook_lock_does_not_leave_a_json_file_the_listing_would_pick_up(tmp_path):
@@ -523,3 +532,72 @@ def test_promote_note_promotes_only_the_first_matching_note_by_index():
     source = promote_note(notebook, "n2")
     assert source.blocks[0].text == "first"
     assert [n.text for n in notebook.notes] == ["second"]
+
+
+def test_a_non_latin_id_gets_a_stable_hashed_filename_instead_of_failing(tmp_path):
+    """Reported by a user: naming a notebook in Chinese returned `400 invalid notebook id
+    '模型要睡覺': … reduces to an empty token`. The whitelist strips every non-Latin character, so
+    ANY Chinese/Japanese/Korean/Arabic/emoji-only name reduced to nothing and was rejected as
+    malformed — with nothing to suggest the NAME was the problem rather than the request."""
+    assert slug("模型要睡覺").startswith("nb-")
+    assert slug("模型要睡覺") == slug("模型要睡覺")  # deterministic: same name, same file
+    assert slug("模型要睡覺") != slug("模型要吃飯")  # and distinct names don't collide
+    assert notebook_path("模型要睡覺", base_dir=tmp_path).parent == Path(tmp_path)
+
+
+def test_a_non_latin_id_round_trips_through_save_and_load(tmp_path):
+    """The hash is only ever the FILENAME. `Notebook.id` keeps what the user typed, and
+    `list_notebook_summaries` reports that stored value rather than the filename stem — the
+    property that makes non-Latin names display correctly with no further change."""
+    save_notebook(Notebook(id="模型要睡覺", sources=[_source("s1")]), base_dir=tmp_path)
+
+    loaded = load_notebook("模型要睡覺", base_dir=tmp_path)
+    assert loaded is not None
+    assert loaded.id == "模型要睡覺"
+
+    notebooks, unreadable = list_notebook_summaries(base_dir=tmp_path)
+    assert unreadable == []
+    assert [nb.id for nb in notebooks] == ["模型要睡覺"]
+
+
+def test_a_hashed_id_is_still_filesystem_safe(tmp_path):
+    """The fallback must not reopen what the whitelist closed: no traversal, no separators, and a
+    bounded length (CLAUDE.md's notebook-id invariant)."""
+    for raw in ["../../etc/passwd", "。。/。。", "🐝" * 500, "\n\t"]:
+        token = slug(raw)
+        if not token:
+            continue
+        assert re.fullmatch(r"[A-Za-z0-9._-]+", token), token
+        assert "/" not in token and not token.startswith((".", "-"))
+        assert len(token) <= _SLUG_MAX
+
+
+def test_a_genuinely_empty_id_still_fails_loudly(tmp_path):
+    """"You gave me nothing" stays a real error — only "you gave me a name in your own language"
+    stopped being one."""
+    for raw in ["", "   ", "\n"]:
+        assert slug(raw) == ""
+        with pytest.raises(ValueError):
+            notebook_path(raw, base_dir=tmp_path)
+
+
+def test_slug_never_raises_for_any_string():
+    """Totality is a REQUIREMENT, not an accident: `api._derive_run_id` calls `slug()` directly,
+    outside every error wrapper that turns a bad id into a 4xx, so anything `slug` raises becomes
+    an unauthenticated 500. It was total until the hash fallback introduced `raw.encode("utf-8")`,
+    which an independent review showed raises `UnicodeEncodeError` on a lone surrogate — reachable
+    from a JSON body field and from argv's `surrogateescape` decoding."""
+    for raw in ["\ud800", "\udfff", "a\ud800b", "\x00", "\U0010ffff", "\u202e", "\u200b" * 50]:
+        assert isinstance(slug(raw), str)
+
+
+def test_the_same_visible_name_in_nfc_and_nfd_is_one_notebook():
+    """A browser submits NFC; text pasted from a macOS filename is NFD. Without normalization the
+    two byte strings hash differently, so one user gets two notebooks with identical-looking names
+    and no way to tell them apart — found by an independent review of the hash fallback."""
+    import unicodedata
+
+    for name in ["한글", "café", "Việt"]:
+        nfc, nfd = unicodedata.normalize("NFC", name), unicodedata.normalize("NFD", name)
+        if slug(nfc).startswith("nb-") or slug(nfd).startswith("nb-"):
+            assert slug(nfc) == slug(nfd), name
