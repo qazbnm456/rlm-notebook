@@ -214,6 +214,19 @@ input:focus {
   white-space: nowrap;
 }
 
+/* The notebook's human name. The id is a handle the user never has to invent or read; this is what
+   they actually recognise the notebook by. No `display` rule, deliberately — it is `hidden`-toggled,
+   and tests/test_web_assets.py fails the build if such a class ever gains one without a matching
+   [hidden] rule. */
+.notebook-title {
+  font-weight: 600;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 22ch;
+}
+
 .notebook-switch {
   display: flex;
   align-items: center;

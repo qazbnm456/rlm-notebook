@@ -962,6 +962,34 @@ questions with verifiable citations, and get a distilled research artifact out.
   vanilla JS, by design), so interactive UI state — a toggle that stops toggling — still has no
   test seam. A source-tree assertion cannot reach it.
 
+- **Sixteenth slice: a notebook names itself.** The web UI refused to add a source until the user
+  had invented a notebook id (`Open or name a notebook first`), which made the very first
+  interaction with this product a naming puzzle about a thing that did not exist yet. I deferred
+  this once as "its own slice"; the user pushed back, correctly — the blocker was never that the
+  naming was unsophisticated, it was that naming was mandatory at all.
+
+  **`id` and `title` are now two fields.** The id is a handle the UI mints itself
+  (`nb-<uuid8>`), and it still backs every filename, `ChatTurn.run_id` prefix and URL, so it has to
+  stay stable. `schema.Notebook.title` is the label a person reads and is free to be anything —
+  which is exactly why splitting them beats renaming a notebook (which would move its file and
+  invalidate its run ids). Optional, defaulting to `None`, so older notebooks still load.
+
+  **`naming.SuggestTitle` is deliberately not an `RLMTask`**: a full REPL loop in the pyodide
+  sandbox is right for exploring a multi-MB corpus with verifiable citations and absurd for five
+  words. It is one plain `dspy.Predict` over a 4000-character excerpt — ~8s live, versus a sandbox
+  boot plus planner turns. It still runs in the API's isolated subprocess, so invariant 21 is
+  untouched: `worker.py` only calls `.arun(**kwargs)`, so satisfying that one method is the whole
+  contract and `api.py` still imports neither `dspy` nor `rlm_harness`.
+
+  **A title never costs the user their source.** `POST /notebooks/{id}/title` is separate from
+  `add_sources` (ingestion must not wait on, or fail because of, a model call), fired on the first
+  source only, and every failure path falls back to a deterministic title derived from the origins.
+  An existing title is never overwritten.
+
+  Verified live end to end with no name ever typed: an English source titled itself
+  `Voyager 1 Interstellar Mission`, a Chinese one `蜜蜂的偏振光導航` (the prompt asks for the
+  sources' own language), and the fallbacks were exercised directly.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

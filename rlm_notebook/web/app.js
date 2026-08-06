@@ -26,6 +26,7 @@ const store = createStore();
 
 const state = {
   notebookId: null,
+  title: null,
   sources: [],
   turns: [],
   notes: [],
@@ -340,10 +341,12 @@ async function openNotebook(notebookId) {
   }
   notebookGeneration += 1;
   state.notebookId = notebook.id;
+  state.title = notebook.title || null;
   state.sources = notebook.sources;
   state.turns = notebook.turns;
   state.notes = notebook.notes || [];
   store.emit("notebook:switched", { notebookId: notebook.id });
+  store.emit("notebook:titled", { title: state.title, notebookId: notebook.id });
   store.emit("sources:changed", { sources: state.sources });
   store.emit("notes:changed", { notes: state.notes });
   state.turns.forEach((turn) => store.emit("chat:turnAdded", { turn }));
@@ -357,6 +360,39 @@ async function openNotebook(notebookId) {
 // hit it as "I can't create a second notebook without reloading the page". Two fixes, together:
 // the box is now rewritten from `state` on every switch so it can never disagree with what the app
 // is acting on, and the wordmark is a real button that starts an empty one.
+// Asks the server to name the notebook from the sources it now holds. Fired after the FIRST
+// source lands, never blocking it: ingestion must not wait on (or fail because of) a model call,
+// and the source list should render the moment it exists. The generation check drops the result if
+// the user has moved to another notebook while it was in flight.
+//
+// Silent on failure by design — the endpoint already falls back to a deterministic title, and a
+// missing title is a cosmetic loss, never worth an alert over a source that was added fine.
+async function suggestTitle(notebookId, generation) {
+  try {
+    const notebook = await api(`/notebooks/${encodeURIComponent(notebookId)}/title`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: crypto.randomUUID() }),
+    });
+    if (generation !== notebookGeneration) return;
+    state.title = notebook.title || null;
+    store.emit("notebook:titled", { title: state.title, notebookId });
+    refreshNotebookList();
+  } catch {
+    // keep whatever label is already on screen
+  }
+}
+
+function initNotebookTitle() {
+  const el = document.getElementById("notebook-title");
+  store.on("notebook:titled", ({ title, notebookId }) => {
+    // textContent, never innerHTML — a title is model-authored text derived from source content
+    // a prompt-injected source could influence (CLAUDE.md invariants 6 and 29).
+    el.textContent = title || (notebookId ? "Untitled notebook" : "");
+    el.hidden = !notebookId;
+  });
+}
+
 function initNotebookSwitch() {
   const input = document.getElementById("notebook-input");
   const openBtn = document.getElementById("notebook-open");
@@ -395,10 +431,12 @@ let notebookGeneration = 0;
 function resetToNewNotebook() {
   notebookGeneration += 1;
   state.notebookId = null;
+  state.title = null;
   state.sources = [];
   state.turns = [];
   state.notes = [];
   store.emit("notebook:switched", { notebookId: "" });
+  store.emit("notebook:titled", { title: null, notebookId: "" });
   store.emit("sources:changed", { sources: [] });
   store.emit("notes:changed", { notes: [] });
 }
@@ -449,9 +487,15 @@ function initSourcesPanel() {
   const form = document.getElementById("add-source-form");
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
-    if (!state.notebookId) {
-      alert("Open or name a notebook first.");
-      return;
+    // No notebook open? Make one. Demanding a name before the first source made the very first
+    // interaction with this product a naming puzzle about a thing that didn't exist yet — the user
+    // hit "Open or name a notebook first" and had to invent an id. The id is a handle now, not a
+    // label: it is minted here, never shown as the primary name, and `suggestTitle()` below fills
+    // in something readable once there is a source to derive it from.
+    const isFirstSource = !state.notebookId;
+    if (isFirstSource) {
+      state.notebookId = `nb-${crypto.randomUUID().slice(0, 8)}`;
+      notebookGeneration += 1;
     }
     const activeKind = document.querySelector("#source-kind-tabs .tab.is-active").dataset.kind;
     const nb = encodeURIComponent(state.notebookId);
@@ -495,7 +539,10 @@ function initSourcesPanel() {
         fileInput.value = "";
       }
       state.sources = notebook.sources;
+      state.title = notebook.title || state.title;
       store.emit("sources:changed", { sources: state.sources });
+      store.emit("notebook:titled", { title: state.title, notebookId: state.notebookId });
+      if (isFirstSource) void suggestTitle(state.notebookId, notebookGeneration);
     } catch (err) {
       alert(`Could not add source: ${err.message}`);
     } finally {

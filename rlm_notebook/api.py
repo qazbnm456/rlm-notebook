@@ -76,6 +76,7 @@ from .config import NotebookConfig, max_trace_files, max_upload_bytes, trace_ret
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
+from .naming import SuggestTitle, fallback_title
 from .notebook import (
     add_note,
     append_sources,
@@ -304,6 +305,7 @@ def _citation_responses(citations: list[Citation], corpus) -> list[CitationRespo
 
 class NotebookSummary(BaseModel):
     id: str
+    title: str | None = None
     source_count: int
     turn_count: int
 
@@ -325,7 +327,8 @@ async def list_notebooks() -> NotebookListResponse:
     notebooks, unreadable = list_notebook_summaries()
     return NotebookListResponse(
         notebooks=[
-            NotebookSummary(id=nb.id, source_count=len(nb.sources), turn_count=len(nb.turns))
+            NotebookSummary(id=nb.id,
+            title=nb.title, source_count=len(nb.sources), turn_count=len(nb.turns))
             for nb in notebooks
         ],
         unreadable=unreadable,
@@ -353,6 +356,7 @@ class NoteResponse(BaseModel):
 
 class NotebookResponse(BaseModel):
     id: str
+    title: str | None = None
     sources: list[dict]
     turns: list[ChatTurnResponse]
     notes: list[NoteResponse]
@@ -369,6 +373,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
     corpus = corpus_of(notebook)
     return NotebookResponse(
         id=notebook.id,
+        title=notebook.title,
         sources=[
             {"id": s.id, "kind": s.kind, "origin": s.origin, "flags": s.flags}
             for s in notebook.sources
@@ -785,6 +790,49 @@ async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
     # "re-verified fresh against the current sources" governs reading a turn BACK (`get_notebook`),
     # and is unaffected.
     return AskResponse(text=answer.text, citations=_citation_responses(answer.citations, corpus))
+
+
+@app.post("/notebooks/{notebook_id}/title", response_model=NotebookResponse)
+async def suggest_title(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> NotebookResponse:
+    """Give a notebook a human label derived from the sources already in it.
+
+    Separate from `add_sources` on purpose: ingestion must stay fast and must not fail because a
+    model is unreachable or unconfigured, and the client wants to render the source list the moment
+    it lands rather than after a round trip to an LM. The UI fires this afterwards and fills the
+    title in when it arrives.
+
+    Runs in the same isolated subprocess every other model call uses (invariant 21) — `worker.py`
+    only ever calls `.arun(**kwargs)`, which `naming.SuggestTitle` satisfies without being an
+    `RLMTask`, so this costs one plain completion rather than a sandbox boot and a REPL loop.
+
+    Never overwrites an existing title: re-titling on every source add would rename a notebook
+    under a user who had already learned its name. Idempotent — calling it again on a titled
+    notebook returns the notebook unchanged."""
+    notebook = _load_notebook_or_404(notebook_id)
+    if notebook.title:
+        return _notebook_response(notebook)
+
+    origins = [s.origin for s in notebook.sources]
+    if not notebook.sources:
+        raise HTTPException(422, "cannot title a notebook with no sources yet")
+
+    config = _config()
+    run_id = _derive_run_id(notebook_id, body.run_id)
+    try:
+        excerpt = corpus_of(notebook).blob(max_chars=None)[:8000]
+        title = await _run_isolated(
+            notebook_id, _dotted(SuggestTitle), {"sources": excerpt, "origins": origins}, config, run_id
+        )
+    except HTTPException:
+        # A failed/timed-out naming run must not deny the caller their notebook — fall back to the
+        # deterministic title, the same "never lose what already succeeded" discipline invariant 19
+        # applies to a TTS failure after a transcript exists.
+        title = fallback_title(origins)
+
+    notebook = await _mutate_or_http(
+        notebook_id, lambda nb: setattr(nb, "title", nb.title or str(title)), create=False
+    )
+    return _notebook_response(notebook)
 
 
 @app.post("/notebooks/{notebook_id}/guide/{kind}")

@@ -853,4 +853,39 @@ assume any of them exist because an earlier design discussion mentioned them.
     29), so interactive UI state like this has no test seam. A source-tree assertion can catch the
     stylesheet class of bug above; it cannot catch a toggle that stops toggling.**
 
+37. **A notebook's `id` is a HANDLE; `schema.Notebook.title` is the label a person reads. The UI
+    mints the id itself and never asks for one.** Requiring a name before the first source could be
+    added made the very first interaction with this product a naming puzzle about a thing that did
+    not exist yet — a user hit `Open or name a notebook first`, and (before invariant 10's hash
+    fallback) got a 400 for answering it in Chinese. The id still backs every filename,
+    `ChatTurn.run_id` prefix and URL, so it must stay stable; the title is free to be anything,
+    which is exactly why they are two fields rather than one. `title` is optional and defaults to
+    `None`, so notebooks written before it existed still load — the same backward-compatible
+    precedent `ChatTurn.run_id` and `Notebook.notes` set.
+
+    **`naming.SuggestTitle` is deliberately NOT an `RLMTask`.** Every other model-facing task here
+    runs the full rlm-harness REPL loop in the pyodide sandbox, which is right when the model must
+    explore a multi-MB corpus and produce verifiable citations, and absurd for five words: it would
+    cost a sandbox boot plus several planner turns. This is one plain `dspy.Predict` over a 4000-
+    character excerpt — measured at ~8s live against a real model. It STILL runs inside the API's
+    isolated subprocess, so invariant 21 is untouched: `worker.py` only ever calls `.arun(**kwargs)`
+    on the class it is handed, so satisfying that one method is the entire contract, and `api.py`
+    still imports neither `dspy` nor `rlm_harness`.
+
+    **Titling is a separate endpoint (`POST /notebooks/{id}/title`), never folded into
+    `add_sources`.** Ingestion must not wait on — or fail because of — a model call, and the client
+    should render the source list the moment it lands. The UI fires this afterwards, on the FIRST
+    source only, and fills the title in when it arrives. **Nothing about a title may cost the user
+    their source**: `SuggestTitle.arun` catches every exception and `suggest_title` catches the
+    `HTTPException` a failed/timed-out run raises, both falling back to `naming.fallback_title` (a
+    deterministic label derived from the origins — a pasted source's readable snippet, or a URL's
+    last segment plus a count). The same "never lose what already succeeded" discipline invariant 19
+    applies to a TTS failure after a transcript exists.
+
+    An existing title is never overwritten — re-titling on every source add would rename a notebook
+    under a user who had already learned its name — so the endpoint is idempotent. `clean_title` is
+    the ONLY guard on what reaches the UI, since this is the one model output in the project with no
+    schema validation behind it; the web UI renders it with `textContent`, never `innerHTML`, for
+    the same reason every other model-derived string is (invariants 6 and 29).
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

@@ -181,6 +181,12 @@ class Notebook(BaseModel):
     the whole persisted unit — one JSON file per notebook, no database."""
 
     id: str
+    #: A human label, suggested from the sources (`naming.py`) — NOT the id. The id stays a stable
+    #: handle that filenames, `ChatTurn.run_id` prefixes and every URL are built from, so a notebook
+    #: can be titled (and one day retitled) without moving a file or invalidating a run id. Optional
+    #: and defaulting to None, so every notebook written before this field existed still loads —
+    #: the same backward-compatible precedent `ChatTurn.run_id` and `Notebook.notes` already set.
+    title: str | None = None
     sources: list[Source] = Field(default_factory=list)
     turns: list[ChatTurn] = Field(default_factory=list)
     notes: list[Note] = Field(default_factory=list)
