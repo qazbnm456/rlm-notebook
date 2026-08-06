@@ -236,6 +236,37 @@ A note carries no citations of its own and is never re-verified against `sources
 invariant 5's coordinate-only guarantee doesn't extend to freeform notes) until it's promoted —
 nothing in this section's UI should imply a note is "grounded" before that point.
 
+### 5.9 Chat overview — the "generate the research artifact" action (Post-launch addendum 5)
+
+`#chat-overview`, a block ABOVE `#chat-history` (never inside it: `ask` rebuilds the history list
+wholesale from `state.turns` after every answer, which would wipe anything else in there).
+
+Two states, one container:
+
+- **No overview yet, sources present** — a primary `✨ Generate overview` button plus the hint
+  "…or just ask a question below."
+- **Generated** — `Overview` head, the Summary rendered through `renderAnswerWithCitations` (so its
+  citations behave exactly like a Chat answer's), the trace affordance, then `Start with` and up to
+  three clickable starter questions taken from the FAQ task.
+
+Hidden entirely when the notebook has no sources. Bounded at `max-height: 45%` with its own scroll:
+a Summary runs to several paragraphs, and as an unbounded flex item it would refuse to shrink,
+collapse `.chat-history`, and push the ask box off screen.
+
+**Why it exists.** Adding a source used to leave the screen doing nothing — Chat said "ask a
+question once you've added a source", Studio said "pick a tab to generate it", and both waited on
+the user to discover the next move. The guided feel of a notebook product comes from the artifact
+appearing IN the conversation and being something to ask follow-ups about; a Summary buried in a
+right-hand tab is disconnected from the thread, so even finding it leads nowhere.
+
+**Still an explicit button, never auto-generated.** §5.4's rule (a guide run is a real RLM loop, so
+never spend one nobody asked for) is unchanged — what changed is that the action is obvious rather
+than hidden behind a tab.
+
+**Not persisted**, matching every other guide artifact, and invalidated whenever the corpus changes
+(the same rule the Studio cache follows: stale the moment the sources it was computed from change,
+not just when the notebook does).
+
 ## 6. Depth / motion
 
 Minimal: 1px hairline borders between surface steps, `var(--radius)` (6px) on interactive elements,

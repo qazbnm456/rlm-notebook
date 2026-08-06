@@ -59,6 +59,10 @@
     <section class="col col-chat" id="col-chat">
       <div class="panel-head">Chat</div>
 
+      <!-- The overview lives ABOVE the history list, not inside it: `ask` rebuilds #chat-history
+           wholesale from state.turns after every answer, which would wipe anything else in there. -->
+      <div class="chat-overview" id="chat-overview" hidden></div>
+
       <div class="chat-history" id="chat-history">
         <p class="empty-note" id="chat-empty">Ask a question once you've added a source.</p>
       </div>

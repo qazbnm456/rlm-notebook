@@ -990,6 +990,44 @@ questions with verifiable citations, and get a distilled research artifact out.
   `Voyager 1 Interstellar Mission`, a Chinese one `蜜蜂的偏振光導航` (the prompt asks for the
   sources' own language), and the fallbacks were exercised directly.
 
+- **Seventeenth slice: a "generate overview" action, in the conversation.** A user asked where the
+  Gemini-style "produce the research artifact, then ask follow-ups from it" moment was. The
+  functionality existed — Studio's Summary/FAQ/Timeline/Insight tabs — but adding a source left the
+  screen doing nothing: Chat said "ask a question once you've added a source", Studio said "pick a
+  tab to generate it", and both waited on the user to discover the next move. Even finding the
+  Summary led nowhere, because it renders in a right-hand tab disconnected from the thread.
+
+  `#chat-overview` sits above the chat history and holds either a primary `✨ Generate overview`
+  button or the generated artifact: the Summary rendered through the SAME
+  `renderAnswerWithCitations` a Chat answer uses (so its citations, source viewer and trace links
+  all behave identically), then up to three clickable starter questions from the FAQ task. **No
+  server-side change at all** — both endpoints already existed.
+
+  **Still an explicit button, never auto-generated on open**: Phase 2's reasoning (a guide run is a
+  real RLM loop; never spend one nobody asked for) is unchanged. What changed is that the action is
+  obvious instead of hidden behind a tab. Summary and FAQ run CONCURRENTLY — two independent runs,
+  so serial execution would double the wait for nothing (measured 34s live, against ~30s for one).
+  FAQ is reused rather than adding a cheap ungrounded question generator: its questions are already
+  grounded by a task that exists, and starter questions gesturing at something the sources don't
+  cover would be worse than none. `allSettled`, so an FAQ failure never costs the user the summary.
+
+  **An independent review found 8 problems in the first version, all fixed.** The worst was
+  self-inflicted and 100% reproducible: the client sent a bare UUID as `run_id` and then used that
+  bare value locally, but the server derives `{notebook_id}-{token}` and both trace endpoints reject
+  anything without the prefix — so every citation's "view reasoning" in the overview 404'd. The
+  shape was copied from `suggestTitle`, where a bare token is correct precisely because it is never
+  used client-side. Verified after the fix by hitting both trace endpoints with each shape: old
+  → 404, new → 200. Also fixed: a trace affordance rendering a dead "⌁ 0 steps" because
+  `openTicker` was never called; starter chips bypassing the `chat:pending` lockout via
+  `requestSubmit()` (which submits as if by the form, so a disabled submit button never blocks it)
+  and producing two pending turns, one of which visibly vanished; the overview never being
+  invalidated when the corpus changed, unlike the Studio cache next to it; no per-request guard, so
+  two concurrent generations raced last-writer-wins; an unbounded flex item that would collapse the
+  chat history and push the ask box off screen; and a silent FAQ failure. The button also moved out
+  of `#chat-empty` — `chat:turnAdded` hides that node, so it vanished after the first question and
+  was permanently unreachable for any notebook that already had turns, which is exactly the set most
+  likely to want one.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

@@ -688,6 +688,178 @@ function renderTurn(turn) {
   return wrapper;
 }
 
+// --- The "generate the research artifact" first action ---------------------------------------
+//
+// Adding a source used to leave the screen doing nothing: Chat said "ask a question once you've
+// added a source", Studio said "pick a tab to generate it", and both were waiting on the user to
+// discover the next move. The guided feel of a notebook product comes from the artifact appearing
+// IN THE CONVERSATION and being something you can then ask follow-ups about — a Summary buried in a
+// right-hand tab is disconnected from the thread, so even finding it doesn't lead anywhere.
+//
+// Deliberately still an explicit button, NOT auto-generated on open. A guide run is a real RLM
+// loop, and the reason Phase 2 refused to auto-fetch on notebook open (burning a model call nobody
+// asked for) has not changed — what changed is that the action is now obvious instead of hidden
+// behind a tab nobody clicked.
+//
+// The button lives in #chat-overview, NOT in #chat-empty. An independent review found the first
+// version put it in the empty-state node, which `chat:turnAdded` hides — so it vanished after the
+// first question and a returning user opening a notebook that already had turns could never reach
+// it at all. Since an overview is not persisted, that made it permanently unreachable for exactly
+// the notebooks most likely to want one.
+let overviewToken = 0;
+
+function refreshChatOverview() {
+  const overview = document.getElementById("chat-overview");
+  if (overview._hasOverview) return; // don't clobber a generated one with the starter
+  overview.textContent = "";
+  overview.hidden = !state.sources.length;
+  if (!state.sources.length) return;
+
+  const wrap = document.createElement("div");
+  wrap.className = "chat-starter";
+
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn btn-primary";
+  btn.textContent = "\u2728 Generate overview";
+  btn.addEventListener("click", () => {
+    btn.disabled = true;
+    void generateOverview();
+  });
+  wrap.appendChild(btn);
+
+  const hint = document.createElement("div");
+  hint.className = "hint";
+  hint.textContent = "\u2026or just ask a question below.";
+  wrap.appendChild(hint);
+
+  overview.appendChild(wrap);
+}
+
+// Any change to the corpus makes a generated overview stale — the same rule `initStudioPanel`
+// already applies to its Guide cache ("stale the moment the corpus it was computed from changes,
+// not just when the notebook itself changes"). The first version only handled the notebook half.
+function invalidateChatOverview() {
+  const overview = document.getElementById("chat-overview");
+  overview._hasOverview = false;
+  overviewToken += 1; // also strands any generation still in flight
+  refreshChatOverview();
+}
+
+// Summary and FAQ run CONCURRENTLY, not in sequence: they are two independent RLM runs, so serial
+// execution would double the wait for no reason. (They land in one notebook's single `_ACTIVE_RUNS`
+// slot — invariant 23's documented limitation, meaning only the later one is cancellable. Both
+// still complete, their trace files can't collide since the run ids differ, and nothing here
+// depends on cancelling either.) FAQ is reused rather than adding a cheap ungrounded question
+// generator: its questions are already grounded in the sources by a task that exists, and starter
+// questions gesturing at something the sources don't cover would be worse than none.
+async function generateOverview() {
+  const overview = document.getElementById("chat-overview");
+  const generation = notebookGeneration;
+  const token = (overviewToken += 1);
+  const notebookId = state.notebookId;
+  if (!notebookId) return;
+  const live = () => generation === notebookGeneration && token === overviewToken;
+
+  overview.hidden = false;
+  overview.textContent = "";
+  const pending = document.createElement("div");
+  pending.className = "chat-overview-head";
+  pending.textContent = "Reading your sources\u2026";
+  overview.appendChild(pending);
+
+  // The run id the SERVER will derive — `_derive_run_id` prefixes the notebook id, and both trace
+  // endpoints reject anything that doesn't. Sending a bare uuid and then using that bare value
+  // client-side made every citation's "view reasoning" 404, 100% of the time: copied from
+  // `suggestTitle`, where a bare token is fine precisely because it is never used client-side.
+  const summaryToken = crypto.randomUUID();
+  const faqToken = crypto.randomUUID();
+  const summaryRun = `${notebookId}-${summaryToken}`;
+  const faqRun = `${notebookId}-${faqToken}`;
+
+  const call = (kind, runToken) =>
+    api(`/notebooks/${encodeURIComponent(notebookId)}/guide/${kind}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ run_id: runToken }),
+    });
+
+  // The live ticker, same secondary-layer contract as ask/guide/podcast: losing it never affects
+  // the request. Without opening it, `renderTickerAffordance` below would render a dead "0 steps".
+  void openTicker(notebookId, summaryRun, (event) => {
+    if (live() && event.summary) pending.textContent = event.summary;
+  });
+
+  // allSettled, not all: an FAQ failure must not cost the user the summary that succeeded — the
+  // same "never lose what already succeeded" discipline the transcript/TTS split already uses.
+  const [summary, faq] = await Promise.allSettled([
+    call("summary", summaryToken),
+    call("faq", faqToken),
+  ]);
+  if (!live()) return;
+
+  overview.textContent = "";
+  const head = document.createElement("div");
+  head.className = "chat-overview-head";
+  head.textContent = "Overview";
+  overview.appendChild(head);
+
+  if (summary.status === "fulfilled") {
+    overview.appendChild(
+      renderAnswerWithCitations(summary.value.text, summary.value.citations || [], summaryRun)
+    );
+    overview.appendChild(renderTickerAffordance(summaryRun));
+  } else {
+    const err = document.createElement("div");
+    err.textContent = `(could not generate an overview: ${summary.reason.message})`;
+    overview.appendChild(err);
+  }
+
+  const label = document.createElement("div");
+  label.className = "chat-overview-head";
+  overview.appendChild(label);
+
+  if (faq.status !== "fulfilled") {
+    // Stated, not silent: half the action failed and the user should not have to guess why there
+    // are no starter questions.
+    label.textContent = `Starter questions unavailable (${faq.reason.message})`;
+    overview._hasOverview = true;
+    return;
+  }
+
+  const questions = (faq.value.items || []).map((item) => item.question).slice(0, 3);
+  if (!questions.length) {
+    label.textContent = "";
+    overview._hasOverview = true;
+    return;
+  }
+  label.textContent = "Start with";
+
+  const row = document.createElement("div");
+  row.className = "starter-questions";
+  questions.forEach((question) => {
+    const chip = document.createElement("button");
+    chip.type = "button";
+    chip.className = "starter-question";
+    // textContent, never innerHTML — a starter question is model-authored text derived from
+    // source content a prompt-injected source could influence (invariants 6 and 29).
+    chip.textContent = question;
+    chip.addEventListener("click", () => {
+      // `requestSubmit()` submits as if by the form, so a DISABLED submit button never blocks it —
+      // an independent review found two chips clicked in a row produced two pending turns, one of
+      // which visibly vanished when the first answer rebuilt the history. The chips live outside
+      // the region `chat:pending` disables, so the guard has to be here.
+      if (document.getElementById("ask-submit").disabled) return;
+      const input = document.getElementById("ask-input");
+      input.value = question;
+      document.getElementById("ask-form").requestSubmit();
+    });
+    row.appendChild(chip);
+  });
+  overview.appendChild(row);
+  overview._hasOverview = true;
+}
+
 function initChatPanel() {
   const history = document.getElementById("chat-history");
   const empty = document.getElementById("chat-empty");
@@ -696,6 +868,12 @@ function initChatPanel() {
   const submitBtn = document.getElementById("ask-submit");
 
   store.on("notebook:switched", () => {
+    const overview = document.getElementById("chat-overview");
+    overview._hasOverview = false;
+    overviewToken += 1;
+    overview.hidden = true;
+    overview.textContent = "";
+    refreshChatOverview();
     history.innerHTML = "";
     // Un-hide the placeholder too: `chat:turnAdded` hides it, and without this a switch FROM a
     // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at
@@ -703,6 +881,11 @@ function initChatPanel() {
     empty.hidden = false;
     history.appendChild(empty);
   });
+
+  // Chat's own reaction to the corpus changing: the "generate an overview" action only exists once
+  // there is something to summarise, and an already-generated overview is stale once it changes.
+  store.on("sources:changed", () => invalidateChatOverview());
+  refreshChatOverview();
 
   store.on("chat:turnAdded", ({ turn }) => {
     empty.hidden = true;
