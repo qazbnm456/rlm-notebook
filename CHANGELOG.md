@@ -1083,6 +1083,51 @@ questions with verifiable citations, and get a distilled research artifact out.
   requests in a row both 200 with distinct run ids, and a 121-character token no longer collapses
   its two run ids into one.
 
+- **Nineteenth slice: output language.** Every model-authored string came out in the SOURCES'
+  language, so a Traditional-Chinese reader feeding in English papers got an English notebook. The
+  language you read should not be decided by the documents you happen to be reading.
+
+  **The carve-out turned out to be the load-bearing half.** `verify_citations` compares `locator`
+  with an exact `==` and never inspects `quote` at all, so a model told "write everything in
+  Chinese" that localises `page:1` to `第1頁` makes every citation UNVERIFIED, and one that
+  translates a quote leaves a ✓ badge on something that is no longer the source's words. The design
+  named only `quote`; the pre-implementation audit caught that and the rule now covers `source_id`,
+  `locator`, the marker syntax and `quote` together, composed BEFORE the citation rules.
+  `CITATION_RULES` also gained the "a quote is copied verbatim" sentence it had never contained, and
+  `schema.py`'s "faithful summary" wording that muddied it is fixed.
+
+  **The resolution is a model judgement, not a header lookup — and a sibling project
+  already paid for the alternative.** Its ASR seeded itself from `Locale.current`, which answers
+  "what language should this app's UI be in" while ASR was asking "what language is this person
+  speaking", and transcribed Chinese speech as syllable-by-syllable English gibberish.
+  `Accept-Language` is the same shape of wrong question. `naming.SuggestLanguage` (a cheap
+  `dspy.Predict`, not an RLMTask) weighs the header, the sources' language, and any questions
+  already asked, with questions weighted highest. Two more of a sibling project's lessons applied directly: a
+  ladder cannot correct its own input, and an instrument that cannot reproduce production's shape is
+  not evidence — so the live check sends the `Accept-Language` a real browser sends.
+
+  `RN_OUTPUT_LANGUAGE` is a hard override and applies to CHAT too. The value reaches a task as a
+  signature field and is never empty: instructions are composed at import time, so "a signature
+  field" and "byte-identical prompts when unset" were a contradiction in the design, resolved with a
+  literal default.
+
+  **The Audio Overview is deliberately excluded, as a stated scope cut.** `tts.py` maps no language
+  to a voice, so a forced-Chinese notebook would produce a correct Chinese script read by the en-US
+  default cast — quietly breaking invariant 15. A tripwire asserts the podcast task does NOT declare
+  the field (so the exclusion stays deliberate) and every other grounded task does, because a
+  missing required input surfaces only as the opaque `RLMTaskError` while an undeclared extra kwarg
+  is silently accepted — a partial rollout fails silently in both directions.
+
+  The audit found 4 blockers and 8 should-fixes before any code was written, including two run-id
+  collisions: sharing the artifact's derived id 409s on the exclusive-create gate, and `/overview`
+  gathering two runs would have fired two concurrent resolutions deriving the same `-lang` id.
+
+  **Verified live, both paths**, since the offline tests drive a scripted LM and can demonstrate
+  none of it: forced Chinese against English sources gave Chinese prose with `s1`/`whole`
+  untranslated, English quotes verbatim, every citation verified; and with the override unset,
+  `Accept-Language: zh-TW` against the same English sources resolved to "Traditional Chinese",
+  persisted it, and did not re-resolve for the next artifact.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

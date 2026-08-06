@@ -241,6 +241,37 @@ def _maybe_subscription_lm(model: str):
     return ClaudeAgentLM(name)
 
 
+#: Bound on `RN_OUTPUT_LANGUAGE` / a model-resolved language. Both end up spliced into a prompt, and
+#: the resolved one is unvalidated model prose derived from UNTRUSTED source content (invariant 6) —
+#: the same reason `naming.clean_title` exists.
+_MAX_LANGUAGE_CHARS = 40
+
+
+def clean_language(raw: str | None) -> str | None:
+    """A language name safe to splice into an instruction: one line, bounded, no control characters.
+    Returns `None` for anything empty, which every caller reads as "no preference".
+
+    Not a closed-set check like `_ocr_provider_from_env`'s: human language names have no enumerable
+    set, so this bounds the value rather than refusing unknown ones."""
+    if not raw:
+        return None
+    collapsed = " ".join(str(raw).split())
+    stripped = "".join(c for c in collapsed if c.isprintable())
+    return stripped[:_MAX_LANGUAGE_CHARS].strip() or None
+
+
+def output_language() -> str | None:
+    """`RN_OUTPUT_LANGUAGE` — a HARD override over anything resolved from the reader's signals, and
+    it applies to chat as well as to whole-corpus artifacts (NotebookLM's equivalent forced-language
+    setting does too; scoping it to artifacts would leave an operator who set it wondering why their
+    answers were still in the sources' language).
+
+    Standalone rather than a `NotebookConfig` field, for the same reason as `max_upload_bytes`
+    (invariant 30): it is read on paths that have nothing to do with whether a model is configured.
+    Read at GENERATION time, so changing it takes effect without re-resolving any notebook."""
+    return clean_language(os.getenv("RN_OUTPUT_LANGUAGE"))
+
+
 def setup(config: NotebookConfig) -> NotebookConfig:
     """Configure rlm-harness (main + sub LM) for this process, and return `config` unchanged.
 

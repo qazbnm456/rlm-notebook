@@ -83,6 +83,14 @@ def client():
     return TestClient(api.app)
 
 
+class _FakeRequest:
+    """Just the `headers` a handler reads. `ask`/`guide`/`audio`/`title`/`overview` all take a
+    `Request` now, for `Accept-Language` — the handlers driven as bare coroutines (rather than
+    through TestClient) have to supply one."""
+
+    headers: ClassVar[dict[str, str]] = {}
+
+
 class _FakeProcess:
     """Just enough of `asyncio.subprocess.Process` for `_RUN_PROCESSES` bookkeeping — Phase 3
     stashes `run.process` there, so `_FakeRun` needs one even though these tests never exercise the
@@ -121,6 +129,10 @@ def _mock_runner(monkeypatch, result: dict, *, dotted_tasks: list[str] | None = 
 def _live_env(monkeypatch) -> None:
     monkeypatch.setenv("RN_MAIN_MODEL", "test/model")
     monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    # A forced language SKIPS `_resolve_language`'s model run entirely, which keeps every test that
+    # isn't about language to exactly the runs it means to exercise. The resolution path has its own
+    # tests below, which unset this.
+    monkeypatch.setenv("RN_OUTPUT_LANGUAGE", "English")
 
 
 def _add_a_source(client) -> None:
@@ -1153,7 +1165,9 @@ def test_a_source_and_a_note_added_during_an_ask_both_survive_it(monkeypatch, cl
     monkeypatch.setattr(api.runner, "wait_result", _gated_wait_result)
 
     async def _scenario():
-        asking = asyncio.create_task(api.ask("mynb", api.AskRequest(question="what?")))
+        asking = asyncio.create_task(
+            api.ask("mynb", api.AskRequest(question="what?"), _FakeRequest())
+        )
         await asyncio.sleep(0.05)  # let `ask` load the notebook and park on the run
 
         await api.add_sources("mynb", api.SourcesRequest(texts=["added while asking"]))
@@ -1419,3 +1433,120 @@ def test_the_persisted_overviews_citations_are_reverified_on_read(client, monkey
     citation = client.get("/notebooks/mynb").json()["overview"]["citations"][0]
     assert citation["verified"] is False
     assert "s99" in citation["reason"]
+
+
+# --- output language ------------------------------------------------------------------------
+
+
+def _mock_runner_by_run(monkeypatch, dotted, *, lang, other):
+    """Like `_mock_runner`, but answers the LANGUAGE run differently from the artifact run — they
+    return different shapes, so one canned result cannot serve both."""
+
+    async def _start(run_id, trace_dir, dotted_task, kwargs):
+        dotted.append(dotted_task)
+        return _FakeRun(run_id)
+
+    async def _wait(run, *, timeout=None):
+        return lang if "-lang" in run.run_id else other
+
+    monkeypatch.setattr(api.runner, "start_run", _start)
+    monkeypatch.setattr(api.runner, "wait_result", _wait)
+
+
+def test_every_grounded_task_declares_output_language():
+    """A tripwire, not tidiness. A MISSING required signature input surfaces as the opaque
+    `RLMTaskError: Failed to produce a valid 'answer'` (a 502) — indistinguishable from any other
+    run failure — and an UNDECLARED extra kwarg is silently accepted and injected as a REPL variable
+    anyway, so a partial rollout fails silently in BOTH directions. Verified empirically by this
+    slice's pre-implementation audit against the installed rlm-harness.
+
+    `GeneratePodcastScript` is deliberately ABSENT: the podcast is excluded from the forced language
+    this slice, because `tts.py` maps no language to a voice and a Chinese script would be
+    synthesized with the en-US default cast (invariant 15's "works out of the box")."""
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.task import AnswerQuestion
+
+    for task_cls in (AnswerQuestion, *(t for t, _ in api._GUIDE_TASKS.values())):
+        assert "output_language: str" in task_cls.signature, task_cls.__name__
+    assert "output_language" not in GeneratePodcastScript.signature
+
+
+def test_a_forced_language_skips_the_resolution_run_entirely(client, monkeypatch):
+    """`RN_OUTPUT_LANGUAGE` is a hard override, so there is nothing to resolve — and it applies to
+    CHAT as well as artifacts (NotebookLM's equivalent setting does; scoping it to artifacts would
+    leave an operator who set it wondering why answers stayed in the sources' language)."""
+    _live_env(monkeypatch)
+    monkeypatch.setenv("RN_OUTPUT_LANGUAGE", "Traditional Chinese")
+    _add_a_source(client)
+    dotted: list[str] = []
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []}, dotted_tasks=dotted)
+
+    assert client.post("/notebooks/mynb/ask", json={"question": "q"}).status_code == 200
+
+    assert dotted == ["rlm_notebook.task:AnswerQuestion"], "a resolution run fired despite the override"
+    assert load_notebook("mynb").output_language is None, "the override must not be persisted"
+
+
+def test_the_language_is_resolved_once_and_persisted(client, monkeypatch):
+    _live_env(monkeypatch)
+    monkeypatch.delenv("RN_OUTPUT_LANGUAGE", raising=False)
+    _add_a_source(client)
+    dotted: list[str] = []
+    _mock_runner_by_run(monkeypatch, dotted, lang="Japanese", other={"text": "x", "citations": []})
+
+    client.post("/notebooks/mynb/guide/summary")
+    assert dotted[0] == "rlm_notebook.naming:SuggestLanguage", dotted
+    assert load_notebook("mynb").output_language == "Japanese"
+
+    dotted.clear()
+    client.post("/notebooks/mynb/guide/faq")
+    assert "rlm_notebook.naming:SuggestLanguage" not in dotted, "resolved a second time"
+
+
+def test_the_overview_resolves_the_language_once_not_once_per_run(client, monkeypatch):
+    """`/overview` gathers two runs. Calling `_resolve_language` inside each branch would fire two
+    concurrent resolutions deriving the SAME `-lang` run id — one 409s on the exclusive-create gate
+    and both race to persist. Caught by the pre-implementation audit; pinned here."""
+    _live_env(monkeypatch)
+    monkeypatch.delenv("RN_OUTPUT_LANGUAGE", raising=False)
+    _add_a_source(client)
+    dotted: list[str] = []
+    _mock_runner_by_run(
+        monkeypatch, dotted, lang="Japanese", other={"text": "x", "citations": [], "items": []}
+    )
+
+    resp = client.post("/notebooks/mynb/overview", json={"run_id": "tok"})
+
+    assert resp.status_code == 200, resp.text
+    assert dotted.count("rlm_notebook.naming:SuggestLanguage") == 1, dotted
+
+
+def test_a_failed_resolution_never_costs_the_caller_their_artifact(client, monkeypatch):
+    """A language guess is a convenience. `_resolve_language` returns None on failure and the caller
+    substitutes its literal default."""
+    _live_env(monkeypatch)
+    monkeypatch.delenv("RN_OUTPUT_LANGUAGE", raising=False)
+    _add_a_source(client)
+
+    async def _fail_language(run, *, timeout=None):
+        raise api.runner.RunError("simulated resolution failure")
+
+    real_wait = api.runner.wait_result
+
+    async def _dispatch(run, *, timeout=None):
+        if "-lang" in run.run_id:
+            return await _fail_language(run, timeout=timeout)
+        return {"text": "an answer", "citations": []}
+
+    async def _start(run_id, trace_dir, dotted_task, kwargs):
+        return _FakeRun(run_id)
+
+    monkeypatch.setattr(api.runner, "start_run", _start)
+    monkeypatch.setattr(api.runner, "wait_result", _dispatch)
+    try:
+        resp = client.post("/notebooks/mynb/ask", json={"question": "q"})
+    finally:
+        monkeypatch.setattr(api.runner, "wait_result", real_wait)
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["text"] == "an answer"

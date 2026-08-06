@@ -27,7 +27,7 @@ from pydantic import ValidationError
 from . import __version__
 from .audio import GeneratePodcastScript
 from .citations import verify_citations
-from .config import NotebookConfig, setup
+from .config import NotebookConfig, output_language, setup
 from .corpus import Corpus, CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .notebook import (
@@ -77,6 +77,18 @@ _GUIDE_TASKS: dict[str, type] = {
     "timeline": GenerateTimeline,
     "insight": GenerateKeyInsight,
 }
+
+
+#: What a task is told when nothing better is known — a literal, never empty (see `api.py`'s copies
+#: for why). The CLI has no `Accept-Language` and never runs the resolver, so it uses whatever
+#: `RN_OUTPUT_LANGUAGE` says, else the language already resolved and PERSISTED on the notebook by
+#: the API (the notebook is the unit both entry points share — invariant 20), else these.
+_DEFAULT_ARTIFACT_LANGUAGE = "the language the sources are written in"
+_DEFAULT_CHAT_LANGUAGE = "the language the question was asked in"
+
+
+def _language_for(notebook, default: str) -> str:
+    return output_language() or notebook.output_language or default
 
 
 def _prepare(args) -> tuple[Notebook, Corpus] | None:
@@ -184,7 +196,12 @@ def _cmd_ask(args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    result = AnswerQuestion().run(sources=blob, history=history_text(notebook), question=args.question)
+    result = AnswerQuestion().run(
+        sources=blob,
+        history=history_text(notebook),
+        question=args.question,
+        output_language=_language_for(notebook, _DEFAULT_CHAT_LANGUAGE),
+    )
 
     print(result.text)
     _print_citations(result.citations, corpus)
@@ -211,7 +228,9 @@ def _cmd_guide(args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    result = _GUIDE_TASKS[args.kind]().run(sources=blob)
+    result = _GUIDE_TASKS[args.kind]().run(
+        sources=blob, output_language=_language_for(_notebook, _DEFAULT_ARTIFACT_LANGUAGE)
+    )
 
     if args.kind == "summary":
         print(result.text)

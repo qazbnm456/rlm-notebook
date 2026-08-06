@@ -24,6 +24,8 @@ from __future__ import annotations
 
 import re
 
+from .config import clean_language
+
 #: How much of the corpus the model is shown. A title needs the topic, not the document — and this
 #: is called right after the FIRST source lands, when the whole notebook is usually one file.
 _EXCERPT_CHARS = 4000
@@ -38,7 +40,8 @@ Rules:
 - 2 to 6 words. No trailing period.
 - Name the SUBJECT, not the format: "Voyager Interstellar Mission", never "Notes on a document"
   or "Summary of sources".
-- Use the sources' own language: if they are in Chinese, write a Chinese title.
+- Write the title in the language named by `language`. If that is empty, use the sources' own
+  language: if they are in Chinese, write a Chinese title.
 - If the sources are too fragmentary to tell what they are about, answer with their most concrete
   shared noun rather than inventing a theme.
 """
@@ -74,13 +77,71 @@ def clean_title(raw: str, origins: list[str]) -> str:
     return title[:_MAX_TITLE_CHARS]
 
 
+_LANGUAGE_INSTRUCTIONS = """\
+Decide which language this person wants their research notebook WRITTEN IN.
+
+You are given three signals, and they often disagree:
+- `accept_language`: the reader's browser preference. Useful, but it answers "what language should
+  this browser's interface be in", NOT "what language does this person want to read research in" —
+  an English-locale machine reading Japanese papers is exactly where the two diverge. Do not treat
+  it as decisive on its own.
+- `sources_excerpt`: what the documents are written in. The WEAKEST signal — reading a paper in one
+  language says nothing about wanting notes in it.
+- `questions`: anything this person has actually typed. The STRONGEST signal when present, because
+  it is the one place they chose a language for themselves rather than inheriting one.
+
+Answer with the language's name in English, two or three words at most: "Traditional Chinese",
+"Japanese", "Brazilian Portuguese", "English". No explanation, no punctuation, no alternatives.
+"""
+
+
+class SuggestLanguage:
+    """Which language to write this notebook's artifacts in — `worker.py`-compatible, like
+    `SuggestTitle`, and a plain `dspy.Predict` for the same reason (one word does not justify a
+    sandbox boot and a planner loop).
+
+    **Why a model call rather than ranking `Accept-Language` first.** The sibling project a sibling project
+    shipped exactly that class of bug in its ASR: it seeded the recogniser from `Locale.current`,
+    which answers "what language should this app's UI be in", while ASR was asking "what language is
+    this person speaking" — and transcribed Chinese speech as syllable-by-syllable English gibberish.
+    `Accept-Language` is the same shape of wrong API for "what language does this person want their
+    research written in". Weighing the signals together is a judgement, not a lookup.
+
+    Returns `None` on any failure — falling back to today's behaviour. A language guess must never
+    cost the user the artifact they asked for.
+    """
+
+    async def arun(
+        self, *, accept_language: str = "", sources_excerpt: str = "", questions: str = ""
+    ) -> str | None:
+        try:
+            import dspy
+
+            predictor = dspy.Predict(
+                dspy.Signature(
+                    "accept_language: str, sources_excerpt: str, questions: str -> language: str",
+                    _LANGUAGE_INSTRUCTIONS,
+                )
+            )
+            result = await predictor.acall(
+                accept_language=accept_language or "(not provided)",
+                sources_excerpt=(sources_excerpt or "")[:_EXCERPT_CHARS],
+                questions=questions or "(none asked yet)",
+            )
+            return clean_language(getattr(result, "language", ""))
+        except Exception:  # noqa: BLE001 — a language guess is never worth failing the request
+            return None
+
+
 class SuggestTitle:
     """`worker.py`-compatible: one `arun(**kwargs)` coroutine, nothing else.
 
     `arun(sources=<corpus excerpt>, origins=<list[str]>) -> str`.
     """
 
-    async def arun(self, *, sources: str = "", origins: list[str] | None = None) -> str:
+    async def arun(
+        self, *, sources: str = "", origins: list[str] | None = None, language: str = ""
+    ) -> str:
         origins = origins or []
         excerpt = (sources or "")[:_EXCERPT_CHARS]
         if not excerpt.strip():
@@ -89,9 +150,9 @@ class SuggestTitle:
             import dspy
 
             predictor = dspy.Predict(
-                dspy.Signature("sources: str -> title: str", _INSTRUCTIONS)
+                dspy.Signature("sources: str, language: str -> title: str", _INSTRUCTIONS)
             )
-            result = await predictor.acall(sources=excerpt)
+            result = await predictor.acall(sources=excerpt, language=language or "")
             return clean_title(getattr(result, "title", ""), origins)
         except Exception:  # noqa: BLE001 — a title is never worth failing the request that wanted it
             return fallback_title(origins)

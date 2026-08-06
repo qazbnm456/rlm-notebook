@@ -72,11 +72,17 @@ from pydantic import BaseModel, ValidationError
 from . import runner
 from .audio import GeneratePodcastScript
 from .citations import verify_citations
-from .config import NotebookConfig, max_trace_files, max_upload_bytes, trace_retention_seconds
+from .config import (
+    NotebookConfig,
+    max_trace_files,
+    max_upload_bytes,
+    output_language,
+    trace_retention_seconds,
+)
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
-from .naming import SuggestTitle, fallback_title
+from .naming import SuggestLanguage, SuggestTitle, fallback_title
 from .notebook import (
     add_note,
     append_sources,
@@ -710,6 +716,65 @@ def _derive_run_id(notebook_id: str, client_token: str | None) -> str:
     return f"{slug(notebook_id)}-{token}"
 
 
+#: What every task is told when nothing better is known — a literal, never an empty string. A
+#: class-level `instructions` string is composed at IMPORT time and cannot know a per-request
+#: language, so the rule paragraph is always present; giving it a real default means it never has to
+#: guard an absent value. (Trying to have BOTH a signature field and byte-identical prompts-when-
+#: unset was a contradiction this slice's own audit caught in its design.)
+_DEFAULT_ARTIFACT_LANGUAGE = "the language the sources are written in"
+_DEFAULT_CHAT_LANGUAGE = "the language the question was asked in"
+
+
+async def _resolve_language(
+    notebook: Notebook, request: Request, config: NotebookConfig, base_run_id: str
+) -> str | None:
+    """The notebook's output language, resolving and persisting it on first use.
+
+    Precedence: `RN_OUTPUT_LANGUAGE` wins outright and needs no run at all; otherwise an
+    already-persisted value is reused; otherwise one cheap model call weighs the reader's signals
+    and the answer is persisted. `None` means "no preference" and every caller substitutes its own
+    literal default.
+
+    **Its run id gets its own `-lang` suffix, appended AFTER derivation** (invariant 38's rule):
+    sharing the artifact's derived id would 409 on `_run_isolated`'s exclusive-create gate. The
+    caller passes the already-derived base and calls this ONCE — `/overview` in particular must
+    resolve BEFORE its `asyncio.gather`, or the two branches fire two concurrent resolutions that
+    derive the same id, one 409ing and both racing to persist.
+
+    Never raises: a failed resolution returns `None`, which is today's behaviour."""
+    forced = output_language()
+    if forced:
+        return forced
+    if notebook.output_language:
+        return notebook.output_language
+
+    excerpt = corpus_of(notebook).blob(max_chars=None)[:4000] if notebook.sources else ""
+    questions = "\n".join(turn.question for turn in notebook.turns[-5:])
+    try:
+        resolved = await _run_isolated(
+            notebook.id,
+            _dotted(SuggestLanguage),
+            {
+                "accept_language": request.headers.get("accept-language", ""),
+                "sources_excerpt": excerpt,
+                "questions": questions,
+            },
+            config,
+            f"{base_run_id}-lang",
+        )
+    except HTTPException:
+        return None
+    if not resolved:
+        return None
+    # `or`-guarded so two concurrent first-artifact requests can't flip an already-resolved value.
+    await _mutate_or_http(
+        notebook.id,
+        lambda nb: setattr(nb, "output_language", nb.output_language or str(resolved)),
+        create=False,
+    )
+    return str(resolved)
+
+
 async def _run_isolated(
     notebook_id: str, dotted_task: str, kwargs: dict, config: NotebookConfig, run_id: str
 ) -> dict:
@@ -807,7 +872,7 @@ async def _prune_traces() -> None:
 
 
 @app.post("/notebooks/{notebook_id}/ask", response_model=AskResponse)
-async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
+async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskResponse:
     notebook = _load_notebook_or_404(notebook_id)
     corpus = corpus_of(notebook)
     config = _config()
@@ -817,10 +882,16 @@ async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
         raise HTTPException(413, str(exc)) from exc
 
     run_id = _derive_run_id(notebook_id, body.run_id)
+    language = await _resolve_language(notebook, request, config, run_id)
     result = await _run_isolated(
         notebook_id,
         _dotted(AnswerQuestion),
-        {"sources": blob, "history": history_text(notebook), "question": body.question},
+        {
+            "sources": blob,
+            "history": history_text(notebook),
+            "question": body.question,
+            "output_language": language or _DEFAULT_CHAT_LANGUAGE,
+        },
         config,
         run_id,
     )
@@ -845,7 +916,9 @@ async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
 
 
 @app.post("/notebooks/{notebook_id}/title", response_model=NotebookResponse)
-async def suggest_title(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> NotebookResponse:
+async def suggest_title(
+    notebook_id: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
+) -> NotebookResponse:
     """Give a notebook a human label derived from the sources already in it.
 
     Separate from `add_sources` on purpose: ingestion must stay fast and must not fail because a
@@ -872,8 +945,16 @@ async def suggest_title(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) ->
     run_id = _derive_run_id(notebook_id, body.run_id)
     try:
         excerpt = corpus_of(notebook).blob(max_chars=None)[:8000]
+        # The title follows the notebook's resolved language too. Consequence to accept: the UI
+        # fires `/title` right after the FIRST source, before any question exists, so resolution
+        # runs with two of its three signals and serialises two cheap calls into that path.
+        language = await _resolve_language(notebook, request, config, run_id)
         title = await _run_isolated(
-            notebook_id, _dotted(SuggestTitle), {"sources": excerpt, "origins": origins}, config, run_id
+            notebook_id,
+            _dotted(SuggestTitle),
+            {"sources": excerpt, "origins": origins, "language": language or ""},
+            config,
+            run_id,
         )
     except HTTPException:
         # A failed/timed-out naming run must not deny the caller their notebook — fall back to the
@@ -888,7 +969,9 @@ async def suggest_title(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) ->
 
 
 @app.post("/notebooks/{notebook_id}/overview", response_model=NotebookResponse)
-async def generate_overview(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> NotebookResponse:
+async def generate_overview(
+    notebook_id: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
+) -> NotebookResponse:
     """Generate the notebook's front page — a Summary plus FAQ questions offered as follow-ups —
     and PERSIST it onto the notebook.
 
@@ -929,9 +1012,15 @@ async def generate_overview(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS
     base = _derive_run_id(notebook_id, (body.run_id or uuid.uuid4().hex)[:_RUN_TOKEN_MAX])
     summary_run, faq_run = f"{base}-summary", f"{base}-faq"
 
+    # Resolved ONCE, BEFORE the gather. Calling `_resolve_language` inside each branch would fire
+    # two concurrent resolutions deriving the same `-lang` id — one 409s on the exclusive-create
+    # gate and both race to persist. Caught by this slice's pre-implementation audit.
+    language = await _resolve_language(notebook, request, config, base)
+    kwargs = {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE}
+
     summary, faq = await asyncio.gather(
-        _run_isolated(notebook_id, _dotted(GenerateSummary), {"sources": blob}, config, summary_run),
-        _run_isolated(notebook_id, _dotted(GenerateFAQ), {"sources": blob}, config, faq_run),
+        _run_isolated(notebook_id, _dotted(GenerateSummary), kwargs, config, summary_run),
+        _run_isolated(notebook_id, _dotted(GenerateFAQ), kwargs, config, faq_run),
         return_exceptions=True,
     )
     if isinstance(summary, BaseException):
@@ -956,7 +1045,9 @@ async def generate_overview(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS
 
 
 @app.post("/notebooks/{notebook_id}/guide/{kind}")
-async def guide(notebook_id: str, kind: str, body: RunOptions = _NO_RUN_OPTIONS) -> dict:
+async def guide(
+    notebook_id: str, kind: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
+) -> dict:
     if kind not in _GUIDE_TASKS:
         raise HTTPException(404, f"unknown guide kind {kind!r}; known: {sorted(_GUIDE_TASKS)}")
     notebook = _load_notebook_or_404(notebook_id)
@@ -969,7 +1060,14 @@ async def guide(notebook_id: str, kind: str, body: RunOptions = _NO_RUN_OPTIONS)
 
     task_cls, output_model = _GUIDE_TASKS[kind]
     run_id = _derive_run_id(notebook_id, body.run_id)
-    result = await _run_isolated(notebook_id, _dotted(task_cls), {"sources": blob}, config, run_id)
+    language = await _resolve_language(notebook, request, config, run_id)
+    result = await _run_isolated(
+        notebook_id,
+        _dotted(task_cls),
+        {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE},
+        config,
+        run_id,
+    )
     parsed = output_model.model_validate(result)
 
     if kind in ("summary", "insight"):

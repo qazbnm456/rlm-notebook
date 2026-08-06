@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 from rlm_harness import RLMTask
 from rlm_harness.tools.validation import make_schema_validator
 
-from .instructions import CITATION_RULES, validate_before_submit_rule
+from .instructions import CITATION_RULES, artifact_language_rule, validate_before_submit_rule
 from .schema import FAQ, KeyInsight, Summary, Timeline
 
 __all__ = ["GenerateFAQ", "GenerateKeyInsight", "GenerateSummary", "GenerateTimeline"]
@@ -33,6 +33,8 @@ def _grounded_instructions(task_description: str, tool_name: str) -> str:
 never your own background knowledge. If the sources don't support a claim, leave it out rather
 than filling the gap from what you already know.
 
+{artifact_language_rule("the language named by the `output_language` variable")}
+
 {CITATION_RULES}
 
 {validate_before_submit_rule(tool_name)}
@@ -42,7 +44,7 @@ than filling the gap from what you already know.
 class GenerateSummary(RLMTask):
     """A concise summary of a notebook's sources, with citations."""
 
-    signature = "sources: str -> summary: Summary"
+    signature = "sources: str, output_language: str -> summary: Summary"
     output_field = "summary"
     output_model = Summary
     instructions = _grounded_instructions(
@@ -56,7 +58,7 @@ class GenerateSummary(RLMTask):
 class GenerateFAQ(RLMTask):
     """A set of frequently-asked questions and answers derived from a notebook's sources."""
 
-    signature = "sources: str -> faq: FAQ"
+    signature = "sources: str, output_language: str -> faq: FAQ"
     output_field = "faq"
     output_model = FAQ
     instructions = _grounded_instructions(
@@ -72,7 +74,7 @@ class GenerateTimeline(RLMTask):
     """A chronological (or otherwise ordered) timeline of events described across a notebook's
     sources."""
 
-    signature = "sources: str -> timeline: Timeline"
+    signature = "sources: str, output_language: str -> timeline: Timeline"
     output_field = "timeline"
     output_model = Timeline
     instructions = _grounded_instructions(
@@ -89,7 +91,7 @@ class GenerateTimeline(RLMTask):
 class GenerateKeyInsight(RLMTask):
     """The single most important, non-obvious takeaway from a notebook's sources, in one sentence."""
 
-    signature = "sources: str -> insight: KeyInsight"
+    signature = "sources: str, output_language: str -> insight: KeyInsight"
     output_field = "insight"
     output_model = KeyInsight
     instructions = _grounded_instructions(

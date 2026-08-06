@@ -16,7 +16,7 @@ from typing import Any, ClassVar
 from rlm_harness import RLMTask
 from rlm_harness.tools.validation import make_schema_validator
 
-from .instructions import CITATION_RULES, validate_before_submit_rule
+from .instructions import CITATION_RULES, chat_language_rule, validate_before_submit_rule
 from .schema import Answer
 
 __all__ = ["AnswerQuestion"]
@@ -33,6 +33,8 @@ past answer is not automatically still correct: re-derive and re-verify every cl
 THIS answer from `sources` fresh, exactly as if `history` did not exist for grounding purposes. If
 this is the first question in the conversation, `history` says so plainly.
 
+{chat_language_rule("the language named by the `output_language` variable")}
+
 {CITATION_RULES}
 
 {validate_before_submit_rule("validate_answer")}
@@ -42,7 +44,7 @@ this is the first question in the conversation, `history` says so plainly.
 class AnswerQuestion(RLMTask):
     """Answer one question grounded in a notebook's corpus blob, with citations."""
 
-    signature = "sources: str, history: str, question: str -> answer: Answer"
+    signature = "sources: str, history: str, question: str, output_language: str -> answer: Answer"
     output_field = "answer"
     output_model = Answer
     instructions = _INSTRUCTIONS

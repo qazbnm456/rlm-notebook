@@ -46,7 +46,7 @@ def _validate_then_submit(task_cls, tool_name: str, output_field: str, payload: 
             submit({output_field: payload}),
         ]
     )
-    return asyncio.run(task_cls(interpreter=interpreter).arun(sources=_SOURCES))
+    return asyncio.run(task_cls(interpreter=interpreter).arun(output_language="English", sources=_SOURCES))
 
 
 @pytest.mark.parametrize("task_cls", _GUIDE_TASKS)

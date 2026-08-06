@@ -55,7 +55,8 @@ class Source(BaseModel):
 class Citation(BaseModel):
     """A claimed citation. `source_id`/`locator` MUST be copied verbatim from a marker the model
     actually saw in the corpus blob (see `task.py`'s instructions) — `citations.py` verifies this
-    coordinate exists; it does not verify `quote` is a faithful summary of that block's text (see
+    coordinate exists; it does not verify `quote` is genuinely verbatim from that block (the model is
+    #: INSTRUCTED to copy it exactly — see `instructions.CITATION_RULES` — but nothing checks it) (see
     CLAUDE.md invariant 5)."""
 
     source_id: str
@@ -210,6 +211,13 @@ class Notebook(BaseModel):
     #: and defaulting to None, so every notebook written before this field existed still loads —
     #: the same backward-compatible precedent `ChatTurn.run_id` and `Notebook.notes` already set.
     title: str | None = None
+    #: The language model-authored prose is written in, resolved ONCE from the reader's signals and
+    #: persisted (`naming.SuggestLanguage`). `None` = never resolved, which falls back to today's
+    #: behaviour. `RN_OUTPUT_LANGUAGE` overrides it at generation time, so changing the env takes
+    #: effect without re-resolving. Records the CURRENT setting only: an artifact generated before it
+    #: changed carries no record of what it was written in — the same gap a sibling project had to close by
+    #: adding a locale column to its transcripts, noted here rather than fixed.
+    output_language: str | None = None
     #: The persisted chat overview, if one has been generated. Optional and defaulting to None, so
     #: notebooks written before it existed still load (the precedent `run_id`/`notes`/`title` set).
     overview: Overview | None = None

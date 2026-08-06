@@ -19,8 +19,52 @@ Markers are OPAQUE identifiers, not something you compute. When a claim relies o
 that block's marker's `source_id` and `locator` VERBATIM into a `Citation` — never invent, alter,
 guess, or reconstruct one from surrounding context. If you cannot find a marker supporting a claim,
 leave that claim uncited rather than fabricating a citation for it; an uncited claim is honest, a
-fabricated citation is not.\
+fabricated citation is not.
+
+A `Citation`'s `quote` is copied VERBATIM from the block — never translated, paraphrased,
+summarised, re-punctuated, or tidied. It is the reader's way of checking your prose against the
+source's own words, and it stops being that the moment you rewrite it.\
 """
+
+#: The carve-out every language instruction composes with. Kept SEPARATE from the language rules
+#: below so both of them share one copy (CLAUDE.md invariant 13) rather than each restating it.
+#:
+#: Naming only `quote` would be insufficient, and the omission is not cosmetic: a model told to
+#: write everything in Chinese will equally localise a LOCATOR — `page:1` becomes `第1頁`, a YouTube
+#: `ts:01:30` gets reformatted — and `citations.verify_citations` compares locators with an exact
+#: `==`. Every such citation lands as UNVERIFIED, which reads to a user as the model having made the
+#: citation up. Found by this slice's pre-implementation audit, before any of it was written.
+VERBATIM_COORDINATES = """\
+This does NOT apply to citation coordinates. A `source_id`, a `locator`, the `[[SRC:...]]` marker
+syntax, and a `quote` are all copied EXACTLY as they appear in `sources`, in the source's own
+language and formatting, however you are writing your prose. `page:1` stays `page:1`; a quote of
+English text stays in English inside a Chinese answer. These are coordinates and evidence, not
+prose, and a reader uses them to find the passage you are pointing at.\
+"""
+
+
+def chat_language_rule(language: str) -> str:
+    """`AnswerQuestion`'s language rule. Separate from the artifact rule because chat has something
+    no artifact has — a question, whose own language is the strongest available signal.
+
+    `language` is never empty: callers pass a literal default rather than an empty string, so this
+    paragraph is always present and never has to guard an absent value (a class-level `instructions`
+    string is composed at import time and cannot know a per-request language — trying to have both a
+    signature field and byte-identical prompts-when-unset was a contradiction this slice's audit
+    caught in its own design)."""
+    return (
+        f"Write your prose in {language}. If that instruction names the question's own language,\n"
+        f"answer in whatever language the question was asked in; when a follow-up is too short to\n"
+        f"tell (\"and Y?\", \"why?\"), use the language of the most recent question in `history`.\n"
+        f"Reading `history` for THAT is reading it as context for what the question refers to, which\n"
+        f"is what it is for — it remains never a source of facts or citations.\n\n"
+        f"{VERBATIM_COORDINATES}"
+    )
+
+
+def artifact_language_rule(language: str) -> str:
+    """The language rule for whole-corpus artifacts, which have no question to take a cue from."""
+    return f"Write your prose in {language}.\n\n{VERBATIM_COORDINATES}"
 
 
 def validate_before_submit_rule(tool_name: str) -> str:

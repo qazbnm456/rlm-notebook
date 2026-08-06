@@ -963,4 +963,67 @@ assume any of them exist because an earlier design discussion mentioned them.
     supports. Pre-existing, and found by this slice's audit precisely because persisting
     `Overview.run_id` would have made a dead link the notebook's front page.
 
+39. **Model-authored prose follows the READER's language, not the documents'. Citation coordinates
+    never follow anything.** Every model-authored string used to come out in the sources' language,
+    so a Traditional-Chinese reader feeding in English papers got an English notebook.
+
+    **The carve-out is the load-bearing half, and it covers coordinates, not just quotes.**
+    `citations.verify_citations` compares `locator` with an exact `==` and never inspects `quote` at
+    all (invariant 5) — so a model told "write everything in Chinese" that helpfully localises
+    `page:1` to `第1頁` turns every citation UNVERIFIED, and one that translates a `quote` produces
+    a citation still wearing a ✓ badge while no longer being the source's own words.
+    `instructions.VERBATIM_COORDINATES` names `source_id`, `locator`, the `[[SRC:...]]` marker
+    syntax AND `quote` together, and is composed BEFORE `CITATION_RULES`, not after. Naming only
+    `quote` was a real defect in this slice's own design, caught by its pre-implementation audit.
+    `CITATION_RULES` also gained the "a quote is copied verbatim" sentence it had never actually
+    contained, and `schema.py`'s "faithful summary" wording — which muddied exactly this — is fixed.
+
+    **`Accept-Language` is the wrong API to rank first, and a sibling project already paid
+    for that lesson.** Its ASR seeded itself from `Locale.current`, which answers "what language
+    should this app's UI be in", while ASR was asking "what language is this person speaking" — and
+    it transcribed Chinese speech as syllable-by-syllable English gibberish. `Accept-Language` is the
+    same shape of wrong question here. So the resolution is one cheap `dspy.Predict`
+    (`naming.SuggestLanguage`, NOT an `RLMTask` — same reasoning as invariant 37) weighing the
+    header, the sources' language, and any questions already asked, with the questions weighted
+    highest because they are the one place the reader chose a language rather than inheriting one.
+    Two more of a sibling project's lessons apply directly: **a ladder cannot correct its own input** (our
+    `env → resolved → default` chain has the same property), and **an instrument that cannot
+    reproduce production's shape is not evidence** — this slice's live check therefore sends the
+    `Accept-Language` a real browser sends, not a bare `curl`.
+
+    Precedence: `RN_OUTPUT_LANGUAGE` (a HARD override, applying to CHAT too — NotebookLM's
+    equivalent setting does, and scoping it to artifacts would leave an operator wondering why
+    answers stayed in the sources' language) → `Notebook.output_language`, resolved once and
+    persisted → a literal default. The value reaches a task as a SIGNATURE FIELD and is never empty:
+    a class-level `instructions` string is composed at import time and cannot know a per-request
+    language, so "a signature field" and "byte-identical prompts when unset" were a contradiction —
+    the default is a literal like "the language the sources are written in". Precedence is resolved
+    in `api.py`/`cli.py` and passed DOWN; `worker.py` must never re-read the env, or precedence
+    would be applied twice with the persisted value invisible to the subprocess.
+
+    **`_resolve_language` runs at most once per request, with its own `-lang` run-id suffix appended
+    AFTER derivation** (invariant 38's rule). Sharing the artifact's derived id 409s on the
+    exclusive-create gate; and `/overview` must resolve BEFORE its `asyncio.gather`, or the two
+    branches fire two concurrent resolutions deriving the same id — one 409ing, both racing to
+    persist. A failed resolution returns `None` and the caller uses its default: a language guess
+    never costs the user the artifact they asked for.
+
+    **The Audio Overview is deliberately EXCLUDED.** `tts.py` maps no language to a voice —
+    `voice_map` comes straight from `RN_TTS_VOICE_HOST_A/B` and `synthesize` speaks whatever it is
+    handed — so a forced-Chinese notebook would produce a correct Chinese script read by the en-US
+    default cast, quietly breaking invariant 15's "works out of the box". Shipping a known-broken
+    combination is worse than a stated scope cut; language-aware default voices are their own
+    follow-up. `tests/test_api.py`'s tripwire asserts `GeneratePodcastScript` does NOT declare the
+    field, so the exclusion is deliberate rather than forgotten — and that every OTHER grounded task
+    does, because a missing required input surfaces only as the opaque
+    `RLMTaskError: Failed to produce a valid 'answer'` while an UNDECLARED extra kwarg is silently
+    accepted, so a partial rollout fails silently in both directions.
+
+    **Verified live, both paths**, since the offline tests drive a scripted LM and can demonstrate
+    none of this (invariant 4's residual-risk note applies with full force): forced Chinese against
+    English sources returned Chinese prose with `s1`/`whole` untranslated, English quotes verbatim
+    and every citation verified; and with the override unset, `Accept-Language: zh-TW` against the
+    same English sources resolved to "Traditional Chinese", persisted it, and did not re-resolve for
+    the next artifact.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.
