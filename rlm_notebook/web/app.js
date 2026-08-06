@@ -1182,6 +1182,28 @@ function initPodcastPlayer() {
       body.appendChild(player);
       currentObjectUrl = newUrl;
       if (oldUrl) URL.revokeObjectURL(oldUrl); // ...then revoke the OLD one, never the reverse
+
+      // An explicit download, because there is nowhere else to get this from: the server keeps NO
+      // audio (a temp file, unlinked in a `finally` — invariant 29), so the episode exists only as
+      // this tab's Blob and a page reload loses it. `<audio controls>` does expose a download in
+      // some browsers' overflow menu, which is neither discoverable nor uniform.
+      //
+      // Shares `currentObjectUrl`'s lifetime deliberately: it points at the SAME object URL the
+      // player uses, so the existing assign-new-then-revoke-old ordering keeps both valid together
+      // and neither outlives the other.
+      const download = document.createElement("a");
+      download.className = "btn podcast-download";
+      download.href = newUrl;
+      // A model-authored title reaches a filename here, so it is slugged rather than interpolated:
+      // `download` is an attribute the browser turns into a path component.
+      const stem = (state.title || state.notebookId || "notebook")
+        .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
+        .replace(/^-+|-+$/g, "")
+        .slice(0, 60);
+      download.download = `${stem || "notebook"}.mp3`;
+      download.textContent = "\u2913 Download mp3";
+      body.appendChild(download);
+
       body.appendChild(renderTickerAffordance(runId));
 
       const transcript = document.createElement("div");

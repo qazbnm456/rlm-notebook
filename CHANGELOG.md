@@ -1156,6 +1156,15 @@ questions with verifiable citations, and get a distilled research artifact out.
   Verified live end to end: an English source in a forced-Chinese notebook produced a Chinese
   two-host script and synthesized it with the zh-TW cast into a valid 203KB MP3.
 
+- **A download link on the podcast player.** A user asked where the generated mp3 was. Nowhere —
+  by design: the server writes a temp file and unlinks it in a `finally`, so the episode exists only
+  as the browser tab's `Blob` and a reload loses it. `<audio controls>` exposes a download in some
+  browsers' overflow menu, which is neither discoverable nor uniform. An explicit `↓ Download mp3`
+  now sits beside the player, sharing the player's object URL so the existing
+  assign-new-then-revoke-old ordering keeps both valid together. The filename is slugged from the
+  notebook title rather than interpolated — `download` is an attribute the browser turns into a path
+  component, and that title is model-authored.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
