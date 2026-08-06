@@ -14,7 +14,7 @@ from typing import Any, ClassVar
 from rlm_harness import RLMTask
 from rlm_harness.tools.validation import make_schema_validator
 
-from .instructions import CITATION_RULES, validate_before_submit_rule
+from .instructions import CITATION_RULES, artifact_language_rule, validate_before_submit_rule
 from .schema import PodcastScript
 
 __all__ = ["GeneratePodcastScript"]
@@ -34,6 +34,8 @@ the sources actually contain — a handful of substantive exchanges for a short 
 long or dense one; do not pad with filler to hit some target length, and do not try to cover every
 single detail in the sources at the cost of a natural conversation.
 
+{artifact_language_rule("the language named by the `output_language` variable")}
+
 {CITATION_RULES}
 
 {validate_before_submit_rule("validate_podcastscript")}
@@ -43,7 +45,7 @@ single detail in the sources at the cost of a natural conversation.
 class GeneratePodcastScript(RLMTask):
     """Generate a two-host podcast script grounded in a notebook's sources, with citations."""
 
-    signature = "sources: str -> script: PodcastScript"
+    signature = "sources: str, output_language: str -> script: PodcastScript"
     output_field = "script"
     output_model = PodcastScript
     instructions = _INSTRUCTIONS

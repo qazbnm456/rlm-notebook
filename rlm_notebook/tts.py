@@ -97,6 +97,72 @@ class EdgeTTSProvider:
         return b"".join(chunks)
 
 
+#: Language name (or BCP-47 tag) -> a (host_a, host_b) edge-tts voice pair. Every id here was read
+#: out of a real `edge_tts.list_voices()` response, not written from memory — a plausible-looking but
+#: nonexistent voice fails only at synthesis time, after a real model call has already been spent.
+#:
+#: Keys are matched loosely (see `default_voices_for`) because the language can arrive either as a
+#: model-authored NAME ("Traditional Chinese") or as whatever an operator typed into
+#: `RN_OUTPUT_LANGUAGE` ("zh-TW"). An unknown language returns None and the configured defaults
+#: stand — a wrong-language voice is bad, but silently substituting a voice for a language nobody
+#: asked for is worse.
+_LANGUAGE_VOICES: dict[str, tuple[str, str]] = {
+    "traditional chinese": ("zh-TW-YunJheNeural", "zh-TW-HsiaoChenNeural"),
+    "zh-tw": ("zh-TW-YunJheNeural", "zh-TW-HsiaoChenNeural"),
+    "zh-hant": ("zh-TW-YunJheNeural", "zh-TW-HsiaoChenNeural"),
+    "simplified chinese": ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural"),
+    "chinese": ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural"),
+    "mandarin": ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural"),
+    "zh-cn": ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural"),
+    "zh": ("zh-CN-YunjianNeural", "zh-CN-XiaoxiaoNeural"),
+    "japanese": ("ja-JP-KeitaNeural", "ja-JP-NanamiNeural"),
+    "ja": ("ja-JP-KeitaNeural", "ja-JP-NanamiNeural"),
+    "korean": ("ko-KR-HyunsuMultilingualNeural", "ko-KR-SunHiNeural"),
+    "ko": ("ko-KR-HyunsuMultilingualNeural", "ko-KR-SunHiNeural"),
+    "english": ("en-US-GuyNeural", "en-US-JennyNeural"),
+    "en": ("en-US-GuyNeural", "en-US-JennyNeural"),
+    "german": ("de-DE-FlorianMultilingualNeural", "de-DE-SeraphinaMultilingualNeural"),
+    "de": ("de-DE-FlorianMultilingualNeural", "de-DE-SeraphinaMultilingualNeural"),
+    "french": ("fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural"),
+    "fr": ("fr-FR-RemyMultilingualNeural", "fr-FR-VivienneMultilingualNeural"),
+    "spanish": ("es-ES-AlvaroNeural", "es-ES-XimenaNeural"),
+    "es": ("es-ES-AlvaroNeural", "es-ES-XimenaNeural"),
+    "brazilian portuguese": ("pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"),
+    "portuguese": ("pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"),
+    "pt": ("pt-BR-AntonioNeural", "pt-BR-ThalitaMultilingualNeural"),
+    "italian": ("it-IT-GiuseppeMultilingualNeural", "it-IT-ElsaNeural"),
+    "it": ("it-IT-GiuseppeMultilingualNeural", "it-IT-ElsaNeural"),
+    "russian": ("ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"),
+    "ru": ("ru-RU-DmitryNeural", "ru-RU-SvetlanaNeural"),
+    "thai": ("th-TH-NiwatNeural", "th-TH-PremwadeeNeural"),
+    "vietnamese": ("vi-VN-NamMinhNeural", "vi-VN-HoaiMyNeural"),
+    "indonesian": ("id-ID-ArdiNeural", "id-ID-GadisNeural"),
+    "arabic": ("ar-SA-HamedNeural", "ar-SA-ZariyahNeural"),
+    "hindi": ("hi-IN-MadhurNeural", "hi-IN-SwaraNeural"),
+}
+
+
+def default_voices_for(language: str | None) -> tuple[str, str] | None:
+    """The `(host_a, host_b)` pair for a language, or `None` if it isn't one we have voices for.
+
+    **This is the gap that kept the podcast out of the previous slice's language work**: nothing in
+    this module ever mapped a language to a voice — `voice_map` came straight from
+    `RN_TTS_VOICE_HOST_A/B` and `synthesize` spoke whatever it was handed — so a correct Chinese
+    script would have been read by the en-US default cast. That hole is provider-independent; it was
+    never "edge-tts is the wrong TTS".
+
+    Matching is deliberately loose: the value arrives either as a model-authored name ("Traditional
+    Chinese") or as whatever an operator typed ("zh-TW"). A bare BCP-47 tag also falls back to its
+    primary subtag, so "pt-PT" finds "pt" rather than nothing.
+    """
+    if not language:
+        return None
+    key = " ".join(language.lower().split())
+    if key in _LANGUAGE_VOICES:
+        return _LANGUAGE_VOICES[key]
+    return _LANGUAGE_VOICES.get(key.split("-")[0])
+
+
 _PROVIDERS: dict[str, Callable[[], TTSProvider]] = {
     "edge-tts": EdgeTTSProvider,
 }

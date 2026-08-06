@@ -80,7 +80,7 @@ def test_generate_podcast_script_offline_forward_pass():
     )
     task = GeneratePodcastScript(interpreter=interpreter)
 
-    result = asyncio.run(task.arun(sources=_SOURCES))
+    result = asyncio.run(task.arun(output_language="English", sources=_SOURCES))
 
     assert isinstance(result, PodcastScript)
     assert len(result.utterances) == 3
@@ -100,6 +100,6 @@ def test_generate_podcast_script_offline_forward_pass_empty_script():
             submit({"script": {"utterances": []}}),
         ]
     )
-    result = asyncio.run(GeneratePodcastScript(interpreter=interpreter).arun(sources=_SOURCES))
+    result = asyncio.run(GeneratePodcastScript(interpreter=interpreter).arun(output_language="English", sources=_SOURCES))
     assert isinstance(result, PodcastScript)
     assert result.utterances == []

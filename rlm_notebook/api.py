@@ -78,6 +78,7 @@ from .config import (
     max_upload_bytes,
     output_language,
     trace_retention_seconds,
+    tts_voice_map,
 )
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
@@ -1108,7 +1109,9 @@ class AudioResponse(BaseModel):
 
 
 @app.post("/notebooks/{notebook_id}/audio", response_model=AudioResponse)
-async def audio(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> AudioResponse:
+async def audio(
+    notebook_id: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
+) -> AudioResponse:
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
     audio. Two host-side steps, not one (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum):
     `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
@@ -1150,8 +1153,13 @@ async def audio(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> AudioRe
     provider = _tts_provider(config)
 
     run_id = _derive_run_id(notebook_id, body.run_id)
+    language = await _resolve_language(notebook, request, config, run_id)
     result = await _run_isolated(
-        notebook_id, _dotted(GeneratePodcastScript), {"sources": blob}, config, run_id
+        notebook_id,
+        _dotted(GeneratePodcastScript),
+        {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE},
+        config,
+        run_id,
     )
     script = PodcastScript.model_validate(result)
 
@@ -1168,7 +1176,7 @@ async def audio(notebook_id: str, body: RunOptions = _NO_RUN_OPTIONS) -> AudioRe
         # already has, rather than calling synthesize() and getting a TTSError for an empty script.
         return AudioResponse(utterances=[], audio_base64=None)
 
-    voice_map = {"host_a": config.tts_voice_host_a, "host_b": config.tts_voice_host_b}
+    voice_map = tts_voice_map(config, language)
     fd, tmp_name = tempfile.mkstemp(suffix=".mp3")
     os.close(fd)
     tmp_path = Path(tmp_name)

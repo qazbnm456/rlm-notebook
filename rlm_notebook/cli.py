@@ -27,7 +27,7 @@ from pydantic import ValidationError
 from . import __version__
 from .audio import GeneratePodcastScript
 from .citations import verify_citations
-from .config import NotebookConfig, output_language, setup
+from .config import NotebookConfig, output_language, setup, tts_voice_map
 from .corpus import Corpus, CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .notebook import (
@@ -287,7 +287,8 @@ def _cmd_audio(args) -> int:
         print(f"cannot generate audio: {exc}", file=sys.stderr)
         return 1
 
-    script = GeneratePodcastScript().run(sources=blob)
+    language = _language_for(_notebook, _DEFAULT_ARTIFACT_LANGUAGE)
+    script = GeneratePodcastScript().run(sources=blob, output_language=language)
 
     if not script.utterances:
         # A source with nothing worth discussing is a legitimate answer (audio.py's instructions
@@ -301,7 +302,7 @@ def _cmd_audio(args) -> int:
             print()
 
         out_path = Path(args.out)
-        voice_map = {"host_a": config.tts_voice_host_a, "host_b": config.tts_voice_host_b}
+        voice_map = tts_voice_map(config, language)
         try:
             provider.synthesize(script, voice_map, out_path)
         except TTSError as exc:

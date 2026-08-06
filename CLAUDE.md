@@ -1008,16 +1008,13 @@ assume any of them exist because an earlier design discussion mentioned them.
     persist. A failed resolution returns `None` and the caller uses its default: a language guess
     never costs the user the artifact they asked for.
 
-    **The Audio Overview is deliberately EXCLUDED.** `tts.py` maps no language to a voice —
-    `voice_map` comes straight from `RN_TTS_VOICE_HOST_A/B` and `synthesize` speaks whatever it is
-    handed — so a forced-Chinese notebook would produce a correct Chinese script read by the en-US
-    default cast, quietly breaking invariant 15's "works out of the box". Shipping a known-broken
-    combination is worse than a stated scope cut; language-aware default voices are their own
-    follow-up. `tests/test_api.py`'s tripwire asserts `GeneratePodcastScript` does NOT declare the
-    field, so the exclusion is deliberate rather than forgotten — and that every OTHER grounded task
-    does, because a missing required input surfaces only as the opaque
-    `RLMTaskError: Failed to produce a valid 'answer'` while an UNDECLARED extra kwarg is silently
-    accepted, so a partial rollout fails silently in both directions.
+    **The Audio Overview was excluded for exactly one slice, then included** — see invariant 40.
+    `tests/test_api.py`'s tripwire asserts every grounded task declares the field, because a missing
+    required input surfaces only as the opaque `RLMTaskError: Failed to produce a valid 'answer'`
+    while an UNDECLARED extra kwarg is silently accepted, so a partial rollout fails silently in
+    both directions. That tripwire earned itself immediately: it pinned the podcast's EXCLUSION, so
+    adding the field one slice later failed the test rather than letting a stated scope cut erode
+    silently.
 
     **Verified live, both paths**, since the offline tests drive a scripted LM and can demonstrate
     none of this (invariant 4's residual-risk note applies with full force): forced Chinese against
@@ -1025,5 +1022,29 @@ assume any of them exist because an earlier design discussion mentioned them.
     and every citation verified; and with the override unset, `Accept-Language: zh-TW` against the
     same English sources resolved to "Traditional Chinese", persisted it, and did not re-resolve for
     the next artifact.
+
+40. **`tts.default_voices_for` is what actually let the podcast join invariant 39's language
+    story, and the gap it closes was never "edge-tts is the wrong TTS".** NOTHING in this project
+    mapped a language to a voice: `voice_map` came straight from `RN_TTS_VOICE_HOST_A`/`_B` and
+    `synthesize` spoke whatever it was handed. Any provider would have had the same hole, so
+    swapping providers would not have fixed it — a correct Chinese script read by the en-US default
+    cast is a routing bug, not a synthesis one.
+
+    **Every voice id in the table was read out of a real `edge_tts.list_voices()` response, never
+    written from memory** — a plausible-looking but nonexistent voice id fails only at SYNTHESIS
+    time, after a real model call has already been spent on the script, which is precisely the waste
+    invariant 19 exists to prevent. A test asserts the shape of every id in the map as a cheap guard
+    against a hand-edited one drifting.
+
+    **Precedence: an explicitly set `RN_TTS_VOICE_HOST_A`/`_B` beats the language default**, which
+    beats the shipped en-US cast. Explicitness is read from the RAW environment, never by comparing
+    against the default VALUE: an operator who deliberately sets `RN_TTS_VOICE_HOST_A=en-US-GuyNeural`
+    on a Chinese notebook is making a choice, and a value-equality check would silently overrule it.
+    The two voices resolve independently, so setting one and leaving the other keeps the un-set one
+    following the language. An unknown language returns `None` and the configured voices stand — a
+    wrong-language voice is bad, but substituting a voice for a language nobody asked for is worse.
+
+    Verified live end to end: an English source in a forced-Chinese notebook produced a Chinese
+    two-host script AND synthesized it with the zh-TW cast into a valid 203KB MP3.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

@@ -5,6 +5,8 @@ injection-seam pattern `parsers/web.py`'s `fetcher` parameter uses for the SSRF-
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from rlm_notebook.schema import PodcastScript, Utterance
@@ -109,3 +111,68 @@ def test_get_tts_provider_returns_edge_tts_by_default():
 def test_get_tts_provider_raises_on_unknown_name():
     with pytest.raises(TTSError, match="unknown TTS provider"):
         get_tts_provider("not-a-real-provider")
+
+
+# --- language-aware default voices ------------------------------------------------------------
+
+
+def test_default_voices_cover_the_common_language_spellings():
+    """The language arrives either as a model-authored NAME ("Traditional Chinese") or as whatever
+    an operator typed into RN_OUTPUT_LANGUAGE ("zh-TW"), so matching is loose on purpose."""
+    from rlm_notebook.tts import default_voices_for
+
+    assert default_voices_for("Traditional Chinese") == default_voices_for("zh-TW")
+    assert default_voices_for("Japanese")[0].startswith("ja-JP-")
+    assert default_voices_for("  traditional   chinese  ") == default_voices_for("Traditional Chinese")
+    # a BCP-47 tag falls back to its primary subtag rather than finding nothing
+    assert default_voices_for("pt-PT") == default_voices_for("Portuguese")
+
+
+def test_an_unknown_language_keeps_the_configured_voices():
+    """A wrong-language voice is bad; silently substituting one for a language nobody asked for is
+    worse. Unknown means "no opinion", and the configured defaults stand."""
+    from rlm_notebook.tts import default_voices_for
+
+    assert default_voices_for("Klingon") is None
+    assert default_voices_for(None) is None
+    assert default_voices_for("") is None
+
+
+def test_every_mapped_voice_id_is_shaped_like_a_real_edge_tts_voice():
+    """Every id in the table was read out of a real `edge_tts.list_voices()` response rather than
+    written from memory — a plausible-looking but nonexistent voice fails only at synthesis time,
+    after a real model call has already been spent on the script."""
+    from rlm_notebook.tts import _LANGUAGE_VOICES
+
+    for language, (host_a, host_b) in _LANGUAGE_VOICES.items():
+        for voice in (host_a, host_b):
+            assert re.fullmatch(r"[a-z]{2}-[A-Z]{2}-\w+Neural", voice), (language, voice)
+
+
+def test_an_explicit_env_voice_beats_the_language_default(monkeypatch):
+    """An operator who set a voice meant it, whatever language the notebook resolved to. Read from
+    the RAW env, not by comparing against the default value: setting RN_TTS_VOICE_HOST_A to the
+    en-US default on a Chinese notebook is a choice, and an equality check would overrule it."""
+    from rlm_notebook.config import NotebookConfig, tts_voice_map
+
+    config = NotebookConfig(main_model="x")
+    monkeypatch.delenv("RN_TTS_VOICE_HOST_A", raising=False)
+    monkeypatch.delenv("RN_TTS_VOICE_HOST_B", raising=False)
+    assert tts_voice_map(config, "Traditional Chinese")["host_a"].startswith("zh-TW-")
+
+    monkeypatch.setenv("RN_TTS_VOICE_HOST_A", "en-US-GuyNeural")
+    resolved = tts_voice_map(config, "Traditional Chinese")
+    assert resolved["host_a"] == "en-US-GuyNeural", "an explicit choice was overruled"
+    assert resolved["host_b"].startswith("zh-TW-"), "the un-set voice should still follow the language"
+
+
+def test_no_language_falls_back_to_the_shipped_cast(monkeypatch):
+    from rlm_notebook.config import NotebookConfig, tts_voice_map
+
+    monkeypatch.delenv("RN_TTS_VOICE_HOST_A", raising=False)
+    monkeypatch.delenv("RN_TTS_VOICE_HOST_B", raising=False)
+    config = NotebookConfig(main_model="x")
+    assert tts_voice_map(config, None) == {
+        "host_a": config.tts_voice_host_a,
+        "host_b": config.tts_voice_host_b,
+    }

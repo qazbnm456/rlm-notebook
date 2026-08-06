@@ -1460,15 +1460,18 @@ def test_every_grounded_task_declares_output_language():
     anyway, so a partial rollout fails silently in BOTH directions. Verified empirically by this
     slice's pre-implementation audit against the installed rlm-harness.
 
-    `GeneratePodcastScript` is deliberately ABSENT: the podcast is excluded from the forced language
-    this slice, because `tts.py` maps no language to a voice and a Chinese script would be
-    synthesized with the en-US default cast (invariant 15's "works out of the box")."""
+    `GeneratePodcastScript` was deliberately ABSENT for one slice — the podcast was excluded from
+    the forced language because `tts.py` mapped no language to a voice, so a Chinese script would
+    have been read by the en-US default cast (invariant 15's "works out of the box"). It is included
+    now that `tts.default_voices_for` closes that. The exclusion being pinned is what made changing
+    it a deliberate act: this assertion failed the moment the field was added, rather than the
+    scope cut silently eroding."""
     from rlm_notebook.audio import GeneratePodcastScript
     from rlm_notebook.task import AnswerQuestion
 
-    for task_cls in (AnswerQuestion, *(t for t, _ in api._GUIDE_TASKS.values())):
+    grounded = (AnswerQuestion, GeneratePodcastScript, *(t for t, _ in api._GUIDE_TASKS.values()))
+    for task_cls in grounded:
         assert "output_language: str" in task_cls.signature, task_cls.__name__
-    assert "output_language" not in GeneratePodcastScript.signature
 
 
 def test_a_forced_language_skips_the_resolution_run_entirely(client, monkeypatch):

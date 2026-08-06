@@ -272,6 +272,26 @@ def output_language() -> str | None:
     return clean_language(os.getenv("RN_OUTPUT_LANGUAGE"))
 
 
+def tts_voice_map(config: NotebookConfig, language: str | None) -> dict[str, str]:
+    """The `{speaker: voice}` map `tts.synthesize` needs, with the LANGUAGE picking the defaults.
+
+    Precedence, and the middle rung is the point of this function: an EXPLICITLY set
+    `RN_TTS_VOICE_HOST_A`/`_B` always wins (an operator who chose a voice meant it, whatever language
+    the notebook resolved to) → else the language's default pair (`tts.default_voices_for`) → else
+    the en-US cast this project has always shipped.
+
+    Explicitness is read from the raw environment, NOT by comparing against the default value: a user
+    who deliberately sets `RN_TTS_VOICE_HOST_A=en-US-GuyNeural` on a Chinese notebook is making a
+    choice, and a value-equality check would silently overrule it.
+    """
+    from .tts import default_voices_for
+
+    pair = default_voices_for(language)
+    host_a = os.getenv("RN_TTS_VOICE_HOST_A", "").strip() or (pair[0] if pair else config.tts_voice_host_a)
+    host_b = os.getenv("RN_TTS_VOICE_HOST_B", "").strip() or (pair[1] if pair else config.tts_voice_host_b)
+    return {"host_a": host_a, "host_b": host_b}
+
+
 def setup(config: NotebookConfig) -> NotebookConfig:
     """Configure rlm-harness (main + sub LM) for this process, and return `config` unchanged.
 

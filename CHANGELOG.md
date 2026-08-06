@@ -1128,6 +1128,34 @@ questions with verifiable citations, and get a distilled research artifact out.
   `Accept-Language: zh-TW` against the same English sources resolved to "Traditional Chinese",
   persisted it, and did not re-resolve for the next artifact.
 
+- **Twentieth slice: language-aware default voices — the podcast rejoins the language story.**
+  The previous slice excluded the Audio Overview as a stated scope cut; this closes it.
+
+  **The gap was never "edge-tts is the wrong TTS".** Nothing in this project mapped a language to a
+  voice: `voice_map` came straight from `RN_TTS_VOICE_HOST_A`/`_B` and `synthesize` spoke whatever
+  it was handed. Every provider would have had the same hole, so swapping providers would not have
+  fixed it — a correct Chinese script read by the en-US default cast is a routing bug, not a
+  synthesis one.
+
+  `tts.default_voices_for` maps a language to a voice pair, matching loosely because the value
+  arrives either as a model-authored name ("Traditional Chinese") or as whatever an operator typed
+  ("zh-TW"), with a BCP-47 tag falling back to its primary subtag. **Every voice id was read out of
+  a real `edge_tts.list_voices()` response rather than written from memory** — a plausible-looking
+  but nonexistent id fails only at synthesis time, after a real model call has already been spent on
+  the script, exactly the waste invariant 19 exists to prevent.
+
+  An explicitly set env voice beats the language default, read from the RAW environment rather than
+  by comparing against the default value: setting `RN_TTS_VOICE_HOST_A=en-US-GuyNeural` on a Chinese
+  notebook is a choice, and an equality check would overrule it. The two resolve independently.
+
+  **The previous slice's tripwire earned itself immediately.** It pinned that
+  `GeneratePodcastScript` did NOT declare `output_language`, so adding the field failed the test
+  rather than letting a stated scope cut erode unnoticed — the exclusion had to be un-made
+  deliberately.
+
+  Verified live end to end: an English source in a forced-Chinese notebook produced a Chinese
+  two-host script and synthesized it with the zh-TW cast into a valid 203KB MP3.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
