@@ -29,6 +29,7 @@ const state = {
   notebookId: null,
   title: null,
   overview: null,
+  podcast: null,
   sources: [],
   turns: [],
   notes: [],
@@ -345,6 +346,7 @@ async function openNotebook(notebookId) {
   state.notebookId = notebook.id;
   state.title = notebook.title || null;
   state.overview = notebook.overview || null;
+  state.podcast = notebook.podcast || null;
   state.sources = notebook.sources;
   state.turns = notebook.turns;
   state.notes = notebook.notes || [];
@@ -567,6 +569,7 @@ function resetToNewNotebook() {
   state.notebookId = null;
   state.title = null;
   state.overview = null;
+  state.podcast = null;
   state.sources = [];
   state.turns = [];
   state.notes = [];
@@ -1255,21 +1258,73 @@ function renderPodcastUtterance(utterance, runId) {
   return div;
 }
 
+// Renders an episode: player, download, transcript. ONE function for both the just-generated case
+// and the reopened-notebook case, so a persisted episode can never render differently from a fresh
+// one — the shape the podcast was missing before it was persisted at all.
+//
+// `audioSrc` is a URL on this server (`GET .../audio/file`), not an object URL: the browser can
+// range-request it, so seeking in a long episode doesn't re-download it, and reopening a notebook
+// costs no re-synthesis. The `cacheBust` token is what makes REGENERATING visible — the path is
+// stable per notebook, so without it the browser would keep serving the previous episode.
+function renderPodcast(body, { utterances, runId, audioSrc, stale }) {
+  body.innerHTML = "";
+
+  if (stale) {
+    const note = document.createElement("div");
+    note.className = "chat-overview-head";
+    note.textContent = "Audio Overview · sources have changed since this";
+    body.appendChild(note);
+  }
+
+  const player = document.createElement("audio");
+  player.controls = true;
+  player.preload = "none"; // don't pull a multi-MB episode on every notebook open
+  player.src = audioSrc;
+  body.appendChild(player);
+
+  const download = document.createElement("a");
+  download.className = "btn podcast-download";
+  download.href = audioSrc;
+  // A model-authored title reaches a filename here, so it is slugged rather than interpolated:
+  // `download` is an attribute the browser turns into a path component.
+  const stem = (state.title || state.notebookId || "notebook")
+    .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 60);
+  download.download = `${stem || "notebook"}.mp3`;
+  download.textContent = "\u2913 Download mp3";
+  body.appendChild(download);
+
+  if (runId && tickerLogs.has(runId)) body.appendChild(renderTickerAffordance(runId));
+
+  const transcript = document.createElement("div");
+  transcript.className = "podcast-transcript";
+  utterances.forEach((u) => transcript.appendChild(renderPodcastUtterance(u, runId)));
+  body.appendChild(transcript);
+}
+
 function initPodcastPlayer() {
   const generateBtn = document.getElementById("podcast-generate");
   const body = document.getElementById("podcast-body");
-  let currentObjectUrl = null;
 
+  // No object-URL bookkeeping any more: the audio is a real URL on this server, so there is nothing
+  // to revoke and no revocation ORDER to get right (blueprint P2.6's fix is moot rather than wrong).
   function clearPlayer() {
     body.innerHTML = "";
-    // Revoke only after nothing in the DOM still references it — the caller always assigns a new
-    // src (or clears the body) before this runs, so a previous episode mid-playback is never
-    // yanked out from under a live <audio> element (blueprint P2.6's revocation-order fix).
-    if (currentObjectUrl) {
-      URL.revokeObjectURL(currentObjectUrl);
-      currentObjectUrl = null;
-    }
   }
+
+  // A persisted episode renders on open, which is the whole point of persisting it.
+  store.on("notebook:switched", () => {
+    clearPlayer();
+    const podcast = state.podcast;
+    if (!podcast || !state.notebookId) return;
+    renderPodcast(body, {
+      utterances: podcast.utterances,
+      runId: podcast.run_id,
+      audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file`,
+      stale: podcast.stale,
+    });
+  });
 
   generateBtn.addEventListener("click", async () => {
     if (!state.notebookId) {
@@ -1302,47 +1357,19 @@ function initPodcastPlayer() {
         return;
       }
 
-      const bytes = Uint8Array.from(atob(data.audio_base64), (c) => c.charCodeAt(0));
-      const blob = new Blob([bytes], { type: "audio/mpeg" });
-      const newUrl = URL.createObjectURL(blob);
-      const oldUrl = currentObjectUrl;
-
-      const player = document.createElement("audio");
-      player.controls = true;
-      player.src = newUrl; // assign the NEW url first...
-      body.appendChild(player);
-      currentObjectUrl = newUrl;
-      if (oldUrl) URL.revokeObjectURL(oldUrl); // ...then revoke the OLD one, never the reverse
-
-      // An explicit download, because there is nowhere else to get this from: the server keeps NO
-      // audio (a temp file, unlinked in a `finally` — invariant 29), so the episode exists only as
-      // this tab's Blob and a page reload loses it. `<audio controls>` does expose a download in
-      // some browsers' overflow menu, which is neither discoverable nor uniform.
-      //
-      // Shares `currentObjectUrl`'s lifetime deliberately: it points at the SAME object URL the
-      // player uses, so the existing assign-new-then-revoke-old ordering keeps both valid together
-      // and neither outlives the other.
-      const download = document.createElement("a");
-      download.className = "btn podcast-download";
-      download.href = newUrl;
-      // A model-authored title reaches a filename here, so it is slugged rather than interpolated:
-      // `download` is an attribute the browser turns into a path component.
-      const stem = (state.title || state.notebookId || "notebook")
-        .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
-        .replace(/^-+|-+$/g, "")
-        .slice(0, 60);
-      download.download = `${stem || "notebook"}.mp3`;
-      download.textContent = "\u2913 Download mp3";
-      body.appendChild(download);
-
-      body.appendChild(renderTickerAffordance(runId));
-
-      const transcript = document.createElement("div");
-      transcript.className = "podcast-transcript";
-      data.utterances.forEach((utterance) =>
-        transcript.appendChild(renderPodcastUtterance(utterance, runId))
-      );
-      body.appendChild(transcript);
+      state.podcast = {
+        utterances: data.utterances,
+        run_id: runId,
+        stale: false,
+      };
+      renderPodcast(body, {
+        utterances: data.utterances,
+        runId,
+        // Cache-busted: the path is stable per notebook, so without this the browser would keep
+        // serving the episode it already has and "Regenerate" would look like it did nothing.
+        audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file?v=${token}`,
+        stale: false,
+      });
     } catch (err) {
       body.classList.remove("is-pending");
       body.innerHTML = "";
@@ -1470,6 +1497,8 @@ function initNotesPanel() {
 // --- Boot -------------------------------------------------------------------------------------
 
 initTheme();
+initSettings();
+initNotebookTitle();
 initNotebookSwitch();
 initSourcesPanel();
 initChatPanel();

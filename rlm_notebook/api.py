@@ -65,7 +65,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, ValidationError
 
@@ -89,6 +89,7 @@ from .naming import SuggestLanguage, SuggestTitle, fallback_title
 from .notebook import (
     add_note,
     append_sources,
+    audio_path,
     corpus_of,
     delete_note,
     existing_origins,
@@ -111,6 +112,7 @@ from .schema import (
     KeyInsight,
     Notebook,
     Overview,
+    Podcast,
     PodcastScript,
     Summary,
     Timeline,
@@ -448,10 +450,17 @@ class OverviewResponse(BaseModel):
     stale: bool = False
 
 
+class PodcastResponse(BaseModel):
+    utterances: list[AudioUtteranceResponse]
+    run_id: str | None = None
+    stale: bool = False
+
+
 class NotebookResponse(BaseModel):
     id: str
     title: str | None = None
     overview: OverviewResponse | None = None
+    podcast: PodcastResponse | None = None
     sources: list[dict]
     turns: list[ChatTurnResponse]
     notes: list[NoteResponse]
@@ -484,6 +493,27 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
         ],
         notes=[NoteResponse(id=n.id, text=n.text) for n in notebook.notes],
         overview=_overview_response(notebook, corpus),
+        podcast=_podcast_response(notebook, corpus),
+    )
+
+
+def _podcast_response(notebook: Notebook, corpus) -> PodcastResponse | None:
+    """The persisted episode's transcript, citations RE-VERIFIED against the current corpus and a
+    staleness verdict — identical treatment to the overview, for the identical reason. The AUDIO is
+    not in here: it is a separate `GET .../audio/file`, so a multi-MB blob never rides along on every
+    notebook read."""
+    podcast = notebook.podcast
+    if podcast is None:
+        return None
+    return PodcastResponse(
+        utterances=[
+            AudioUtteranceResponse(
+                speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus)
+            )
+            for u in podcast.utterances
+        ],
+        run_id=podcast.run_id,
+        stale=set(podcast.source_ids) != {s.id for s in notebook.sources},
     )
 
 
@@ -1198,12 +1228,14 @@ async def audio(
     this exact scenario as the CALLER's responsibility to route around, not something `synthesize()`
     itself should change.
 
-    No audio is ever persisted past this one request — synthesis writes to a temp file, the bytes
-    are read back and base64-encoded into the response, and the temp file is deleted whether
-    synthesis succeeded or failed (the `try`/`finally` wraps the `synthesize()` call itself, not
-    just the read-back — a synthesis failure after the file already exists on disk must not leak
-    it). There is deliberately no `GET .../audio/{run_id}.mp3`-style file-serving endpoint and no
-    retention policy to get right, unlike the reasoning-trace files Phase 3 left unresolved.
+    **The episode IS persisted now — this reverses Phase 2's "no audio past one request".** That
+    decision bought a real simplification (no file-serving endpoint, no retention to get right) and
+    it cost the user their episode the moment they reloaded, which is what a user reported after
+    asking where the mp3 was. Synthesis still writes to a temp file, but the bytes are then moved to
+    ONE file per notebook (`notebook.audio_path`, replaced on regenerate, so growth is bounded by
+    how many notebooks exist rather than by how many times anyone pressed the button) and the script
+    is stored on the notebook. The temp file is still removed whether synthesis succeeded or failed
+    — the `try`/`finally` wraps the `synthesize()` call itself, not just the read-back.
 
     **Known, stated limitation**: only the script-generation step is cancellable through
     `POST .../cancel` — `_run_isolated`'s `finally` clears this notebook's `_ACTIVE_RUNS` entry the
@@ -1260,9 +1292,42 @@ async def audio(
     finally:
         tmp_path.unlink(missing_ok=True)
 
+    # Persist the audio BEFORE the notebook record, so a crash between the two leaves an orphan file
+    # (harmless — it is overwritten on the next generate) rather than a notebook pointing at audio
+    # that isn't there.
+    destination = audio_path(notebook_id)
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    await asyncio.to_thread(destination.write_bytes, audio_bytes)
+
+    podcast = Podcast(
+        utterances=script.utterances, run_id=run_id, source_ids=[s.id for s in notebook.sources]
+    )
+    await _mutate_or_http(notebook_id, lambda nb: setattr(nb, "podcast", podcast), create=False)
+
     return AudioResponse(
         utterances=utterances, audio_base64=base64.b64encode(audio_bytes).decode("ascii")
     )
+
+
+@app.get("/notebooks/{notebook_id}/audio/file")
+async def get_audio_file(notebook_id: str) -> FileResponse:
+    """Serve a notebook's persisted Audio Overview.
+
+    A materially different exposure than a metadata endpoint, and the fourth of its kind here after
+    the trace stream, the citation-turn lookup and the full-source-text endpoint (invariants 29 and
+    31): with no authentication (invariant 25), anyone who can reach this server can play any
+    notebook's episode. Stated rather than folded silently into "same as everything else".
+
+    A real file rather than a base64 blob, deliberately: the browser can range-request it, so
+    seeking in a long episode does not re-download it, and reopening a notebook costs no
+    re-synthesis at all."""
+    try:
+        path = audio_path(notebook_id)
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
+    if not path.exists():
+        raise HTTPException(404, f"no generated audio for notebook {notebook_id!r}")
+    return FileResponse(path, media_type="audio/mpeg", filename=f"{slug(notebook_id)}.mp3")
 
 
 @app.post("/notebooks/{notebook_id}/cancel")

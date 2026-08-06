@@ -139,3 +139,24 @@ def test_no_innerhtml_with_interpolated_content():
             continue  # a bare clear
         bad.append(code)
     assert not bad, "an HTML-parsing sink used with something other than a bare clear:\n" + "\n".join(bad)
+
+
+def test_every_init_function_is_actually_called():
+    """Two features shipped inert because their `init*()` was never wired into the boot sequence:
+    the header's notebook title (which therefore never displayed at all) and the settings button
+    (dead on click, reported by a user). Both came from a scripted edit whose anchor didn't match,
+    which `str.replace` silently ignores.
+
+    Nothing else here can catch it — there is no JavaScript test runner (zero-build vanilla JS, by
+    design), the Python suite never executes the page, and a defined-but-uncalled function is
+    perfectly valid JS. A source-tree assertion is the only place this is visible."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    defined = set(re.findall(r"^function (init\w+)\(", js, re.MULTILINE))
+    called = set(re.findall(r"^(init\w+)\(\);", js, re.MULTILINE))
+
+    assert defined, "found no init functions — this test has stopped testing anything"
+    uncalled = sorted(defined - called)
+    assert not uncalled, (
+        f"these init functions are defined but never called from the boot sequence: {uncalled}"
+    )

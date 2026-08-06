@@ -1198,6 +1198,33 @@ questions with verifiable citations, and get a distilled research artifact out.
   `tests/conftest.py` now isolates every test into its own directory — a developer's local state
   silently changing a test result is the same class a sibling project's ASR locale design records.
 
+- **Twenty-second slice: the Audio Overview persists and plays from the page.** Phase 2 deliberately
+  kept no audio past one request — no file-serving endpoint, no retention to get right — and it cost
+  the user their episode on every reload, since it existed only as the browser tab's `Blob`. Reported
+  after they asked where the mp3 was.
+
+  One mp3 per notebook (`notebooks/audio/<slug>.mp3`), replaced on regenerate, which is what makes
+  retention a non-question: growth is bounded by how many notebooks exist, not by how many times
+  anyone pressed the button — unlike `traces/`, which needed a whole sweep. The transcript persists
+  on the notebook; the audio does NOT go in the JSON, because a multi-MB base64 blob would be
+  re-parsed on every read of that notebook. `GET .../audio/file` serves it instead, which also lets
+  the browser range-request it — verified live: a `Range` header returns `206 Partial Content`.
+
+  The audio is written BEFORE the notebook record, so a crash between the two leaves an orphan file
+  (harmless — overwritten on the next generate) rather than a notebook pointing at audio that isn't
+  there. Same staleness treatment as the overview, citations re-verified on every read, and ONE
+  `renderPodcast` serving both the just-generated and the reopened case so a persisted episode can
+  never render differently from a fresh one.
+
+  **Two features had shipped completely inert, found while investigating this.** `initSettings()`
+  and `initNotebookTitle()` were never called: a scripted edit's anchor didn't match the file's
+  actual indentation and `str.replace` silently did nothing. So the settings button was dead on
+  click and the header's notebook title had NEVER displayed since it was added. Nothing else could
+  catch it — there is no JavaScript test runner, and a defined-but-uncalled function is valid JS —
+  so `tests/test_web_assets.py` now fails the build on any `init*()` that is defined and never
+  called. Mutation-tested. The settings icon also reused `.theme-toggle`, whose `margin-left: auto`
+  then applied to two elements at once; one `.header-actions` wrapper owns the push-right now.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

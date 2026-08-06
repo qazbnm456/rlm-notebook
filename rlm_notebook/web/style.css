@@ -240,8 +240,17 @@ input:focus {
   min-width: 0;
 }
 
-.theme-toggle {
+/* ONE element owns the push-right. Both header buttons carried `margin-left: auto` when the
+   settings button was added by reusing `.theme-toggle`'s class, which left them oddly placed —
+   reported by a user. */
+.header-actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.header-btn {
   border: 1px solid var(--border);
   background: var(--surface-1);
   border-radius: 999px;
@@ -593,6 +602,12 @@ input:focus {
 .podcast-body.is-pending {
   color: var(--text-faint);
   font-style: italic;
+  margin-top: 0.5rem;
+}
+
+/* The native player has no intrinsic width worth relying on in a 340px rail. */
+.podcast-body audio {
+  width: 100%;
   margin-top: 0.5rem;
 }
 

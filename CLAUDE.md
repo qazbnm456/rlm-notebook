@@ -382,9 +382,11 @@ assume any of them exist because an earlier design discussion mentioned them.
     `EdgeTTSProvider.synthesize()` internally calls `asyncio.run(...)`, which raises if invoked from
     a running event loop (this handler's own) — `tts.py`'s own docstring had already flagged this
     exact scenario as the caller's responsibility to route around, not something `synthesize()`
-    itself should change. No audio is ever persisted past one request (a temp file, deleted in a
-    `finally` that covers BOTH the success and the synthesis-failure path, not just the former —
-    caught and fixed by this phase's own pre-implementation audit before it was ever code); the
+    itself should change. **Phase 2 persisted no audio past one request — REVERSED, see invariant
+    42**; what survives from that decision is the temp file and its `finally`, which covers BOTH the
+    success and the synthesis-failure path, not just the former (caught and fixed by this phase's own
+    pre-implementation audit before it was ever code). The bytes are now moved to one file per
+    notebook rather than only base64'd into the response; the
     response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
     uniform with every other endpoint.
 
@@ -1125,5 +1127,44 @@ assume any of them exist because an earlier design discussion mentioned them.
     reported as a corrupt notebook. Written through `atomic.atomic_write_text`, extracted from
     `save_notebook` rather than hand-copied — but note this is only the ATOMIC half of invariant
     34's discipline, not its lock-and-re-read half, which a full-replacement write does not need.
+
+42. **A generated Audio Overview is PERSISTED — one mp3 per notebook, served as a real file —
+    which deliberately reverses Phase 2's "no audio is ever persisted past one request".** That
+    decision bought a real simplification (no file-serving endpoint, no retention to get right) and
+    it cost the user their episode on every reload: the audio existed only as the browser tab's
+    `Blob`. A user reported it after asking where the mp3 was.
+
+    **One file per notebook (`notebook.audio_path` → `<base_dir>/audio/<slug>.mp3`), replaced on
+    regenerate.** That is what makes retention a non-question: growth is bounded by how many
+    notebooks exist, not by how many times anyone pressed the button — unlike `traces/`, which
+    needed invariant 34's whole sweep. A SUBDIRECTORY so `list_notebook_summaries`' `*.json` glob
+    never sees it, and the same validated `slug` every other path here uses.
+
+    **The transcript persists on the notebook (`schema.Podcast`); the AUDIO does not go in the JSON.**
+    A multi-MB base64 blob inside the notebook file would be re-parsed on every read of that
+    notebook, including every `GET /notebooks/{id}`. `GET /notebooks/{id}/audio/file` serves it
+    instead, which also lets the browser range-request it — verified live: a `Range` header returns
+    `206 Partial Content`, so seeking in a long episode does not re-download it.
+
+    **The audio is written BEFORE the notebook record**, so a crash between the two leaves an orphan
+    file (harmless — the next generate overwrites it) rather than a notebook pointing at audio that
+    isn't there.
+
+    Same staleness treatment as the overview (invariant 38): `Podcast.source_ids` captured at run
+    start, compared server-side, surfaced so the player can say "sources have changed since this".
+    Citations are re-verified against the current corpus on every read, exactly as the overview's
+    and every `ChatTurn`'s are.
+
+    **`GET .../audio/file` is the FOURTH materially-different exposure in this API** — after the
+    trace stream, the citation-turn lookup and full source text (invariants 29 and 31). With no
+    authentication (invariant 25), anyone who can reach this server can play any notebook's episode.
+    Stated rather than folded silently into "same as everything else".
+
+    **`renderPodcast` is ONE function serving both the just-generated and the reopened case**, so a
+    persisted episode can never render differently from a fresh one. It plays from the server URL,
+    not an object URL — which retires the object-URL revocation ORDER that Phase 2 had to get right,
+    rather than proving it wrong. `preload="none"` keeps a multi-MB episode from being fetched on
+    every notebook open, and the generate path cache-busts the (stable) URL, or "Regenerate" would
+    look like it did nothing because the browser still had the previous episode.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

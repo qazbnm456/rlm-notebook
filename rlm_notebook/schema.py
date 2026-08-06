@@ -200,6 +200,22 @@ class Overview(BaseModel):
     source_ids: list[str] = Field(default_factory=list)
 
 
+class Podcast(BaseModel):
+    """A generated Audio Overview, persisted so it survives a reload.
+
+    **This deliberately reverses Phase 2's "no audio is ever persisted past one request".** That
+    decision bought a real simplification — no file-serving endpoint, no retention to get right —
+    and it cost the user the episode the moment they reloaded, which is what a user reported after
+    asking where the mp3 was. The audio is stored as ONE file per notebook, replaced on regenerate,
+    so the growth is bounded by the number of notebooks rather than by the number of generations.
+    """
+
+    utterances: list[Utterance] = Field(default_factory=list)
+    run_id: str | None = None
+    #: Same staleness key as `Overview`: the sources this was generated from, captured at RUN START.
+    source_ids: list[str] = Field(default_factory=list)
+
+
 class Notebook(BaseModel):
     """Sources plus chat history that survive across `ask` invocations (see `notebook.py`). This is
     the whole persisted unit — one JSON file per notebook, no database."""
@@ -218,6 +234,10 @@ class Notebook(BaseModel):
     #: changed carries no record of what it was written in — the same gap a sibling project had to close by
     #: adding a locale column to its transcripts, noted here rather than fixed.
     output_language: str | None = None
+    #: The persisted Audio Overview, if one has been generated. The mp3 itself lives beside the
+    #: notebook file (see `notebook.audio_path`), not in here — a multi-MB base64 blob inside the
+    #: JSON would be re-parsed on every single read of this notebook.
+    podcast: Podcast | None = None
     #: The persisted chat overview, if one has been generated. Optional and defaulting to None, so
     #: notebooks written before it existed still load (the precedent `run_id`/`notes`/`title` set).
     overview: Overview | None = None

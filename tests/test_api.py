@@ -1628,3 +1628,56 @@ def test_the_settings_language_beats_a_notebooks_cached_resolution(client, monke
     from rlm_notebook.config import output_language
 
     assert output_language() == "Traditional Chinese"
+
+
+def test_the_podcast_persists_and_is_served_as_a_file(client, monkeypatch, tmp_path):
+    """Phase 2 deliberately kept no audio past one request. That cost the user their episode on
+    every reload — reported after they asked where the mp3 was — so it is persisted now: one file
+    per notebook, replaced on regenerate, served as a real file the browser can range-request."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"utterances": [{"speaker": "host_a", "text": "hi", "citations": []}]})
+
+    class _FakeProvider:
+        def synthesize(self, script, voice_map, out_path):
+            out_path.write_bytes(b"ID3fake-mp3-bytes")
+
+    monkeypatch.setattr(api, "get_tts_provider", lambda name: _FakeProvider())
+
+    resp = client.post("/notebooks/mynb/audio", json={"run_id": "pod"})
+    assert resp.status_code == 200, resp.text
+
+    # the transcript comes back on a plain notebook read...
+    podcast = client.get("/notebooks/mynb").json()["podcast"]
+    assert podcast is not None
+    assert podcast["utterances"][0]["text"] == "hi"
+    assert podcast["stale"] is False
+
+    # ...and the audio is a separate file endpoint, so a multi-MB blob never rides along on it
+    assert "audio_base64" not in str(podcast)
+    audio = client.get("/notebooks/mynb/audio/file")
+    assert audio.status_code == 200
+    assert audio.headers["content-type"] == "audio/mpeg"
+    assert audio.content == b"ID3fake-mp3-bytes"
+
+
+def test_adding_a_source_marks_the_podcast_stale(client, monkeypatch):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"utterances": [{"speaker": "host_a", "text": "hi", "citations": []}]})
+
+    class _FakeProvider:
+        def synthesize(self, script, voice_map, out_path):
+            out_path.write_bytes(b"x")
+
+    monkeypatch.setattr(api, "get_tts_provider", lambda name: _FakeProvider())
+    client.post("/notebooks/mynb/audio", json={"run_id": "pod"})
+
+    client.post("/notebooks/mynb/sources", json={"texts": ["a second source"]})
+
+    assert client.get("/notebooks/mynb").json()["podcast"]["stale"] is True
+
+
+def test_the_audio_file_endpoint_404s_and_400s_cleanly(client):
+    assert client.get("/notebooks/never-generated/audio/file").status_code == 404
+    assert client.get("/notebooks/%20%20/audio/file").status_code == 400
