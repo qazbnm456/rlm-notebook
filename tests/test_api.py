@@ -1299,3 +1299,45 @@ def test_prune_never_deletes_the_trace_of_a_run_still_in_flight(monkeypatch):
 
     assert live.exists(), "an in-flight run's trace was deleted"
     assert not dead.exists()
+
+
+def test_the_stream_does_not_declare_a_reserved_run_dead(monkeypatch):
+    """`_run_isolated` creates the trace file BEFORE spawning, so there is a window — the whole
+    `await runner.start_run(...)`, a real subprocess spawn — where the file exists and no process is
+    tracked yet. `stream_run` read exactly that pair as "the writer has exited" and immediately
+    emitted `run ended without a final event`, for a run that was about to start perfectly well.
+
+    Reported by a user clicking "Generate overview" and reproduced 3/3 against a live server the
+    moment two guide runs were fired concurrently on one notebook (which interleaves the event loop
+    and widens the window). The reservation placeholder (`_RUN_PROCESSES[run_id] = None`) is what
+    distinguishes "starting" from "gone"; this pins that an ABSENT key still means gone."""
+    monkeypatch.setattr(api, "_TRACE_POLL_INTERVAL", 0.01)
+    run_id = "mynb-reserved"
+    _write_trace(run_id, [])  # the exclusively-created, still-empty trace file
+
+    async def _drain(limit):
+        out = []
+        async for event in api._tail_trace_events(run_id):
+            out.append(event)
+            if len(out) >= limit:
+                break
+        return out
+
+    async def _scenario():
+        api._RUN_PROCESSES[run_id] = None  # reserved, spawn in flight
+        task = asyncio.create_task(_drain(1))
+        await asyncio.sleep(0.1)  # several poll intervals
+        still_waiting = not task.done()
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+        del api._RUN_PROCESSES[run_id]  # the run is genuinely over now
+        return still_waiting, await _drain(1)
+
+    still_waiting, events = asyncio.run(_scenario())
+
+    assert still_waiting, "the stream declared a reserved-but-not-yet-spawned run dead"
+    assert events[0]["summary"] == "run ended without a final event"

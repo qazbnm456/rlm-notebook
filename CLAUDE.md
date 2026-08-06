@@ -414,7 +414,17 @@ assume any of them exist because an earlier design discussion mentioned them.
       before the error propagates — otherwise a failed spawn permanently occupies that run id and
       a legitimate retry gets a false 409 forever.
     - **`_RUN_PROCESSES` (run-id-keyed) is a SEPARATE map from `_ACTIVE_RUNS` (notebook-id-keyed),
-      deliberately not reused.** An earlier draft of this phase's own design planned to reuse
+      deliberately not reused, and a run is RESERVED in it (value `None`) before it is spawned.**
+      An ABSENT key means finished/cancelled/never-started; a key present with `None` means the
+      subprocess is still being spawned. Registering only after `runner.start_run` returned left a
+      window — the whole `await`, a real subprocess spawn — where the trace file already existed and
+      nothing was tracked, and `stream_run` reads exactly that pair as "the writer has exited": a
+      client that opened its ticker alongside the request got `run ended without a final event`
+      immediately, for a run about to start perfectly well. Reported by a user clicking "Generate
+      overview" and reproduced 3/3 against a live server as soon as two guide runs were fired
+      concurrently on one notebook (which interleaves the loop and widens the window). This is the
+      SAME reservation window `traces._MIN_AGE_SECONDS` exists to protect pruning from — it bit a
+      second consumer before anyone connected the two. An earlier draft of this phase's own design planned to reuse
       `_ACTIVE_RUNS` to detect a cancelled/dead run for the trace stream's termination logic — a
       second audit round found this misfires under ordinary same-notebook concurrency: invariant
       23's single slot per notebook id means a second concurrent request overwrites the first's

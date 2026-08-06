@@ -175,7 +175,7 @@ _ACTIVE_RUNS: dict[str, runner.Run] = {}
 #: stream falsely conclude it was cancelled the moment a second one starts (found during this
 #: phase's own pre-implementation audit). Keyed by the run id itself, which `_run_isolated`'s own
 #: exclusive-create gate (below) guarantees is unique — two entries here can never collide.
-_RUN_PROCESSES: dict[str, asyncio.subprocess.Process] = {}
+_RUN_PROCESSES: dict[str, asyncio.subprocess.Process | None] = {}
 
 #: How the trace-stream endpoint paces itself — see `_tail_trace_events`.
 _TRACE_POLL_INTERVAL = 0.2
@@ -699,9 +699,20 @@ async def _run_isolated(
     except FileExistsError:
         raise HTTPException(409, f"run id {run_id!r} is already in use — retry with a fresh run_id") from None
 
+    # Reserve the run id BEFORE spawning, with a None placeholder meaning "starting". Registering
+    # only after `start_run` returned left a window — the whole `await`, i.e. a real subprocess
+    # spawn — in which the trace file already existed but nothing was tracked, and `stream_run`
+    # reads exactly that pair as "the writer has exited". A client opening its ticker alongside the
+    # request then got `run ended without a final event` immediately, for a run that was about to
+    # start perfectly well. Reproduced 3/3 the moment two guide runs were fired concurrently on one
+    # notebook (which interleaves the loop and widens the window); this is the same reservation
+    # window `traces._MIN_AGE_SECONDS` already exists to protect pruning from.
+    _RUN_PROCESSES[run_id] = None
+
     try:
         run = await runner.start_run(run_id, _TRACE_DIR, dotted_task, kwargs)
     except Exception:
+        _RUN_PROCESSES.pop(run_id, None)
         trace_path.unlink(missing_ok=True)
         raise
 
@@ -1043,13 +1054,19 @@ async def _tail_trace_events(run_id: str):
                         return
                 continue
 
-            process = _RUN_PROCESSES.get(run_id)
-            if process is None or process.returncode is not None:
+            # ABSENT means finished/cancelled/never-started; PRESENT-but-None means reserved and
+            # still spawning (`_run_isolated`). Distinguishing the two matters: treating the
+            # reservation as "no process" declared a run dead before it had started.
+            if run_id not in _RUN_PROCESSES:
                 # The process that was writing this trace has exited (or was never tracked at
                 # all) and no `run_end` ever arrived — a `killpg`-cancelled or crashed run.
                 # Synthesize a terminal event so the stream reaches "done" instead of hanging,
                 # the same fix `ctx-distillery-studio` already documents for the identical
                 # failure mode (a hard-killed run whose recorder never reached `__exit__`).
+                yield {"step": None, "kind": "done", "summary": "run ended without a final event"}
+                return
+            process = _RUN_PROCESSES[run_id]
+            if process is not None and process.returncode is not None:
                 yield {"step": None, "kind": "done", "summary": "run ended without a final event"}
                 return
             await asyncio.sleep(_TRACE_POLL_INTERVAL)
