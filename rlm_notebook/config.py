@@ -284,7 +284,7 @@ def output_language() -> str | None:
     return clean_language(_env_wins("RN_OUTPUT_LANGUAGE") or read_settings()[0].get("output_language"))
 
 
-def tts_voice_map(config: NotebookConfig, language: str | None) -> dict[str, str]:
+def tts_voice_map(config: NotebookConfig, language: str | None, provider=None) -> dict[str, str]:
     """The `{speaker: voice}` map `tts.synthesize` needs, with the LANGUAGE picking the defaults.
 
     Precedence, and the middle rung is the point of this function: an EXPLICITLY set
@@ -299,7 +299,10 @@ def tts_voice_map(config: NotebookConfig, language: str | None) -> dict[str, str
     from .tts import default_voices_for
 
     stored, _ = read_settings()
-    pair = default_voices_for(language)
+    # The voice NAME is provider-specific (`zh-TW-YunJheNeural` vs `zf_xiaobei`), so the defaults
+    # come from the provider that will actually speak them. `None` keeps the pre-provider behaviour
+    # for callers that have not resolved one yet.
+    pair = provider.default_voices(language) if provider is not None else default_voices_for(language)
 
     def _pick(env_name: str, file_key: str, index: int, configured: str) -> str:
         # The settings file sits directly below the env and ABOVE the language default. Both the env

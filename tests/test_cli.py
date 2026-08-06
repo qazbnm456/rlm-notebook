@@ -255,6 +255,15 @@ def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothin
 
 
 class _FakeTTSProvider:
+    # A `TTSProvider` now also declares its output FORMAT and its own language->voice defaults, so a
+    # local model emitting WAV isn't forced through an MP3 encoder and one provider's voice names
+    # can't leak into another's request (CLAUDE.md invariant 43).
+    suffix = ".mp3"
+    media_type = "audio/mpeg"
+
+    def default_voices(self, language):
+        return None
+
     def __init__(self, *, fail: bool = False) -> None:
         self._fail = fail
         self.calls: list = []

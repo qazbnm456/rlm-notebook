@@ -90,9 +90,11 @@ from .notebook import (
     add_note,
     append_sources,
     audio_path,
+    clear_audio,
     corpus_of,
     delete_note,
     existing_origins,
+    find_audio,
     history_text,
     ingest_sources_for,
     list_notebook_summaries,
@@ -1278,8 +1280,8 @@ async def audio(
         # already has, rather than calling synthesize() and getting a TTSError for an empty script.
         return AudioResponse(utterances=[], audio_base64=None)
 
-    voice_map = tts_voice_map(config, language)
-    fd, tmp_name = tempfile.mkstemp(suffix=".mp3")
+    voice_map = tts_voice_map(config, language, provider)
+    fd, tmp_name = tempfile.mkstemp(suffix=provider.suffix)
     os.close(fd)
     tmp_path = Path(tmp_name)
     try:
@@ -1295,8 +1297,11 @@ async def audio(
     # Persist the audio BEFORE the notebook record, so a crash between the two leaves an orphan file
     # (harmless — it is overwritten on the next generate) rather than a notebook pointing at audio
     # that isn't there.
-    destination = audio_path(notebook_id)
+    destination = audio_path(notebook_id, suffix=provider.suffix)
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # Clear every format first: switching providers between generations would otherwise leave the
+    # previous `.mp3` beside the new `.wav`, and `find_audio` would serve the stale one.
+    await asyncio.to_thread(clear_audio, notebook_id)
     await asyncio.to_thread(destination.write_bytes, audio_bytes)
 
     podcast = Podcast(
@@ -1322,12 +1327,15 @@ async def get_audio_file(notebook_id: str) -> FileResponse:
     seeking in a long episode does not re-download it, and reopening a notebook costs no
     re-synthesis at all."""
     try:
-        path = audio_path(notebook_id)
+        path = find_audio(notebook_id)
     except ValueError as exc:
         raise _invalid_notebook_id(notebook_id, exc) from exc
-    if not path.exists():
+    if path is None:
         raise HTTPException(404, f"no generated audio for notebook {notebook_id!r}")
-    return FileResponse(path, media_type="audio/mpeg", filename=f"{slug(notebook_id)}.mp3")
+    # The media type follows the FILE, not the currently-configured provider: an episode generated
+    # by edge-tts must keep playing after someone switches RN_TTS_PROVIDER to kokoro.
+    media = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
+    return FileResponse(path, media_type=media, filename=f"{slug(notebook_id)}{path.suffix}")
 
 
 @app.post("/notebooks/{notebook_id}/cancel")

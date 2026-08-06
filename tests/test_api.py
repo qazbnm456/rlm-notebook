@@ -651,6 +651,15 @@ class _FakeTTSProvider:
     `boom` is set), so these tests never touch the real `edge-tts` network service — the same
     seam `test_tts.py` uses at a lower level (an injectable `_communicate_factory`), just faked one
     layer up since `api.py` only ever calls `provider.synthesize(...)`, never `edge-tts` directly."""
+    # A `TTSProvider` now also declares its output FORMAT and its own language->voice defaults, so a
+    # local model emitting WAV isn't forced through an MP3 encoder and one provider's voice names
+    # can't leak into another's request (CLAUDE.md invariant 43).
+    suffix = ".mp3"
+    media_type = "audio/mpeg"
+
+    def default_voices(self, language):
+        return None
+
 
     def __init__(self, *, boom: str | None = None, payload: bytes = b"fake-mp3-bytes") -> None:
         self.boom = boom
@@ -1639,6 +1648,12 @@ def test_the_podcast_persists_and_is_served_as_a_file(client, monkeypatch, tmp_p
     _mock_runner(monkeypatch, {"utterances": [{"speaker": "host_a", "text": "hi", "citations": []}]})
 
     class _FakeProvider:
+        suffix = ".mp3"
+        media_type = "audio/mpeg"
+
+        def default_voices(self, language):
+            return None
+
         def synthesize(self, script, voice_map, out_path):
             out_path.write_bytes(b"ID3fake-mp3-bytes")
 
@@ -1667,6 +1682,12 @@ def test_adding_a_source_marks_the_podcast_stale(client, monkeypatch):
     _mock_runner(monkeypatch, {"utterances": [{"speaker": "host_a", "text": "hi", "citations": []}]})
 
     class _FakeProvider:
+        suffix = ".mp3"
+        media_type = "audio/mpeg"
+
+        def default_voices(self, language):
+            return None
+
         def synthesize(self, script, voice_map, out_path):
             out_path.write_bytes(b"x")
 

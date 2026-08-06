@@ -94,14 +94,39 @@ def notebook_path(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_
     return Path(base_dir) / f"{slug_or_raise(notebook_id)}.json"
 
 
-def audio_path(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> Path:
+#: Every audio format a provider may write. A reader has to find whichever one is actually there,
+#: because the provider that produced it may not be the one currently configured — `edge-tts` writes
+#: `.mp3` and `kokoro` writes `.wav`, and switching `RN_TTS_PROVIDER` must not make an
+#: already-generated episode unreachable.
+AUDIO_SUFFIXES = (".mp3", ".wav")
+
+
+def find_audio(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> Path | None:
+    """The notebook's generated audio, whatever format wrote it, or `None`."""
+    for suffix in AUDIO_SUFFIXES:
+        candidate = audio_path(notebook_id, base_dir=base_dir, suffix=suffix)
+        if candidate.exists():
+            return candidate
+    return None
+
+
+def clear_audio(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> None:
+    """Remove every format's file, so regenerating with a DIFFERENT provider can't leave the old
+    one behind for `find_audio` to serve instead of the new one."""
+    for suffix in AUDIO_SUFFIXES:
+        audio_path(notebook_id, base_dir=base_dir, suffix=suffix).unlink(missing_ok=True)
+
+
+def audio_path(
+    notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR, suffix: str = ".mp3"
+) -> Path:
     """Where a notebook's generated Audio Overview lives: `<base_dir>/audio/<slug>.mp3`.
 
     A subdirectory, so `list_notebook_summaries`' `*.json` glob never sees it, and ONE file per
     notebook — regenerating replaces it rather than accumulating, so the disk cost is bounded by how
     many notebooks exist. Derives from the same validated `slug` every other path here does, so an
     id that reduces to nothing raises before any file is touched."""
-    return Path(base_dir) / "audio" / f"{slug_or_raise(notebook_id)}.mp3"
+    return Path(base_dir) / "audio" / f"{slug_or_raise(notebook_id)}{suffix}"
 
 
 def slug_or_raise(notebook_id: str) -> str:

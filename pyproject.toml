@@ -84,6 +84,14 @@ api = [
 # needs the Claude Code CLI installed and logged in — a runtime prerequisite pip cannot express.
 subscription = ["claude-agent-sdk>=0.1.60"]
 
+# A fully LOCAL TTS provider (`RN_TTS_PROVIDER=kokoro`): no network, no API key, and none of the
+# undocumented-endpoint grey area `edge-tts` operates in. Deliberately an EXTRA, not a core
+# dependency: this pulls 87 packages including torch, transformers and spacy (measured), and model
+# weights download on first use — invariant 15's "works out of the box" rests on the DEFAULT
+# provider needing neither a key nor a download. Apache-2.0, ~82M parameters, and verified to
+# synthesize Mandarin on CPU (Apple Silicon) before it was added; see CLAUDE.md invariant 43.
+kokoro = ["kokoro>=0.9", "misaki[zh]>=0.9", "soundfile>=0.12", "numpy>=1.26"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",

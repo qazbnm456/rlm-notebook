@@ -1167,4 +1167,42 @@ assume any of them exist because an earlier design discussion mentioned them.
     every notebook open, and the generate path cache-busts the (stable) URL, or "Regenerate" would
     look like it did nothing because the browser still had the previous episode.
 
+43. **A `TTSProvider` owns its OUTPUT FORMAT and its own language→voice map; neither is the
+    caller's.** `tts.KokoroProvider` (`RN_TTS_PROVIDER=kokoro`, the `kokoro` extra) is a fully local
+    second provider: no network, no API key, and none of the undocumented-endpoint grey area
+    `edge-tts` operates in with its hardcoded client token.
+
+    **A voice NAME is provider-specific** — edge-tts wants `zh-TW-YunJheNeural`, Kokoro wants
+    `zf_xiaobei` — so `default_voices` moved onto the protocol. Keeping one shared map would have
+    leaked one provider's names into the other's request. **The format moved for the same reason**:
+    Kokoro emits 24kHz WAV, and forcing it through an MP3 encoder would drag in the `ffmpeg`/`pydub`
+    dependency invariant 17 deliberately refused for a purely cosmetic gain. A browser plays WAV
+    natively, so nothing downstream needed one.
+
+    Consequences that had to be handled rather than assumed: `notebook.find_audio` looks for
+    WHICHEVER format is present, because the provider that generated an episode may not be the one
+    currently configured, and switching `RN_TTS_PROVIDER` must not make an existing episode
+    unreachable; `clear_audio` removes every format before a regenerate, or the previous `.mp3`
+    would sit beside the new `.wav` and be served instead; and `GET .../audio/file` derives its
+    media type from the FILE, never from the configured provider.
+
+    **Two recommendations were wrong before this one, both from unverified sources — the pattern
+    invariant 7 exists to punish.** NeuTTS was proposed and rejected: English/Spanish/German/French
+    only, no CJK, which is the language the whole output-language work exists for (and two of its
+    three models carry a bespoke licence). Qwen3-TTS was then recommended from a blog summary
+    claiming CPU inference; the repository documents `device_map="cuda:0"` and never mentions CPU,
+    so it would not run on the Apple Silicon machine this project is developed on. Kokoro was
+    chosen only after being INSTALLED AND RUN: Apache-2.0, ~82M parameters, 17.4s one-time pipeline
+    load then 4.4s for 8.9s of Mandarin audio on CPU. Every voice id in `_KOKORO_VOICES` came from
+    a working synthesis, the same discipline invariant 40 already requires of the edge-tts map.
+
+    **An EXTRA, never a core dependency.** `kokoro` + `misaki[zh]` pulls 87 packages including
+    torch, transformers and spacy (measured with `--dry-run`, not estimated), plus weights on first
+    use. Invariant 15's "works out of the box" rests on the DEFAULT provider needing neither a key
+    nor a download; `edge-tts` stays the default for exactly that reason.
+
+    Verified end to end through the real product: `RN_TTS_PROVIDER=kokoro` generated a 14-turn
+    Chinese episode with no network TTS call at all, wrote `notebooks/audio/<slug>.wav` (2m53s,
+    24kHz), removed the previous `.mp3`, and served it as `audio/wav` with range support.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

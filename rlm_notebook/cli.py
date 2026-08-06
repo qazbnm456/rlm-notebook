@@ -302,7 +302,7 @@ def _cmd_audio(args) -> int:
             print()
 
         out_path = Path(args.out)
-        voice_map = tts_voice_map(config, language)
+        voice_map = tts_voice_map(config, language, provider)
         try:
             provider.synthesize(script, voice_map, out_path)
         except TTSError as exc:

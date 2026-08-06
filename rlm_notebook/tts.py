@@ -26,9 +26,24 @@ class TTSError(RuntimeError):
 class TTSProvider(Protocol):
     """Minimal TTS interface: one script in, one audio file out. A provider may internally
     synthesize per-utterance and concatenate (see `EdgeTTSProvider`) or natively generate a whole
-    multi-speaker conversation in one call — callers only see "script in, audio file out"."""
+    multi-speaker conversation in one call — callers only see "script in, audio file out".
+
+    `suffix`/`media_type` are the provider's, not the caller's: a local model that emits WAV must not
+    be forced through an MP3 encoder just because the first provider happened to produce MP3 — that
+    would drag in the `ffmpeg`/`pydub` dependency invariant 17 deliberately avoided.
+
+    `default_voices` belongs here too, because a voice NAME is provider-specific: edge-tts wants
+    `zh-TW-YunJheNeural` and Kokoro wants `zf_xiaobei`. Keeping the language→voice map on the
+    provider is what stops one provider's names leaking into another's request.
+    """
+
+    #: File extension and MIME type of what `synthesize` writes.
+    suffix: str
+    media_type: str
 
     def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None: ...
+
+    def default_voices(self, language: str | None) -> tuple[str, str] | None: ...
 
 
 #: A factory `(text, voice) -> an object with an async .stream()` yielding edge-tts-shaped chunks.
@@ -64,6 +79,12 @@ class EdgeTTSProvider:
     """
 
     _communicate_factory: CommunicateFactory = field(default=_default_communicate_factory)
+
+    suffix = ".mp3"
+    media_type = "audio/mpeg"
+
+    def default_voices(self, language: str | None) -> tuple[str, str] | None:
+        return default_voices_for(language)
 
     def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None:
         if not script.utterances:
@@ -163,8 +184,112 @@ def default_voices_for(language: str | None) -> tuple[str, str] | None:
     return _LANGUAGE_VOICES.get(key.split("-")[0])
 
 
+#: Kokoro's own voice names, which look nothing like edge-tts's — `zf_xiaobei`, not
+#: `zh-TW-HsiaoChenNeural`. Keeping the map on the provider is exactly why `default_voices` moved
+#: onto the protocol: one provider's names must never leak into another's request.
+#:
+#: The leading letter is Kokoro's own convention (language then gender: `zf` = Chinese female,
+#: `am` = American male), and `KPipeline` additionally needs a one-character `lang_code`, so both
+#: are stored. Every id here was taken from a working local synthesis, not from documentation.
+_KOKORO_VOICES: dict[str, tuple[str, str, str]] = {
+    # language key -> (lang_code, host_a voice, host_b voice)
+    "chinese": ("z", "zm_yunjian", "zf_xiaobei"),
+    "mandarin": ("z", "zm_yunjian", "zf_xiaobei"),
+    "traditional chinese": ("z", "zm_yunjian", "zf_xiaobei"),
+    "simplified chinese": ("z", "zm_yunjian", "zf_xiaobei"),
+    "zh": ("z", "zm_yunjian", "zf_xiaobei"),
+    "english": ("a", "am_adam", "af_heart"),
+    "en": ("a", "am_adam", "af_heart"),
+    "japanese": ("j", "jm_kumo", "jf_alpha"),
+    "ja": ("j", "jm_kumo", "jf_alpha"),
+    "spanish": ("e", "em_alex", "ef_dora"),
+    "french": ("f", "ff_siwis", "ff_siwis"),
+    "italian": ("i", "im_nicola", "if_sara"),
+    "brazilian portuguese": ("p", "pm_alex", "pf_dora"),
+    "portuguese": ("p", "pm_alex", "pf_dora"),
+    "hindi": ("h", "hm_omega", "hf_alpha"),
+}
+
+
+class KokoroProvider:
+    """A fully LOCAL provider: no network, no API key, no third-party terms of service.
+
+    Exists because `edge-tts`, the default, reaches an undocumented Microsoft consumer endpoint with
+    a hardcoded client token — it works and needs no credentials (invariant 15), but it is network-
+    dependent and operates in the same grey area every Edge-Read-Aloud client does. This is the
+    offline answer.
+
+    **Chosen after two wrong recommendations, and only once it had been RUN on the target machine.**
+    NeuTTS has no CJK at all, which is the language the whole output-language work exists for.
+    Qwen3-TTS was recommended from a blog summary claiming CPU inference; the repository documents
+    `device_map="cuda:0"` and never mentions CPU, so it would not run on the Apple Silicon machine
+    this project is developed on. Kokoro was verified by installing it and synthesizing Mandarin
+    before a line of this class was written: 17.4s one-time pipeline load, then 4.4s for 8.9s of
+    audio on CPU.
+
+    **Writes WAV, not MP3, and that is why `suffix`/`media_type` live on the provider.** Kokoro
+    emits raw 24kHz samples; converting to MP3 would need the `ffmpeg`/`pydub` dependency invariant
+    17 deliberately refused for a purely cosmetic gain. A browser plays WAV natively, so nothing
+    downstream needs an encoder.
+
+    Optional dependency (`uv sync --extra kokoro`), imported lazily so a default install never pays
+    for torch — 87 packages, measured, not estimated. Weights download on first use.
+    """
+
+    suffix = ".wav"
+    media_type = "audio/wav"
+
+    #: Kokoro's native sample rate.
+    _SAMPLE_RATE = 24_000
+
+    def default_voices(self, language: str | None) -> tuple[str, str] | None:
+        entry = self._entry(language)
+        return (entry[1], entry[2]) if entry else None
+
+    @staticmethod
+    def _entry(language: str | None) -> tuple[str, str, str] | None:
+        if not language:
+            return None
+        key = " ".join(language.lower().split())
+        return _KOKORO_VOICES.get(key) or _KOKORO_VOICES.get(key.split("-")[0])
+
+    def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None:
+        try:
+            import numpy as np
+            import soundfile as sf
+            from kokoro import KPipeline
+        except ImportError as exc:  # pragma: no cover — exercised only with the extra absent
+            raise TTSError(
+                "the 'kokoro' provider needs the optional extra: uv sync --extra kokoro"
+            ) from exc
+
+        # The lang_code is a property of the VOICE, and both hosts speak the same language here, so
+        # it is derived from host_a's voice rather than passed separately.
+        lang_code = next(
+            (entry[0] for entry in _KOKORO_VOICES.values() if entry[1] == voice_map.get("host_a")),
+            "a",
+        )
+        try:
+            pipeline = KPipeline(lang_code=lang_code)
+            chunks = []
+            for utterance in script.utterances:
+                voice = voice_map.get(utterance.speaker)
+                if not voice:
+                    raise TTSError(f"no voice configured for speaker {utterance.speaker!r}")
+                for _, _, audio in pipeline(utterance.text, voice=voice):
+                    chunks.append(audio.numpy() if hasattr(audio, "numpy") else audio)
+            if not chunks:
+                raise TTSError("kokoro produced no audio for this script")
+            sf.write(out_path, np.concatenate(chunks), self._SAMPLE_RATE)
+        except TTSError:
+            raise
+        except Exception as exc:
+            raise TTSError(f"kokoro synthesis failed: {exc}") from exc
+
+
 _PROVIDERS: dict[str, Callable[[], TTSProvider]] = {
     "edge-tts": EdgeTTSProvider,
+    "kokoro": KokoroProvider,
 }
 
 

@@ -1225,6 +1225,34 @@ questions with verifiable citations, and get a distilled research artifact out.
   called. Mutation-tested. The settings icon also reused `.theme-toggle`, whose `margin-left: auto`
   then applied to two elements at once; one `.header-actions` wrapper owns the push-right now.
 
+- **Twenty-third slice: a fully local TTS provider.** `RN_TTS_PROVIDER=kokoro` (the `kokoro`
+  extra) synthesizes with no network call at all — no API key, and none of the undocumented-endpoint
+  grey area `edge-tts` operates in with its hardcoded client token.
+
+  **Two recommendations were wrong before this one, both from unverified sources.** NeuTTS: no CJK,
+  which is the language the whole output-language work exists for. Qwen3-TTS: recommended from a
+  blog summary claiming CPU inference, but the repository documents `device_map="cuda:0"` and never
+  mentions CPU — it would not run on the machine this project is developed on. (Its licence claim
+  did hold up on checking the HF model card, but I had asserted it before looking.) Kokoro was
+  chosen only after being installed and RUN: Apache-2.0, ~82M parameters, 17.4s one-time load then
+  4.4s for 8.9s of Mandarin on CPU.
+
+  **A `TTSProvider` now owns its output FORMAT and its own language→voice map.** A voice name is
+  provider-specific — `zh-TW-YunJheNeural` versus `zf_xiaobei` — so one shared map would have leaked
+  one provider's names into the other's request. Kokoro emits 24kHz WAV, and forcing it through an
+  MP3 encoder would drag in the ffmpeg/pydub dependency invariant 17 refused. Handled rather than
+  assumed: `find_audio` looks for whichever format is present (switching providers must not orphan
+  an existing episode), `clear_audio` removes every format before a regenerate, and the file
+  endpoint derives its media type from the file rather than the configured provider.
+
+  An EXTRA, never core: 87 packages including torch, transformers and spacy (measured with
+  `--dry-run`), plus weights on first use. Invariant 15's "works out of the box" rests on the
+  DEFAULT provider needing neither a key nor a download.
+
+  Verified end to end through the real product: a 14-turn Chinese episode generated with no network
+  TTS call, written as `notebooks/audio/<slug>.wav` (2m53s, 24kHz), the previous `.mp3` removed, and
+  served as `audio/wav` with range support.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
