@@ -16,9 +16,7 @@ docstrings before adding a new write path.
 from __future__ import annotations
 
 import hashlib
-import os
 import re
-import tempfile
 import threading
 import unicodedata
 from collections.abc import Callable, Iterator
@@ -27,6 +25,7 @@ from pathlib import Path
 
 from pydantic import ValidationError
 
+from .atomic import atomic_write_text
 from .corpus import Corpus
 from .ingest import ingest_new, ingest_pasted_text, with_injection_flags
 from .schema import Note, Notebook, Source
@@ -120,18 +119,7 @@ def save_notebook(notebook: Notebook, *, base_dir: str | Path = DEFAULT_NOTEBOOK
     notebook, so writing an object read any earlier than "just now, under the lock" silently
     destroys whatever else was written in between. `mutate_notebook` is the only caller inside this
     package for exactly that reason; tests building fixtures on disk are the legitimate exception."""
-    path = notebook_path(notebook.id, base_dir=base_dir)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as fh:
-            fh.write(notebook.model_dump_json(indent=2))
-            fh.flush()
-            os.fsync(fh.fileno())
-        os.replace(tmp_name, path)
-    except BaseException:
-        Path(tmp_name).unlink(missing_ok=True)
-        raise
+    atomic_write_text(notebook_path(notebook.id, base_dir=base_dir), notebook.model_dump_json(indent=2))
 
 
 #: Per-lock-path `threading.Lock`s, used ONLY on a platform without `fcntl` (see `notebook_lock`).

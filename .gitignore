@@ -8,7 +8,10 @@ __pycache__/
 # uv / virtualenv
 .venv/
 
-# Run artifacts (traces + persisted notebooks a live run writes; not source)
+# Run artifacts (traces + persisted notebooks a live run writes; not source). The settings
+# page writes notebooks/.settings — inside an already-ignored directory, and deliberately NOT a
+# .json file, since list_notebook_summaries globs notebooks/*.json (which pathlib matches against
+# dotfiles too) and would report it as a corrupt notebook.
 /traces/
 /notebooks/
 *.jsonl

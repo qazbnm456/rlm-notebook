@@ -1553,3 +1553,78 @@ def test_a_failed_resolution_never_costs_the_caller_their_artifact(client, monke
 
     assert resp.status_code == 200, resp.text
     assert resp.json()["text"] == "an answer"
+
+
+# --- settings -----------------------------------------------------------------------------------
+
+
+def test_settings_never_calls_config_and_works_without_a_model(client, monkeypatch):
+    """`NotebookConfig.from_env()` raises SystemExit (a 500) whenever RN_MAIN_MODEL is unset — and a
+    settings page is exactly what an operator opens when the server is misconfigured. The same
+    reasoning invariant 30 already applies to `max_upload_bytes`."""
+    monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
+    monkeypatch.delenv("RN_OUTPUT_LANGUAGE", raising=False)
+
+    resp = client.get("/settings")
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["output_language"]["source"] == "default"
+
+
+def test_settings_refuses_an_unknown_key_and_a_crafted_voice(client, monkeypatch):
+    monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
+
+    assert client.put("/settings", json={"output_language": "Traditional Chinese"}).status_code == 200
+    # An unknown key is REFUSED, not dropped. Pydantic's default drops it before the handler's
+    # validator sees it — and combined with full-replacement semantics that made a request carrying
+    # only a typo'd key silently WIPE every setting, which a live check caught after this very test
+    # (asserting only that nothing extra is persisted) had passed while missing it.
+    resp = client.put("/settings", json={"RN_API_KEY": "sk-x", "output_language": "Japanese"})
+    assert resp.status_code == 422, resp.text
+    assert client.get("/settings").json()["output_language"]["value"] == "Traditional Chinese", (
+        "a rejected write must leave the previous settings intact"
+    )
+
+    resp = client.put(
+        "/settings",
+        json={"tts_voice_host_a": "en-US-x'/><audio src=" + chr(34) + "http://e/x" + chr(34) + "/><a b='Neural"},
+    )
+    assert resp.status_code == 422, resp.text
+
+
+def test_no_safety_bound_or_credential_is_readable_or_writable(client, monkeypatch):
+    """"Non-secret" was the wrong filter. Trace retention DELETES files that can hold ingested
+    source text, the upload cap bounds what an unauthenticated caller can push, and a writable
+    RN_BASE_URL would exfiltrate RN_API_KEY on the next run without anyone reading it."""
+    monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
+
+    exposed = set(client.get("/settings").json())
+    assert exposed == {"error", "output_language", "tts_voice_host_a", "tts_voice_host_b"}
+
+    client.put("/settings", json={"output_language": "Japanese"})
+    for forbidden in ("max_upload_bytes", "trace_retention_days", "main_model", "api_key", "base_url"):
+        assert client.put("/settings", json={forbidden: "1"}).status_code == 422, forbidden
+        assert forbidden not in client.get("/settings").json()
+    # and none of those refused writes wiped what was already there
+    assert client.get("/settings").json()["output_language"]["value"] == "Japanese"
+
+
+def test_the_settings_language_beats_a_notebooks_cached_resolution(client, monkeypatch):
+    """The ladder is env -> settings file -> Notebook.output_language -> default. The first two are
+    STATED preferences; the third is a CACHED GUESS that exists only so a resolution isn't paid for
+    per artifact. Below the cache, a language chosen in the settings page would be inert for every
+    notebook that has ever generated anything — the notebooks a user is looking at when they open
+    settings."""
+    _live_env(monkeypatch)
+    monkeypatch.delenv("RN_OUTPUT_LANGUAGE", raising=False)
+    _add_a_source(client)
+    dotted: list[str] = []
+    _mock_runner_by_run(monkeypatch, dotted, lang="Japanese", other={"text": "x", "citations": []})
+    client.post("/notebooks/mynb/guide/summary")
+    assert load_notebook("mynb").output_language == "Japanese"
+
+    client.put("/settings", json={"output_language": "Traditional Chinese"})
+
+    from rlm_notebook.config import output_language
+
+    assert output_language() == "Traditional Chinese"

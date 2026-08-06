@@ -386,6 +386,137 @@ async function suggestTitle(notebookId, generation) {
   }
 }
 
+// --- Settings ---------------------------------------------------------------------------------
+//
+// PRESENTATION settings only: the language the model writes in, and the voices that read it.
+// Trace retention, the upload cap and every model/credential variable are deliberately absent —
+// "non-secret" is the wrong filter, since lowering retention DELETES traces holding ingested source
+// text and raising the upload cap is a DoS lever. Those are safety bounds, and this API has no
+// authentication (invariant 25).
+//
+// Every row shows where its value comes from. A row pinned by an environment variable is DISABLED
+// and says which one: a form that accepts a value and then quietly loses to the env would be a UI
+// that lies, which is worse than not having the control.
+
+const _SETTING_ROWS = [
+  {
+    key: "output_language",
+    label: "Output language",
+    placeholder: "e.g. Traditional Chinese",
+    help: "Leave empty to let each notebook resolve its own from your browser, its sources and your questions.",
+  },
+  {
+    key: "tts_voice_host_a",
+    label: "Podcast voice — host A",
+    placeholder: "e.g. zh-TW-YunJheNeural",
+    help: "Leave empty to follow the notebook's language.",
+  },
+  {
+    key: "tts_voice_host_b",
+    label: "Podcast voice — host B",
+    placeholder: "e.g. zh-TW-HsiaoChenNeural",
+    help: "Leave empty to follow the notebook's language.",
+  },
+];
+
+function renderSettings(state_) {
+  const body = document.getElementById("settings-body");
+  body.textContent = "";
+
+  if (state_.error) {
+    // Surfaced, never swallowed — the reader falls back to defaults on a corrupt file, and the one
+    // place that can say so is here (the same "flag, never silently drop" shape the notebook
+    // listing already uses for an unparseable file).
+    const warn = document.createElement("div");
+    warn.className = "setting-source";
+    warn.textContent = `Settings file could not be read (${state_.error}); showing defaults.`;
+    body.appendChild(warn);
+  }
+
+  const inputs = new Map();
+  _SETTING_ROWS.forEach((row) => {
+    const entry = state_[row.key] || { value: null, source: "default", env_var: "" };
+    const wrap = document.createElement("div");
+    wrap.className = "setting-row";
+
+    const label = document.createElement("label");
+    label.textContent = row.label;
+    label.htmlFor = `setting-${row.key}`;
+    wrap.appendChild(label);
+
+    const input = document.createElement("input");
+    input.id = `setting-${row.key}`;
+    input.type = "text";
+    input.placeholder = row.placeholder;
+    // textContent/value, never innerHTML — these are server-echoed, caller-writable strings.
+    input.value = entry.source === "default" ? "" : entry.value || "";
+    input.disabled = entry.source === "env";
+    wrap.appendChild(input);
+    inputs.set(row.key, input);
+
+    const note = document.createElement("div");
+    note.className = "setting-source";
+    note.textContent =
+      entry.source === "env"
+        ? `Pinned by ${entry.env_var} — unset it to edit here.`
+        : row.help;
+    wrap.appendChild(note);
+
+    body.appendChild(wrap);
+  });
+
+  const save = document.createElement("button");
+  save.type = "button";
+  save.className = "btn btn-primary";
+  save.textContent = "Save";
+  save.addEventListener("click", async () => {
+    save.disabled = true;
+    const payload = {};
+    inputs.forEach((input, key) => {
+      if (!input.disabled && input.value.trim()) payload[key] = input.value.trim();
+    });
+    try {
+      renderSettings(await api("/settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      }));
+    } catch (err) {
+      alert(`Could not save settings: ${err.message}`);
+    } finally {
+      save.disabled = false;
+    }
+  });
+  body.appendChild(save);
+}
+
+function initSettings() {
+  const overlay = document.getElementById("settings-overlay");
+  const close = () => {
+    overlay.hidden = true;
+  };
+
+  document.getElementById("settings-open").addEventListener("click", async () => {
+    closeSourceViewer(); // one overlay at a time — both carry z-index 1000, so DOM order would decide
+    overlay.hidden = false;
+    document.getElementById("settings-body").textContent = "Loading…";
+    try {
+      renderSettings(await api("/settings"));
+    } catch (err) {
+      document.getElementById("settings-body").textContent = `(error) ${err.message}`;
+    }
+  });
+  document.getElementById("settings-close").addEventListener("click", close);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) close();
+  });
+  // The source viewer's Escape handler is its own; without this one Escape would close that and
+  // leave this open.
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !overlay.hidden) close();
+  });
+}
+
 function initNotebookTitle() {
   const el = document.getElementById("notebook-title");
   store.on("notebook:titled", ({ title, notebookId }) => {

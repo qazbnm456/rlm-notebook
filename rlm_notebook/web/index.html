@@ -21,6 +21,8 @@
       <button id="notebook-open" class="btn btn-primary">Open</button>
     </div>
 
+    <button id="settings-open" class="theme-toggle" title="Settings" aria-label="Settings">⚙</button>
+
     <button id="theme-toggle" class="theme-toggle" title="Toggle Paper / Study theme" aria-label="Toggle theme">
       ☀
     </button>
@@ -106,6 +108,20 @@
       </div>
     </section>
   </main>
+
+  <!-- A SECOND overlay, reusing the `.modal-overlay` CLASS but never the source viewer's element:
+       that one owns `sourceViewerAbort`/`closeSourceViewer` and writes into #source-viewer-title
+       and #source-viewer-body. Markup here (not createElement) and toggled with `.hidden =`, which
+       is what makes tests/test_web_assets.py's extraction see it — invariant 36. -->
+  <div class="modal-overlay" id="settings-overlay" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="modal-head">
+        <div id="settings-title" class="modal-title">Settings</div>
+        <button type="button" class="modal-close" id="settings-close" aria-label="Close">✕</button>
+      </div>
+      <div class="modal-body" id="settings-body"></div>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="source-viewer-overlay" hidden>
     <div class="modal" id="source-viewer-modal" role="dialog" aria-modal="true">

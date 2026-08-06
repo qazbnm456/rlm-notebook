@@ -849,6 +849,24 @@ input:focus {
    That is exactly how this shipped in the source-viewer slice, and it made the whole UI unusable
    from the first paint. Any future element that is both `hidden`-toggled and given a `display`
    rule needs the same pair — `tests/test_web_assets.py` fails the build if one is added without it. */
+.setting-row {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.setting-row label {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.setting-source {
+  font-size: 0.75rem;
+  color: var(--text-faint);
+}
+
 .modal-overlay[hidden] {
   display: none;
 }
@@ -875,6 +893,8 @@ input:focus {
   border-bottom: 1px solid var(--border);
 }
 
+/* Was id-scoped, so the settings modal's title rendered unstyled. A class both modals carry. */
+.modal-head .modal-title,
 .modal-head #source-viewer-title {
   font-weight: 700;
   word-break: break-all;

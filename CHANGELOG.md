@@ -1165,6 +1165,39 @@ questions with verifiable citations, and get a distilled research artifact out.
   notebook title rather than interpolated — `download` is an attribute the browser turns into a path
   component, and that title is model-authored.
 
+- **Twenty-first slice: a settings page — presentation settings only.** The user picked this shape
+  after three were put on the table, and the reason is not preference: this API has no
+  authentication (invariant 25) and today holds NO secrets, so a page that persisted API keys
+  server-side would let anyone who can reach the server read or spend them.
+
+  **"Non-secret" turned out to be the wrong filter.** Two candidates are levers an unauthenticated
+  caller does not have today: lowering `RN_TRACE_RETENTION_DAYS` DELETES trace files that can hold
+  ingested source text, and raising `RN_MAX_UPLOAD_BYTES` is a straight DoS lever. Moving a safety
+  BOUND onto an unauthenticated page is the same mistake as moving a key there, just quieter. So the
+  page carries the output language and the two podcast voices, and nothing else. `RN_BASE_URL` is
+  the sharpest exclusion: `config.setup` hands it to `rlm_harness.configure` alongside `api_key`, so
+  a writable base_url exfiltrates the key on the next run without anyone ever reading it.
+
+  A pre-implementation audit found 4 blockers. The language ladder has FOUR rungs, not the two the
+  design named — a one-line "read the file too" would have silently made a browser-typed language a
+  hard override over every notebook's persisted resolution, in the CLI as well, with no test
+  failing. The TTS provider is a `NotebookConfig` field, so reporting it needs `_config()`, which
+  raises `SystemExit` → 500 when `RN_MAIN_MODEL` is unset — on the one page an operator opens when
+  the server is misconfigured; it was cut from the slice. The voice ladder's position was undefined
+  against invariant 40. And both proposed file locations were wrong: a repo-root `settings.json` is
+  not gitignored, and `pathlib`'s `*.json` glob matches dotfiles, so `notebooks/.settings.json`
+  would have been reported as a corrupt notebook.
+
+  **A live check then caught a bug the tests had missed.** Pydantic DROPS unknown keys before the
+  handler's validator sees them, and combined with full-replacement semantics a request carrying
+  only a typo'd key silently WIPED every setting — while a test asserting "nothing outside the three
+  settings is persisted" passed. Fixed with `extra="forbid"`, and the regression is mutation-tested.
+
+  That same live check left a settings file in the working directory and turned an unrelated TTS
+  test red, because every path here resolves against the process CWD. Rather than delete the file,
+  `tests/conftest.py` now isolates every test into its own directory — a developer's local state
+  silently changing a test result is the same class a sibling project's ASR locale design records.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`
