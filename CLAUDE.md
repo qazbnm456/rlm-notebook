@@ -386,7 +386,18 @@ assume any of them exist because an earlier design discussion mentioned them.
     `finally` that covers BOTH the success and the synthesis-failure path, not just the former —
     caught and fixed by this phase's own pre-implementation audit before it was ever code); the
     response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
-    uniform with every other endpoint. Known, accepted limitation: only the script-generation half
+    uniform with every other endpoint.
+
+    **That non-persistence is exactly why the player carries an explicit `↓ Download mp3` link.**
+    The episode exists only as that tab's `Blob`, so a page reload loses it and there is nowhere
+    else to fetch it from — a user asked where the file was. `<audio controls>` does expose a
+    download in some browsers' overflow menu, which is neither discoverable nor uniform. The link
+    shares the player's object URL deliberately, so the existing assign-new-then-revoke-old ordering
+    keeps both valid together and neither outlives the other; the filename is SLUGGED from the
+    (model-authored) notebook title rather than interpolated, since `download` is an attribute the
+    browser turns into a path component.
+
+    Known, accepted limitation: only the script-generation half
     of `/audio` is cancellable — by the time synthesis begins, `_run_isolated`'s `finally` has
     already cleared this notebook's `_ACTIVE_RUNS` entry, so a stuck synthesis call blocks its
     request with no `killpg`-equivalent to reach it.
