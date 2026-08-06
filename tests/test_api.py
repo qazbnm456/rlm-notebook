@@ -14,6 +14,8 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import os
+import time
 from typing import ClassVar
 
 import pytest
@@ -1085,3 +1087,175 @@ def test_citation_turn_404s_when_run_id_does_not_belong_to_the_notebook(client):
     resp = client.get("/notebooks/mynb/runs/othernb-run/citation-turn?source_id=s1&locator=whole")
 
     assert resp.status_code == 404
+
+
+# --- durable writes (slice 14) -------------------------------------------------------------------
+
+
+def test_a_source_and_a_note_added_during_an_ask_both_survive_it(monkeypatch, client):
+    """THE regression test for this slice's defect, reproduced live over real HTTP against a real
+    uvicorn server before the fix: a user keeps working while the model runs — adds a source, saves
+    a note — and `ask` then persists its turn on top. Both writes used to return 200 and both were
+    silently destroyed, because `ask` wrote back a whole notebook it had read minutes earlier."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+
+    gate = asyncio.Event()
+
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+        return _FakeRun(run_id)
+
+    async def _gated_wait_result(run, *, timeout=None):
+        await gate.wait()  # stands in for a real RLM loop: seconds to minutes
+        return {"text": "an answer", "citations": []}
+
+    monkeypatch.setattr(api.runner, "start_run", _fake_start_run)
+    monkeypatch.setattr(api.runner, "wait_result", _gated_wait_result)
+
+    async def _scenario():
+        asking = asyncio.create_task(api.ask("mynb", api.AskRequest(question="what?")))
+        await asyncio.sleep(0.05)  # let `ask` load the notebook and park on the run
+
+        await api.add_sources("mynb", api.SourcesRequest(texts=["added while asking"]))
+        await api.add_note_endpoint("mynb", api.NoteRequest(text="a note taken while asking"))
+
+        gate.set()
+        await asking
+
+    asyncio.run(_scenario())
+
+    saved = load_notebook("mynb")
+    assert len(saved.sources) == 2, "the source added mid-run was destroyed"
+    assert saved.sources[1].origin.startswith("pasted:added while asking")
+    assert [n.id for n in saved.notes] == ["n1"], "the note added mid-run was destroyed"
+    assert len(saved.turns) == 1, "the ask's own turn was lost"
+
+
+def test_two_concurrent_source_adds_both_land(client):
+    """Invariant 31's originally-documented case (two writers on one notebook). Weaker than the
+    test above — before this slice both handlers were fully synchronous, so `gather` would have
+    run them one after the other anyway — but now that each dispatches its merge to a thread they
+    genuinely overlap, and it pins that the lock plus the re-read keeps both."""
+
+    async def _scenario():
+        await asyncio.gather(
+            api.add_sources("nb2", api.SourcesRequest(texts=["first"])),
+            api.add_sources("nb2", api.SourcesRequest(texts=["second"])),
+        )
+
+    asyncio.run(_scenario())
+
+    saved = load_notebook("nb2")
+    assert len(saved.sources) == 2
+    assert sorted(s.id for s in saved.sources) == ["s1", "s2"]
+
+
+def test_delete_note_404s_on_a_note_a_concurrent_request_already_removed(client):
+    """`delete_note`'s `ValueError` must still reach the client as a 404 now that it is raised
+    inside `mutate_notebook`'s worker thread — and must NOT be mistaken for `notebook_path`'s
+    same-typed invalid-id `ValueError`, which would report a 400 naming the wrong thing."""
+    client.post("/notebooks/mynb/notes", json={"text": "a note"})
+
+    assert client.delete("/notebooks/mynb/notes/n1").status_code == 200
+    resp = client.delete("/notebooks/mynb/notes/n1")
+
+    assert resp.status_code == 404
+    assert "n1" in resp.json()["detail"]
+
+
+def _stale_trace(run_id: str, *, age_days: float):
+    """Writes a REAL trace line (with `rlm_harness.trace`'s schema marker) — `traces._is_ours`
+    refuses to delete anything it can't recognise as this project's own, so a fixture writing a
+    bare `{"type": ...}` would be silently un-prunable and make these tests vacuous."""
+    api._TRACE_DIR.mkdir(parents=True, exist_ok=True)
+    path = api._TRACE_DIR / f"{run_id}.jsonl"
+    _write_trace(run_id, [{"type": "run_end", "payload": {"ok": True}}])
+    when = time.time() - age_days * 86_400
+    os.utime(path, (when, when))
+    return path
+
+
+def test_a_finished_run_prunes_old_trace_files(monkeypatch, client):
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []})
+    stale = _stale_trace("mynb-ancient", age_days=30)
+
+    assert client.post("/notebooks/mynb/ask", json={"question": "what?"}).status_code == 200
+
+    assert not stale.exists()
+
+
+def test_a_finished_run_leaves_its_own_fresh_trace_alone(monkeypatch, client):
+    """The just-finished run's trace is exactly what the answer now on screen links to through
+    `citation-turn` — `prune_traces`'s young-file floor must keep it, even though its process is
+    already gone from the protected set by the time the sweep runs."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []})
+    monkeypatch.setenv("RN_TRACE_RETENTION_DAYS", "1")
+    monkeypatch.setenv("RN_MAX_TRACE_FILES", "1")
+
+    resp = client.post("/notebooks/mynb/ask", json={"question": "what?", "run_id": "keepme"})
+
+    assert resp.status_code == 200
+    assert (api._TRACE_DIR / "mynb-keepme.jsonl").exists()
+
+
+def test_the_startup_lifespan_prunes_old_traces():
+    stale = _stale_trace("mynb-ancient", age_days=30)
+
+    with TestClient(api.app):
+        pass
+
+    assert not stale.exists()
+
+
+def test_a_malformed_retention_setting_refuses_startup(monkeypatch):
+    """The other half of the split: `_prune_traces` swallows everything so a completed run can't be
+    turned into a 500, which would also make a typo'd retention value mean "silently never prune."
+    The lifespan reads the settings itself so that case refuses startup instead.
+
+    Drives `_lifespan` directly rather than through `TestClient`: anyio's portal re-raises a
+    startup failure wrapped in a `BaseExceptionGroup`, so asserting on it there would pin
+    TestClient's wrapping rather than this project's behavior. The end-to-end effect was verified
+    against a REAL uvicorn server instead — it logs "Application startup failed. Exiting." and the
+    process exits nonzero."""
+    monkeypatch.setenv("RN_MAX_TRACE_FILES", "not-a-number")
+
+    async def _enter_lifespan():
+        async with api._lifespan(api.app):
+            pass
+
+    with pytest.raises(SystemExit, match="RN_MAX_TRACE_FILES"):
+        asyncio.run(_enter_lifespan())
+
+
+def test_a_broken_retention_setting_does_not_take_down_a_run(monkeypatch, client):
+    """`config.py` raises `SystemExit` on a malformed `RN_*` value. That is right for a CLI and for
+    `_config()`, and wrong for housekeeping in a `finally` — a completed, paid-for `ask` must not
+    become a 500 because a retention knob was typo'd."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []})
+    monkeypatch.setenv("RN_MAX_TRACE_FILES", "not-a-number")
+
+    assert client.post("/notebooks/mynb/ask", json={"question": "what?"}).status_code == 200
+
+
+def test_prune_never_deletes_the_trace_of_a_run_still_in_flight(monkeypatch):
+    """`_prune_traces` must pass the REAL `_RUN_PROCESSES` keys, not an empty set. Deleting a live
+    run's trace would break its SSE stream and free a run id `_run_isolated`'s exclusive-create
+    gate is still relying on being taken, letting a second request append into the same file. An
+    independent test-quality review found this wiring had no coverage: replacing the protected set
+    with `set()` left the whole suite green."""
+    live = _stale_trace("mynb-stillrunning", age_days=30)
+    dead = _stale_trace("mynb-finished", age_days=30)
+    monkeypatch.setitem(api._RUN_PROCESSES, "mynb-stillrunning", _FakeProcess())
+    try:
+        asyncio.run(api._prune_traces())
+    finally:
+        api._RUN_PROCESSES.pop("mynb-stillrunning", None)
+
+    assert live.exists(), "an in-flight run's trace was deleted"
+    assert not dead.exists()

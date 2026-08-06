@@ -736,3 +736,144 @@ questions with verifiable citations, and get a distilled research artifact out.
   risk (LGPL generally permits an unmodified dependency relationship from a permissively-licensed
   program without forcing that program under LGPL itself), but named in `README.md`'s new
   "Licensing" section rather than left undisclosed alongside everything else.
+
+- **Fourteenth slice: durable notebook writes + trace retention.** Not a feature — the one known
+  defect in this project that silently LOSES a user's data, fixed at the root, plus the retention
+  policy `traces/` had never had. Chosen over the remaining feature backlog deliberately: shipping
+  more features on top of a store that can silently drop writes compounds the risk.
+
+  **The defect was reproduced live over real HTTP against a real `uvicorn` server BEFORE anything
+  was designed, and it is materially worse than what invariant 31 had recorded.** That entry
+  described a race between two concurrent `POST /sources` calls — millisecond-wide, needing two
+  browser tabs or a load test to hit. The actual reproduction needed no concurrency trickery at
+  all: ask a question, and while the model works (which is exactly when a person has time to do
+  something else) add a source and save a note from the panels the web UI leaves fully enabled
+  during a run — `app.js`'s `pending` state gates only the Chat composer. Both writes returned 200.
+  Both were gone the moment the answer was saved. `api.ask` held its notebook snapshot across the
+  WHOLE run (up to `RN_RUN_TIMEOUT_SECONDS`, 300s by default) and wrote it back whole;
+  `add_sources`/`upload_source` held theirs across ingestion (network fetch, PDF+OCR, YouTube
+  captions).
+
+  **Two faults, and the fix needs both halves.** A stale snapshot (the handler mutates an object it
+  read minutes ago) and interleaved critical sections. A lock ALONE would not have prevented the
+  reproduction above, because the two writes never overlapped in the file-writing instant — which
+  is why `notebook.mutate_notebook` re-loads the file from disk INSIDE the lock and applies a
+  caller-supplied DELTA. Its closure never sees the caller's snapshot, so "write back the object I
+  built earlier" is not expressible. Every mutating path became: expensive work unlocked against a
+  snapshot → `mutate_notebook` with the delta. Critical sections are now bounded by a JSON load
+  plus a JSON write. Full account in CLAUDE.md invariant 34.
+
+  **`extend_with_sources` was DELETED, not kept alongside its replacement pair** (`ingest_sources_for`
+  + `append_sources`). Ingesting and appending in one breath is precisely what forces a caller to
+  hold a snapshot across ingestion, so leaving it available would let a later caller silently
+  reintroduce the bug. `save_notebook` now has exactly one caller in the whole package.
+
+  **`fcntl.flock`, not `fcntl.lockf`, and both load-bearing properties verified with a probe rather
+  than assumed**: `flock` locks attach to the open file description, so ONE mechanism serializes
+  two threads of a `uvicorn` server as well as two processes (POSIX record locks are per-process —
+  two threads would pass straight through each other), and it releases the GIL while blocked. The
+  cross-process guarantee has its own test that spawns a REAL second process and times how long the
+  parent blocks, the same discipline `test_runner.py`'s real-grandchild cancellation test already
+  applies. POSIX-only, stated rather than papered over: without `fcntl` it degrades to a
+  process-local `threading.Lock`.
+
+  **Four real problems found by this slice's own pre-implementation audit, all fixed before any
+  code was written.** (1) Building the prune's protected set inside a worker thread races the event
+  loop's own mutation of `_RUN_PROCESSES` — `RuntimeError: dictionary changed size during
+  iteration`, raised from a `finally` on an otherwise successful request; the snapshot is taken on
+  the loop instead. (2) `ask` persisting with `create=False` would have thrown away an
+  already-generated, already-paid-for answer if the notebook file vanished mid-run — the same
+  "never discard work that already succeeded" reasoning invariant 19 applies to a TTS failure after
+  a transcript exists. (3) Six handlers each hand-writing invariant 27's `ValueError`/
+  `ValidationError`/`FileNotFoundError` mapping is exactly the drift that produced invariant 27 in
+  the first place — one shared `_mutate_or_http` instead, which also validates the notebook id
+  BEFORE the thread so `notebook_path`'s invalid-id `ValueError` can't be confused with
+  `delete_note`'s same-typed "no such note" one (that confusion would report a missing note as
+  "invalid notebook id"). (4) `cli._prepare` returning its own snapshot rather than the notebook
+  `mutate_notebook` produced would have made every citation in a CLI run silently wrong —
+  `append_sources` renumbers ids against the fresh notebook, so the model would cite `s2` for a
+  source persisted as `s4`. The audit also checked whether the API's `ask` had the same exposure
+  and found it does not (its snapshot holds only already-persisted sources, whose ids are never
+  renumbered) — checked rather than assumed equivalent.
+
+  **One intended behavior change**: `cli._prepare` now persists freshly ingested sources
+  immediately, before the model runs, so a run that fails or is Ctrl+C'd partway no longer discards
+  ingestion the user already paid for in OCR or network time. `_cmd_guide`/`_cmd_audio`'s trailing
+  `save_notebook` calls existed only for that ingestion and are gone.
+
+  **Trace retention (`traces.py`, new)** — `traces/{run_id}.jsonl` no longer accumulates forever.
+  These are the one artifact here that can hold FULL ingested source text (the model echoes corpus
+  spans into its REPL output while reading), in front of an API with no authentication. Sweeps by
+  age (`RN_TRACE_RETENTION_DAYS`, default 7) and count (`RN_MAX_TRACE_FILES`, default 500), `0`
+  disabling either, at startup and after every run. Two rules outrank both sweeps: an in-flight run
+  id, and any file younger than a one-hour floor — **deleting a live run's trace wouldn't just
+  break its SSE stream, it would free a run id `_run_isolated`'s exclusive-create collision gate
+  (invariant 29) is still relying on being taken**, letting a second request append into the same
+  file. The floor covers what the protected set cannot: the window between that exclusive create
+  and the `_RUN_PROCESSES` registration a few lines later, and a just-finished run whose trace is
+  exactly what the answer now on screen links to. Consequence stated rather than hidden: the count
+  cap is a SOFT cap under a burst of runs.
+
+  **`prune_traces` never raises, so the lifespan validates the settings itself.** Housekeeping in a
+  `finally` must not turn a completed, paid-for `ask` into a 500 — but that same defensiveness
+  would make a typo'd `RN_TRACE_RETENTION_DAYS` mean "silently never prune." Split: the per-run
+  sweep stays defensive, and startup reads the values directly so a malformed one refuses to boot,
+  matching what `config.py` already does for every other bad `RN_*` value. Verified against a real
+  `uvicorn` server ("Application startup failed. Exiting.", nonzero exit) — the test drives the
+  lifespan directly rather than through `TestClient`, whose anyio portal re-raises a startup
+  failure wrapped in a `BaseExceptionGroup`; asserting on that would pin TestClient's wrapping
+  rather than this project's behavior.
+
+  **Three independent reviews (concurrency, security, test-quality) then found five more real
+  problems, all fixed before merge.** The concurrency pass came back clean on its own axis.
+
+  **A destructive sink with no ownership check (security, MEDIUM).** `_TRACE_DIR` is a bare
+  relative `Path("traces")` resolved against whatever directory the server was started in, and
+  this project's siblings all write `.jsonl` traces of their own — the review reproduced a
+  co-located directory belonging to ANOTHER tool being emptied at server startup, on nothing but a
+  filename glob and an mtime. Age and the protected set bound only WHEN a file dies, never WHOSE
+  it is. Fixed with `traces._is_ours` (first line must parse as JSON carrying `rlm_harness.trace`'s
+  schema marker, or the file must be empty — the abandoned `O_CREAT|O_EXCL` reservation case, which
+  still has to stay collectable), plus logging of what each sweep removed; the first version
+  discarded `prune_traces`'s return value entirely, so the one destructive operation in this
+  project was also silent. Re-verified live against a real server with a mixed directory.
+
+  **The count cap did the opposite of its own docstring (security, LOW but real).** It charged
+  protected and too-young files against the cap while drawing every deletion from the eligible
+  ones, so N concurrent runs — a client-influenceable number, since `_run_isolated` reserves the
+  trace file before spawning — could force well-within-retention traces to be deleted early.
+  Retention days was a function of load rather than a floor. Fixed so the cap governs how many
+  PRUNABLE traces are kept, matching what the docstring already claimed. One of this slice's own
+  tests had pinned the WRONG behavior and was rewritten.
+
+  **404s left permanent lock files (security, LOW).** Entering `notebook_lock` creates its sidecar
+  file, so every unauthenticated `DELETE /notebooks/<anything>/notes/n1` left a zero-byte file
+  behind for a notebook that never existed — 503 requests, 503 files, invisible to
+  `list_notebook_summaries`. Fixed by checking the `create=False` miss before taking the lock as
+  well as inside it. Re-verified live: 100 such requests now leave zero files.
+
+  **The entire CLI half of the fix had no test coverage (test-quality).** The review proved it by
+  restoring the exact pre-slice defect in `cli._cmd_ask` and watching all 321 tests still pass.
+  Four CLI regression tests added, each verified by mutation to actually fail on the code it
+  guards. One of them failed that check on its first draft — it wrote concurrently BEFORE
+  `_prepare` ran, where snapshot and fresh notebook are identical, so it passed against the very
+  defect it was named for; rewritten to inject the write DURING ingestion, the only window where
+  the two disagree.
+
+  **Two hollow trace tests (test-quality).** Both were named for the young-file floor and both
+  passed with the floor removed from `prune_traces` entirely: one file against a cap of one is AT
+  the cap, not over it, so nothing was ever eligible. Rewritten to two files against a cap of one,
+  and confirmed to fail without the floor. A third gap — `api._prune_traces` passing the real
+  `_RUN_PROCESSES` keys rather than an empty set — had no coverage at all and now does.
+
+  **Verification**: 329 tests pass (from 291), `uvx ruff@0.16.0 check .` clean. Every fix above was
+  mutation-tested in a scratch copy (never the working tree) to confirm its test fails on the
+  unfixed code. Both original live reproductions re-run after the fix — the single-user sequence
+  (all writes now survive) and a cross-process one where a SEPARATE OS PROCESS writes the same
+  notebook while a real server is mid-`ask`, which only `flock` covers.
+
+  **Deliberately NOT in this slice**: a merging write (needs conflict semantics that lock +
+  re-read makes unnecessary), a multi-worker `uvicorn` story for `_ACTIVE_RUNS`/`_RUN_PROCESSES`
+  (the notebook FILE is now safe across processes; those in-memory maps still are not), any
+  retention policy for `notebooks/` itself, and every remaining feature-backlog item (Guide/Audio
+  artifacts as citable sources, Word/Slides/Docs parsing, full audio transcription).

@@ -1,10 +1,16 @@
 """Notebook persistence: sources + chat history that survive across `ask` invocations.
 
 A notebook is one JSON file, `<notebooks_dir>/<slug(id)>.json`, holding a `schema.Notebook` — the
-sources ingested so far and every prior (question, answer) turn. This is deliberately the simplest
-thing that lets `ask` be called more than once against the same accumulated context: one file, no
-database, no locking, no concurrent-writer story — CLAUDE.md's Scope note already says there is no
-API/UI yet, so there is exactly one writer at a time.
+sources ingested so far and every prior (question, answer) turn. One file, no database.
+
+**Every mutation goes through `mutate_notebook`, which re-loads from disk inside a per-notebook
+lock.** This module used to say "no locking, no concurrent-writer story — there is exactly one
+writer at a time," which was true when `cli.py` was the only entry point and has been false since
+`api.py` started serving concurrent HTTP requests. A whole-file `save_notebook` of an object read
+minutes earlier silently destroys everything written in between — reproduced live over real HTTP
+(a source and a note added while an `ask` was running, both returning 200, both gone afterwards);
+see CLAUDE.md's notebook-durability invariant. Read the `mutate_notebook`/`notebook_lock`
+docstrings before adding a new write path.
 """
 
 from __future__ import annotations
@@ -12,6 +18,9 @@ from __future__ import annotations
 import os
 import re
 import tempfile
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from pydantic import ValidationError
@@ -19,6 +28,11 @@ from pydantic import ValidationError
 from .corpus import Corpus
 from .ingest import ingest_new, ingest_pasted_text, with_injection_flags
 from .schema import Note, Notebook, Source
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover — POSIX only; see `notebook_lock` for the fallback
+    fcntl = None  # type: ignore[assignment]
 
 DEFAULT_NOTEBOOKS_DIR = "notebooks"
 
@@ -65,7 +79,12 @@ def save_notebook(notebook: Notebook, *, base_dir: str | Path = DEFAULT_NOTEBOOK
     crash, power loss) — the NEXT `load_notebook` call for that id would then raise an uncaught
     `pydantic.ValidationError` with no recovery but deleting the file, silently losing the whole
     conversation. `os.replace` is atomic on both POSIX and Windows, so a reader only ever sees the
-    fully-old or fully-new file, never a partial one."""
+    fully-old or fully-new file, never a partial one — which is also why READS need no lock.
+
+    **Application code must not call this directly — use `mutate_notebook`.** It writes the WHOLE
+    notebook, so writing an object read any earlier than "just now, under the lock" silently
+    destroys whatever else was written in between. `mutate_notebook` is the only caller inside this
+    package for exactly that reason; tests building fixtures on disk are the legitimate exception."""
     path = notebook_path(notebook.id, base_dir=base_dir)
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.", suffix=".tmp")
@@ -78,6 +97,113 @@ def save_notebook(notebook: Notebook, *, base_dir: str | Path = DEFAULT_NOTEBOOK
     except BaseException:
         Path(tmp_name).unlink(missing_ok=True)
         raise
+
+
+#: Per-lock-path `threading.Lock`s, used ONLY on a platform without `fcntl` (see `notebook_lock`).
+#: Never consulted on POSIX, where `flock` already serializes threads as well as processes.
+_THREAD_LOCKS: dict[str, threading.Lock] = {}
+_THREAD_LOCKS_GUARD = threading.Lock()
+
+
+def _thread_lock_for(key: str) -> threading.Lock:
+    with _THREAD_LOCKS_GUARD:
+        return _THREAD_LOCKS.setdefault(key, threading.Lock())
+
+
+@contextmanager
+def notebook_lock(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR) -> Iterator[None]:
+    """Exclusive advisory lock on one notebook, held across a read-modify-write cycle.
+
+    `fcntl.flock` on a sidecar `<base_dir>/.<slug>.json.lock`. Two properties this design leans on,
+    both verified empirically rather than assumed:
+
+    - **One mechanism covers threads AND processes.** `flock` locks attach to the *open file
+      description*, so a separate `open()` per acquirer serializes two threads of one process just
+      as it does two processes. Do NOT swap this for `fcntl.lockf` (POSIX record locks): those are
+      per-PROCESS, so two threads of one `uvicorn` server would pass straight through each other.
+    - **It releases the GIL while blocked**, so a waiting thread doesn't stall the interpreter.
+
+    A SIDECAR file rather than the notebook itself: `load_or_create` legitimately runs for a
+    notebook that doesn't exist yet, and pre-creating the real path would break `load_notebook`'s
+    `path.exists()` contract. The lock file is never unlinked — deleting it would race with an
+    acquirer that already opened it — so one zero-byte file per notebook accumulates;
+    `list_notebook_summaries` globs `*.json`, so these stay invisible to it.
+
+    **NOT reentrant.** A second acquisition from the same thread blocks forever (a different open
+    file description, so `flock` sees a genuine second acquirer). Nothing passed to
+    `mutate_notebook` may itself call `mutate_notebook`/`notebook_lock`.
+
+    **POSIX only, stated rather than papered over.** Without `fcntl` (Windows), this degrades to a
+    process-local `threading.Lock`: still correct for the single-process `uvicorn` deployment
+    invariant 23 already describes as the only supported one, with no cross-process guarantee. A
+    portable create-exclusive lockfile protocol would need stale-lock recovery after a crash — more
+    failure modes than this buys.
+
+    Raises `ValueError` for an id that slugs to nothing, from `notebook_path` — same as every other
+    function here, so an invalid id fails identically whether or not it reaches a lock.
+    """
+    path = notebook_path(notebook_id, base_dir=base_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path = path.with_name(f".{path.name}.lock")
+
+    if fcntl is None:  # pragma: no cover — POSIX-only fallback
+        with _thread_lock_for(str(lock_path)):
+            yield
+        return
+
+    with open(lock_path, "a+") as fh:
+        fcntl.flock(fh.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(fh.fileno(), fcntl.LOCK_UN)
+
+
+def mutate_notebook(
+    notebook_id: str,
+    apply: Callable[[Notebook], None],
+    *,
+    base_dir: str | Path = DEFAULT_NOTEBOOKS_DIR,
+    create: bool = False,
+) -> Notebook:
+    """Apply a mutation to a notebook under `notebook_lock`, and return the notebook as saved.
+
+    **`apply` receives a notebook re-loaded from disk INSIDE the lock — never a snapshot the caller
+    read earlier.** That is the whole point: it makes it impossible to express "write back the
+    object I built minutes ago," which is the defect this exists to close (see the module
+    docstring). A caller does its expensive work — ingestion, a model run — unlocked, against a
+    snapshot, then passes a closure applying only the resulting DELTA. Critical sections stay
+    bounded by a JSON load plus a JSON write.
+
+    `apply` must therefore not assume ids/indices it computed against its own snapshot are still
+    right (`append_sources` exists for exactly that re-derivation), and must not call
+    `mutate_notebook`/`save_notebook` itself (`notebook_lock` is not reentrant).
+
+    Nothing is written if `apply` raises — the exception propagates with the on-disk file untouched.
+    `create=False` raises `FileNotFoundError` for a notebook that doesn't exist; `create=True`
+    starts a fresh one, matching `load_or_create`. Raises `ValueError` (invalid id) /
+    `pydantic.ValidationError` (corrupted file) exactly where the unlocked readers do.
+
+    The `create=False` miss is checked BEFORE taking the lock as well as inside it. Not an
+    optimisation: `notebook_lock` creates its sidecar file just by being entered, so without this
+    every 404-ing request (`DELETE /notebooks/<anything>/notes/n1` — unauthenticated, invariant 25)
+    left a permanent zero-byte file behind, invisible to `list_notebook_summaries`' `*.json` glob.
+    Found by an independent security review, which reproduced 503 files from 503 requests against
+    notebooks that never existed. The check inside the lock is what makes it correct; this one only
+    keeps the miss from writing anything.
+    """
+    if not create and not notebook_path(notebook_id, base_dir=base_dir).exists():
+        raise FileNotFoundError(f"no notebook {notebook_id!r}")
+
+    with notebook_lock(notebook_id, base_dir=base_dir):
+        notebook = load_notebook(notebook_id, base_dir=base_dir)
+        if notebook is None:
+            if not create:
+                raise FileNotFoundError(f"no notebook {notebook_id!r}")
+            notebook = Notebook(id=notebook_id)
+        apply(notebook)
+        save_notebook(notebook, base_dir=base_dir)
+        return notebook
 
 
 def corpus_of(notebook: Notebook) -> Corpus:
@@ -107,17 +233,53 @@ def load_or_create(
     return notebook
 
 
-def extend_with_sources(notebook: Notebook, new_values: list[str]) -> list[Source]:
-    """Ingest `new_values` not already present in `notebook` (by origin — see
-    `existing_origins`), append them to `notebook.sources` IN PLACE, and return just the
-    newly-added `Source` objects (so the caller can report which, if any, are flagged). Raises
-    `parsers.web.FetchError`/`ValueError`/`OSError` on an ingestion failure, same as
-    `ingest.ingest_new` (which this wraps) — nothing is appended if it raises."""
-    new_sources = ingest_new(
+def ingest_sources_for(notebook: Notebook, new_values: list[str]) -> list[Source]:
+    """Ingest the `new_values` not already present in `notebook` (by origin) and return them —
+    WITHOUT touching `notebook`. The expensive half: a network fetch, a PDF parse plus OCR, a
+    YouTube caption download. Runs UNLOCKED, against a snapshot; `append_sources` then merges the
+    result under `mutate_notebook`'s lock.
+
+    Raises `parsers.web.FetchError`/`ValueError`/`OSError` on an ingestion failure, same as
+    `ingest.ingest_new` (which this wraps).
+
+    This and `append_sources` replace the former single `extend_with_sources`, which ingested and
+    appended in one breath and so forced its caller to hold a snapshot across ingestion — the exact
+    shape of the lost-update defect (module docstring). Deleted rather than kept alongside these
+    two, so a later caller can't silently reintroduce it.
+
+    `notebook` is used only to pre-filter already-present origins and to pick starting ids, both of
+    which `append_sources` re-derives authoritatively. A stale snapshot therefore costs at worst a
+    wasted re-fetch of something a concurrent request added in the meantime, never a wrong result.
+    """
+    return ingest_new(
         new_values, start_index=len(notebook.sources) + 1, skip_origins=existing_origins(notebook)
     )
-    notebook.sources.extend(new_sources)
-    return new_sources
+
+
+def append_sources(notebook: Notebook, sources: list[Source]) -> list[Source]:
+    """Append already-ingested, already-injection-scanned `sources` to `notebook.sources` IN PLACE,
+    deduped by origin and RENUMBERED against THIS notebook. Returns just what was actually appended
+    (so a caller can report which, if any, are flagged).
+
+    The cheap half, meant to run inside `mutate_notebook`'s lock. Both re-derivations matter: a
+    source ingested against a snapshot was numbered from *its* `len(sources) + 1` and deduped
+    against *its* origins, and a concurrent write may have invalidated both.
+
+    Renumbering an as-yet-unpersisted source does NOT touch invariant 12 (which forbids reassigning
+    an id a SAVED notebook already uses): `Source.marker()` derives the citation marker from `.id`
+    at `Corpus.blob()` time, so no id is ever baked into stored block text. Callers that hand the
+    result to a model must use the RETURNED objects, not the ones they passed in.
+    """
+    seen = existing_origins(notebook)
+    appended: list[Source] = []
+    for source in sources:
+        if source.origin in seen:
+            continue
+        seen.add(source.origin)
+        renumbered = source.model_copy(update={"id": f"s{len(notebook.sources) + 1}"})
+        notebook.sources.append(renumbered)
+        appended.append(renumbered)
+    return appended
 
 
 def list_notebook_summaries(
@@ -178,8 +340,8 @@ def add_note(notebook: Notebook, text: str) -> Note:
     """Create and append a new `Note` to `notebook.notes` IN PLACE (see `_next_note_id` for the id
     scheme). Raises `ValueError` on blank text, same discipline `parsers.text.parse_text` already
     applies to a blank text SOURCE. Deliberately does NOT call `save_notebook` itself — same
-    convention every other mutator in this module already follows (`extend_with_sources` doesn't
-    save either); the caller persists once, after the mutation."""
+    convention every other mutator in this module follows (`append_sources` doesn't save either);
+    persistence is `mutate_notebook`'s job, and a mutator that saved would deadlock inside it."""
     if not text.strip():
         raise ValueError("note text is empty")
     note = Note(id=_next_note_id(notebook), text=text)

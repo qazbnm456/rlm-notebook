@@ -5,7 +5,17 @@ import pytest
 from rlm_notebook import cli
 from rlm_notebook.cli import _cmd_ask, _cmd_guide, _print_citations, build_parser
 from rlm_notebook.corpus import Corpus
-from rlm_notebook.schema import FAQ, Answer, Citation, PodcastScript, Source, SourceBlock, Timeline, Utterance
+from rlm_notebook.schema import (
+    FAQ,
+    Answer,
+    Citation,
+    PodcastScript,
+    Source,
+    SourceBlock,
+    Summary,
+    Timeline,
+    Utterance,
+)
 
 
 def test_ask_source_is_optional_at_the_argparse_level():
@@ -355,3 +365,143 @@ def test_cmd_audio_passes_the_configured_provider_name_to_get_tts_provider(monke
     args = parser.parse_args(["audio", "--source", str(a), "--out", str(tmp_path / "ep.mp3")])
     assert cli._cmd_audio(args) == 0
     assert received_names == ["edge-tts"]
+
+
+# --- durable writes (slice 14) -------------------------------------------------------------------
+
+
+def _seed_notebook(monkeypatch, tmp_path, text: str = "the first source"):
+    """A persisted notebook with one source, plus an isolated cwd. Returns the source file path so
+    a caller can pass it as `--source` again (a no-op re-add) or add a different one."""
+    monkeypatch.chdir(tmp_path)
+    src = tmp_path / "a.txt"
+    src.write_text(text, encoding="utf-8")
+    return src
+
+
+def test_cmd_ask_appends_its_turn_without_destroying_a_concurrent_write(tmp_path, monkeypatch, capsys):
+    """The CLI's half of this slice's defect, which the API's own regression test does not cover:
+    `_cmd_ask` used to append its turn to the notebook `_prepare` returned — read BEFORE the model
+    ran — and `save_notebook` the whole thing back, destroying anything written meanwhile. An
+    independent test-quality review proved the gap by restoring exactly that code and watching the
+    entire suite still pass.
+
+    The concurrent write happens INSIDE the stubbed model call, i.e. in the same window a real
+    `rlm-notebook ask` leaves open for minutes."""
+    src = _seed_notebook(monkeypatch, tmp_path)
+
+    from rlm_notebook.notebook import add_note, load_notebook, mutate_notebook
+
+    class _StubTask:
+        def run(self, **kwargs):
+            # Something else writes to the same notebook while the model is "running".
+            mutate_notebook("mynb", lambda nb: add_note(nb, "written during the run"), create=True)
+            return Answer(text="an answer", citations=[])
+
+    monkeypatch.setattr(cli, "AnswerQuestion", _StubTask)
+    monkeypatch.setattr(cli, "setup", lambda config: config)
+    monkeypatch.setattr(cli.NotebookConfig, "from_env", classmethod(lambda cls: cls()))
+
+    args = build_parser().parse_args(["ask", "what?", "--source", str(src), "--notebook", "mynb"])
+    assert _cmd_ask(args) == 0
+
+    saved = load_notebook("mynb")
+    assert [n.text for n in saved.notes] == ["written during the run"], "the concurrent note was destroyed"
+    assert len(saved.turns) == 1, "the ask's own turn was lost"
+    assert len(saved.sources) == 1
+
+
+def test_prepare_persists_ingestion_before_the_model_runs(tmp_path, monkeypatch, capsys):
+    """A run that dies mid-model must not discard ingestion the user already paid for in OCR or
+    network time — so `_prepare` persists it in its own critical section, not in a single save at
+    the end of the command."""
+    src = _seed_notebook(monkeypatch, tmp_path)
+
+    from rlm_notebook.notebook import load_notebook
+
+    class _ExplodingTask:
+        def run(self, **kwargs):
+            raise RuntimeError("the model run died")
+
+    monkeypatch.setattr(cli, "AnswerQuestion", _ExplodingTask)
+    monkeypatch.setattr(cli, "setup", lambda config: config)
+    monkeypatch.setattr(cli.NotebookConfig, "from_env", classmethod(lambda cls: cls()))
+
+    args = build_parser().parse_args(["ask", "what?", "--source", str(src), "--notebook", "mynb"])
+    with pytest.raises(RuntimeError, match="the model run died"):
+        _cmd_ask(args)
+
+    saved = load_notebook("mynb")
+    assert saved is not None, "ingestion was discarded when the run failed"
+    assert [s.origin for s in saved.sources] == [str(src)]
+    assert saved.turns == []
+
+
+def test_prepare_hands_the_model_the_ids_that_were_actually_persisted(tmp_path, monkeypatch):
+    """`append_sources` renumbers against the freshly-loaded notebook, so `_prepare` must return
+    THAT notebook, not its own pre-merge snapshot. Returning the snapshot would have the model cite
+    `s2` for a source persisted as `s3` — every citation in the run silently wrong. Caught by this
+    slice's pre-implementation audit; pinned here so it can't regress.
+
+    The concurrent write is injected DURING ingestion, which is the only window where the two
+    disagree — a mutation-test of a first version of this test (which wrote concurrently before
+    `_prepare` ran) survived: snapshot and fresh notebook were identical, so nothing could tell
+    them apart, and the test passed against the very defect it was named for."""
+    monkeypatch.chdir(tmp_path)
+    new_src = tmp_path / "b.txt"
+    new_src.write_text("brand new content", encoding="utf-8")
+
+    from rlm_notebook.notebook import append_sources, load_notebook, mutate_notebook
+
+    real_ingest = cli.ingest_sources_for
+
+    def _ingest_then_someone_else_writes(notebook, values):
+        ingested = real_ingest(notebook, values)
+        # Another writer lands while this invocation is still parsing/fetching its own sources.
+        other = Source(
+            id="s1", kind="text", origin="added-by-someone-else",
+            blocks=[SourceBlock(locator="whole", text="theirs")],
+        )
+        mutate_notebook("mynb", lambda nb: append_sources(nb, [other]), create=True)
+        return ingested
+
+    monkeypatch.setattr(cli, "ingest_sources_for", _ingest_then_someone_else_writes)
+
+    args = build_parser().parse_args(["ask", "q", "--source", str(new_src), "--notebook", "mynb"])
+    prepared = cli._prepare(args)
+    assert prepared is not None
+    notebook, corpus = prepared
+
+    persisted = load_notebook("mynb")
+    assert [s.origin for s in persisted.sources] == ["added-by-someone-else", str(new_src)]
+    assert [s.id for s in persisted.sources] == ["s1", "s2"]
+    # What the model is handed must match what is on disk, id for id — otherwise it cites an id
+    # that points at different text, or at nothing.
+    assert [(s.id, s.origin) for s in notebook.sources] == [
+        (s.id, s.origin) for s in persisted.sources
+    ]
+    assert "[[SRC:s2|" in corpus.blob()
+
+
+def test_cmd_guide_does_not_write_a_second_time(tmp_path, monkeypatch, capsys):
+    """`_prepare` already persisted any newly ingested sources, so `guide` has nothing left to
+    write. A trailing `save_notebook` here would be a second write path holding a pre-run
+    snapshot — exactly the shape this slice removed."""
+    src = _seed_notebook(monkeypatch, tmp_path)
+
+    from rlm_notebook.notebook import add_note, load_notebook, mutate_notebook
+
+    class _StubGuide:
+        def run(self, **kwargs):
+            mutate_notebook("mynb", lambda nb: add_note(nb, "written during the guide run"), create=True)
+            return Summary(text="a summary", citations=[])
+
+    monkeypatch.setitem(cli._GUIDE_TASKS, "summary", _StubGuide)
+    monkeypatch.setattr(cli, "setup", lambda config: config)
+    monkeypatch.setattr(cli.NotebookConfig, "from_env", classmethod(lambda cls: cls()))
+
+    args = build_parser().parse_args(["guide", "summary", "--source", str(src), "--notebook", "mynb"])
+    assert _cmd_guide(args) == 0
+
+    saved = load_notebook("mynb")
+    assert [n.text for n in saved.notes] == ["written during the guide run"]

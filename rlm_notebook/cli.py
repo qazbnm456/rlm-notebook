@@ -30,7 +30,14 @@ from .citations import verify_citations
 from .config import NotebookConfig, setup
 from .corpus import Corpus, CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
-from .notebook import corpus_of, extend_with_sources, history_text, load_or_create, save_notebook
+from .notebook import (
+    append_sources,
+    corpus_of,
+    history_text,
+    ingest_sources_for,
+    load_or_create,
+    mutate_notebook,
+)
 from .parsers.web import FetchError
 from .schema import ChatTurn, Citation, Notebook
 from .task import AnswerQuestion
@@ -74,13 +81,25 @@ _GUIDE_TASKS: dict[str, type] = {
 
 def _prepare(args) -> tuple[Notebook, Corpus] | None:
     """Load-or-create the notebook named by `args.notebook` (or an ephemeral one — see
-    `notebook.load_or_create`), ingest and merge any new `args.source` values
-    (`notebook.extend_with_sources`), print prompt-injection flag warnings, and return
-    `(notebook, corpus)` — shared by `_cmd_ask`/`_cmd_guide`/`_cmd_audio`, which all need
-    identical sources-in-hand setup before running their own RLMTask. Returns `None` (an error
-    already printed to stderr) if loading or ingestion failed, or if there are no sources at all;
-    the caller should return 1 in that case. `api.py` uses the same two `notebook.py` functions
-    directly rather than this argparse-`Namespace`-shaped wrapper."""
+    `notebook.load_or_create`), ingest any new `args.source` values, merge and PERSIST them, print
+    prompt-injection flag warnings, and return `(notebook, corpus)` — shared by
+    `_cmd_ask`/`_cmd_guide`/`_cmd_audio`, which all need identical sources-in-hand setup before
+    running their own RLMTask. Returns `None` (an error already printed to stderr) if loading or
+    ingestion failed, or if there are no sources at all; the caller should return 1 in that case.
+    `api.py` uses the same `notebook.py` functions directly rather than this
+    argparse-`Namespace`-shaped wrapper.
+
+    **Ingestion is persisted HERE, before the model runs, rather than in a single save at the end
+    of the command.** Two reasons, both consequences of the read-modify-write fix this slice
+    landed: an RLM run is a minutes-long window in which another writer (a second CLI invocation,
+    the API server) can legitimately touch the same notebook, and holding a snapshot across it is
+    the defect itself; and a run that fails or is Ctrl+C'd partway no longer discards ingestion the
+    user already paid for in OCR or network time.
+
+    **Returns the notebook `mutate_notebook` produced, NOT the local snapshot** — `append_sources`
+    renumbers ids against the freshly-loaded notebook, and handing the model a corpus built from
+    the pre-merge objects would make it cite `s2` for a source persisted as `s4`. Every citation in
+    the run would silently point at the wrong source."""
     try:
         notebook = load_or_create(args.notebook)
     except ValidationError as exc:
@@ -104,10 +123,21 @@ def _prepare(args) -> tuple[Notebook, Corpus] | None:
         return None
 
     try:
-        extend_with_sources(notebook, args.source or [])
+        ingested = ingest_sources_for(notebook, args.source or [])
     except (FetchError, ValueError, OSError) as exc:
         print(f"could not ingest a source: {type(exc).__name__}: {exc}", file=sys.stderr)
         return None
+
+    # Nothing new to merge (the common "keep asking an existing notebook" case) takes neither the
+    # lock nor a write: the snapshot above is already exactly as fresh as any reader ever gets.
+    if ingested and args.notebook:
+        notebook = mutate_notebook(
+            args.notebook, lambda nb: append_sources(nb, ingested), create=True
+        )
+    elif ingested:
+        # Ephemeral: nothing is persisted, so there's nothing to lock against and no fresh copy to
+        # re-read — the same `append_sources` merge, applied to the in-memory notebook directly.
+        append_sources(notebook, ingested)
 
     # Every source currently in the notebook, not just ones just added — a flag stays visible on
     # every subsequent turn, not only the turn that ingested the flagged source (CLAUDE.md's
@@ -159,9 +189,12 @@ def _cmd_ask(args) -> int:
     print(result.text)
     _print_citations(result.citations, corpus)
 
-    notebook.turns.append(ChatTurn(question=args.question, answer=result))
     if args.notebook:
-        save_notebook(notebook)
+        # Appended to a notebook re-loaded fresh after the run, not to the snapshot `_prepare`
+        # returned before it — see `notebook.mutate_notebook`. `_prepare` already persisted any
+        # newly ingested sources, so this critical section carries only the turn.
+        turn = ChatTurn(question=args.question, answer=result)
+        mutate_notebook(args.notebook, lambda nb: nb.turns.append(turn), create=True)
     return 0
 
 
@@ -169,7 +202,7 @@ def _cmd_guide(args) -> int:
     prepared = _prepare(args)
     if prepared is None:
         return 1
-    notebook, corpus = prepared
+    _notebook, corpus = prepared  # guide/audio persist nothing; only the corpus is used
 
     config = setup(NotebookConfig.from_env())
     try:
@@ -205,9 +238,10 @@ def _cmd_guide(args) -> int:
         _print_citations(result.citations, corpus)
 
     # Guide artifacts aren't cached onto the notebook or made citable as sources yet (deferred —
-    # see CHANGELOG); this only persists any --source values just ingested, same as `ask` would.
-    if args.notebook:
-        save_notebook(notebook)
+    # see CHANGELOG), and `_prepare` has already persisted any --source values just ingested, so
+    # there is nothing left for this command to write. The trailing `save_notebook` that used to
+    # sit here existed only for that ingestion; keeping it would be a second write path holding a
+    # pre-run snapshot — the exact shape this slice removed.
     return 0
 
 
@@ -215,7 +249,7 @@ def _cmd_audio(args) -> int:
     prepared = _prepare(args)
     if prepared is None:
         return 1
-    notebook, corpus = prepared
+    _notebook, corpus = prepared  # guide/audio persist nothing; only the corpus is used
 
     config = setup(NotebookConfig.from_env())
     try:
@@ -260,8 +294,7 @@ def _cmd_audio(args) -> int:
             return 1
         print(f"-> {out_path}")
 
-    if args.notebook:
-        save_notebook(notebook)
+    # Nothing to persist here either — see `_cmd_guide`'s note above.
     return 0
 
 

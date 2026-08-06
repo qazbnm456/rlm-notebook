@@ -142,7 +142,15 @@ restriction `sources` already enforces. `GET .../sources/{source_id}` returns a 
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
 materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
 citations of its own until it's promoted into a real source — see CLAUDE.md invariant 32. See
-`api.py`'s module docstring and CLAUDE.md invariants 20-33.
+`api.py`'s module docstring and CLAUDE.md invariants 20-34.
+
+Every write to a notebook — a source, a note, a chat turn — re-reads the notebook from disk under a
+per-notebook lock and applies just its own change, so a source you add while a question is still
+being answered is no longer destroyed when that answer is saved (it was, before: both requests
+returned 200 and one of them silently lost). Slow work — ingestion, the model run itself — happens
+outside the lock. Trace files under `traces/` are pruned on a policy now
+(`RN_TRACE_RETENTION_DAYS`, `RN_MAX_TRACE_FILES`) rather than accumulating forever; an in-flight
+run's trace and anything written in the last hour are never touched.
 
 ## Web UI
 

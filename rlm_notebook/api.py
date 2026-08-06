@@ -41,7 +41,13 @@ lookup endpoints are a MATERIALLY DIFFERENT exposure than every other endpoint h
 quotes), a trace can contain full ingested source text the model echoed while reading it. Treat
 this as a sharper version of the same no-auth posture, not a new category of risk this project
 hasn't already accepted, but never let documentation imply the trace endpoints are as low-exposure
-as the rest.
+as the rest. Trace files are pruned on a retention policy (`traces.py`) rather than kept forever,
+which bounds how long that exposure lasts — it does not remove it.
+
+Every write to a notebook here goes through `notebook.mutate_notebook` (via `_mutate_or_http`),
+which re-reads the file under a per-notebook lock and applies only this request's delta. Persisting
+a snapshot read before a long-running step — a model run, an ingestion — silently destroyed
+whatever else was written meanwhile; see CLAUDE.md invariant 34.
 
 Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --extra api`).
 """
@@ -51,9 +57,11 @@ from __future__ import annotations
 import asyncio
 import base64
 import json
+import logging
 import os
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
@@ -64,22 +72,24 @@ from pydantic import BaseModel, ValidationError
 from . import runner
 from .audio import GeneratePodcastScript
 from .citations import verify_citations
-from .config import NotebookConfig, max_upload_bytes
+from .config import NotebookConfig, max_trace_files, max_upload_bytes, trace_retention_seconds
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
 from .notebook import (
     add_note,
+    append_sources,
     corpus_of,
     delete_note,
     existing_origins,
-    extend_with_sources,
     history_text,
+    ingest_sources_for,
     list_notebook_summaries,
     load_notebook,
     load_or_create,
+    mutate_notebook,
+    notebook_path,
     promote_note,
-    save_notebook,
     slug,
 )
 from .parsers.web import FetchError
@@ -95,6 +105,7 @@ from .schema import (
     Timeline,
 )
 from .task import AnswerQuestion
+from .traces import prune_traces
 from .tts import TTSError, get_tts_provider
 
 #: Same registry `cli.py` keeps (`_GUIDE_TASKS`) — kept as a SEPARATE copy rather than imported
@@ -108,10 +119,40 @@ _GUIDE_TASKS: dict[str, tuple[type, type]] = {
 }
 
 #: Where subprocess runs record their trace — same directory `cli.py`'s live-run docs already
-#: point at (see README/.env.example), just used here instead of left implicit.
+#: point at (see README/.env.example), just used here instead of left implicit. Relative to the
+#: process's working directory, which is why `traces.prune_traces` refuses to delete anything it
+#: can't recognise as this project's own (a co-located `traces/` belonging to a sibling tool is a
+#: real scenario, not a hypothetical — see `traces._is_ours`).
 _TRACE_DIR = Path("traces")
 
-app = FastAPI(title="rlm-notebook API", description=__doc__)
+#: Only used for the trace sweep, the one destructive operation here. `uvicorn` configures the root
+#: logger, so this surfaces in the server's normal output without any setup of its own.
+_log = logging.getLogger(__name__)
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """One trace sweep when the server comes up, so a long-lived deployment doesn't depend on runs
+    happening to clean up after each other, and a restart clears whatever a crashed process left
+    behind. `_prune_traces` is defined further down and resolved at call time — this body only runs
+    at startup, long after the module has finished importing.
+
+    A `lifespan` rather than `@app.on_event("startup")`, which is deprecated in the installed
+    FastAPI. Note that `TestClient(app)` only runs this when used as a context manager, so the
+    existing tests that construct one bare are unaffected.
+
+    **The retention settings are read here OUTSIDE `_prune_traces`, so a malformed value refuses
+    startup instead of being swallowed.** `_prune_traces` deliberately never raises (housekeeping in
+    a `finally` must not turn a completed, paid-for `ask` into a 500) — but that same defensiveness
+    would make a typo'd `RN_TRACE_RETENTION_DAYS` mean "silently never prune," and traces can hold
+    full ingested source text. Refusing to start is the same choice `config.py` already makes for
+    every other bad `RN_*` value (invariant 9): loud beats silently doing something else."""
+    trace_retention_seconds()
+    max_trace_files()
+    await _prune_traces()
+    yield
+
+
+app = FastAPI(title="rlm-notebook API", description=__doc__, lifespan=_lifespan)
 
 #: In-flight runs, keyed by notebook id — a SINGLE-PROCESS in-memory map, and ONE SLOT per
 #: notebook id. Two known, documented limitations (CLAUDE.md invariant 23), neither a silent bug:
@@ -176,6 +217,49 @@ def _invalid_notebook_id(notebook_id: str, exc: ValueError) -> HTTPException:
     `TestClient` request (`POST /notebooks/!!!/ask` etc.) before this fix, on all four endpoints
     that touch a notebook by id."""
     return HTTPException(400, f"invalid notebook id {notebook_id!r}: {exc}")
+
+
+async def _mutate_or_http(notebook_id: str, apply, *, create: bool) -> Notebook:
+    """Every mutating endpoint's one way to persist: `notebook.mutate_notebook` dispatched off the
+    event loop, with this API's error mapping applied in ONE place.
+
+    **Off the event loop** (`asyncio.to_thread`): `mutate_notebook` takes a blocking `flock`, which
+    a CLI invocation or a second `uvicorn` worker can hold. Blocking the loop on it would stall
+    every other request, not just this one. Same precedent `/audio` set for `tts.py`'s internal
+    `asyncio.run` (invariant 29).
+
+    **One mapping, not six.** `ValueError` → 400 (an id that slugs to nothing),
+    `ValidationError` → 409 (a corrupted file), `FileNotFoundError` → 404 (`create=False` and no
+    such notebook). Six handlers each hand-writing this is precisely the drift that produced
+    invariant 27 in the first place — an independent review found four endpoints that had each
+    independently forgotten the `ValueError` arm.
+
+    `apply` runs in a worker thread on a notebook loaded fresh inside the lock: it must express a
+    DELTA, never write back a snapshot the handler read earlier (see `mutate_notebook`), and must
+    raise plain exceptions rather than `HTTPException` — the handler translates those itself, since
+    only it knows whether e.g. a `ValueError` from `delete_note` means 404 or 422.
+
+    **The id is validated BEFORE the thread, deliberately, so that `ValueError` stays unambiguous.**
+    `notebook_path`'s invalid-id `ValueError` and `delete_note`'s "no such note" `ValueError` are
+    the same type; catching `ValueError` around the whole call would report a missing note as
+    "invalid notebook id" (a 400 naming the wrong thing, on the wrong field). Validating up front
+    means any `ValueError` escaping the thread is unambiguously the closure's, and propagates to the
+    handler that knows what it means. `ValidationError` is caught FIRST because pydantic's is itself
+    a `ValueError` subclass."""
+    try:
+        notebook_path(notebook_id)
+    except ValueError as exc:
+        raise _invalid_notebook_id(notebook_id, exc) from exc
+    try:
+        return await asyncio.to_thread(mutate_notebook, notebook_id, apply, create=create)
+    except ValidationError as exc:
+        raise HTTPException(
+            409,
+            f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
+            f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
+        ) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(404, f"no notebook {notebook_id!r} — POST sources to it first") from exc
 
 
 def _load_notebook_or_404(notebook_id: str) -> Notebook:
@@ -305,9 +389,15 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
 @app.post("/notebooks/{notebook_id}/sources", response_model=NotebookResponse)
 async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookResponse:
     """Create `notebook_id` if it doesn't exist yet, and ingest+merge `body.sources` into it
-    (deduped by origin — see `notebook.extend_with_sources`). Always persists, unlike `cli.py`'s
+    (deduped by origin — see `notebook.append_sources`). Always persists, unlike `cli.py`'s
     ephemeral-by-default `ask`/`guide`/`audio`: an API caller has no other way to keep a notebook
     around between requests.
+
+    **Ingestion runs unlocked, against a snapshot; only the merge is locked.** A fetch/PDF+OCR pass
+    can take minutes, and holding a notebook snapshot across it is what silently destroyed
+    concurrent writes before this slice — `append_sources` re-dedupes and renumbers against the
+    notebook `mutate_notebook` loads fresh inside the lock, so the snapshot is only ever a
+    pre-filter (at worst a wasted re-fetch of something another request added meanwhile).
 
     **Only http(s) URLs are accepted here — NOT local file paths**, unlike `cli.py`'s `--source`
     (CLAUDE.md invariant 26). `ingest.ingest_one` treats any non-URL string as a path on the
@@ -330,7 +420,7 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
             422, f"each entry in 'texts' must be non-empty pasted text (blank at index {blank_texts})"
         )
     try:
-        notebook = load_or_create(notebook_id)
+        snapshot = load_or_create(notebook_id)
     except ValidationError as exc:
         raise HTTPException(
             409,
@@ -340,21 +430,21 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
     except ValueError as exc:
         raise _invalid_notebook_id(notebook_id, exc) from exc
     try:
-        extend_with_sources(notebook, body.sources)
+        ingested = await asyncio.to_thread(ingest_sources_for, snapshot, body.sources)
     except (FetchError, ValueError, OSError) as exc:
         raise HTTPException(422, f"could not ingest a source: {type(exc).__name__}: {exc}") from exc
 
-    # Pasted text: same same-call-duplicate-guard discipline `ingest_new` already established for
-    # URLs/paths (a `seen` set that grows as this loop runs, not just a static starting snapshot).
-    seen = existing_origins(notebook)
-    for text in body.texts:
-        source = ingest_pasted_text(text.strip(), source_id=f"s{len(notebook.sources) + 1}")
-        if source.origin in seen:
-            continue
-        seen.add(source.origin)
-        notebook.sources.append(with_injection_flags(source))
+    # Pasted text ingests out here too, not inside the lock — `parse_text` plus injection_scan's
+    # regexes are cheap, but there's no reason for ANY ingestion to sit under the lock when
+    # `append_sources` re-dedupes whatever it's handed. Ids are placeholders; it renumbers them.
+    pasted = [
+        with_injection_flags(ingest_pasted_text(text.strip(), source_id="s0"))
+        for text in body.texts
+    ]
 
-    save_notebook(notebook)
+    notebook = await _mutate_or_http(
+        notebook_id, lambda nb: append_sources(nb, ingested + pasted), create=True
+    )
     return _notebook_response(notebook)
 
 
@@ -366,35 +456,33 @@ class NoteRequest(BaseModel):
 async def add_note_endpoint(notebook_id: str, body: NoteRequest) -> NotebookResponse:
     """Create a note — manual, or a copy of a past Chat answer's text (the web UI's "Save as note"
     button). Uses `load_or_create` like `add_sources`: a brand-new notebook can start life by
-    adding a note, same as it can by adding a source."""
+    adding a note, same as it can by adding a source.
+
+    The delta applied under the lock is the TEXT, not a `Note` object built out here: `add_note`
+    derives the id from `_next_note_id` on the notebook it's handed, and an id computed against a
+    snapshot could collide with a note another request added meanwhile — exactly the two-live-notes-
+    one-id failure invariant 32 already documents, arrived at from a different direction."""
     try:
-        notebook = load_or_create(notebook_id)
-    except ValidationError as exc:
-        raise HTTPException(
-            409,
-            f"notebooks/{notebook_id}.json exists but is not a valid notebook file "
-            f"({type(exc).__name__}) — fix or remove it by hand before continuing.",
-        ) from exc
-    except ValueError as exc:
-        raise _invalid_notebook_id(notebook_id, exc) from exc
-    try:
-        add_note(notebook, body.text)
-    except ValueError as exc:
+        notebook = await _mutate_or_http(
+            notebook_id, lambda nb: add_note(nb, body.text), create=True
+        )
+    except ValueError as exc:  # blank text — `add_note`'s own guard, not an id problem
         raise HTTPException(422, str(exc)) from exc
-    save_notebook(notebook)
     return _notebook_response(notebook)
 
 
 @app.delete("/notebooks/{notebook_id}/notes/{note_id}", response_model=NotebookResponse)
 async def delete_note_endpoint(notebook_id: str, note_id: str) -> NotebookResponse:
     """Delete a note by id — an existing note can only be deleted from an EXISTING notebook (no
-    `load_or_create` here, matching `ask`/`guide`'s existing-notebook-only precedent)."""
-    notebook = _load_notebook_or_404(notebook_id)
+    `load_or_create` here, matching `ask`/`guide`'s existing-notebook-only precedent — expressed as
+    `create=False`, whose `FileNotFoundError` `_mutate_or_http` maps to the same 404
+    `_load_notebook_or_404` would have produced, in one read instead of two)."""
     try:
-        delete_note(notebook, note_id)
-    except ValueError as exc:
+        notebook = await _mutate_or_http(
+            notebook_id, lambda nb: delete_note(nb, note_id), create=False
+        )
+    except ValueError as exc:  # no such note — including one a concurrent request just deleted
         raise HTTPException(404, str(exc)) from exc
-    save_notebook(notebook)
     return _notebook_response(notebook)
 
 
@@ -404,13 +492,19 @@ async def promote_note_endpoint(notebook_id: str, note_id: str) -> NotebookRespo
     same pasted-text ingestion path `add_sources`'s `texts` field already goes through. Returns the
     updated `NotebookResponse` either way (whether or not a new source was actually appended —
     ground truth is already visible in the returned `sources`/`notes` lists, no separate "did it
-    dedupe" flag needed)."""
-    notebook = _load_notebook_or_404(notebook_id)
+    dedupe" flag needed).
+
+    `promote_note` runs INSIDE the lock, unlike every other ingestion path here: it already derives
+    both the note it pops and its new source id from the notebook it's handed, and its ingestion
+    (`ingest_pasted_text` — a hash and a `parse_text`, no network, no OCR) is cheap enough to keep
+    the critical section bounded. Splitting it into an unlocked half would mean re-finding the note
+    under the lock anyway, for no gain."""
     try:
-        promote_note(notebook, note_id)
+        notebook = await _mutate_or_http(
+            notebook_id, lambda nb: promote_note(nb, note_id), create=False
+        )
     except ValueError as exc:
         raise HTTPException(404, str(exc)) from exc
-    save_notebook(notebook)
     return _notebook_response(notebook)
 
 
@@ -452,7 +546,7 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
     filename = upload.filename or "upload"
 
     try:
-        notebook = load_or_create(notebook_id)
+        snapshot = load_or_create(notebook_id)
     except ValidationError as exc:
         raise HTTPException(
             409,
@@ -462,16 +556,24 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
     except ValueError as exc:
         raise _invalid_notebook_id(notebook_id, exc) from exc
 
-    if filename in existing_origins(notebook):
-        return _notebook_response(notebook)  # no-op — same dedupe semantics as a re-added path/URL
+    # A dedupe hit still finishes through `mutate_notebook` below rather than returning here: the
+    # snapshot predates any concurrent write, so short-circuiting on it would hand the caller a
+    # stale notebook. This check survives purely to avoid re-PARSING (re-OCRing) a duplicate file;
+    # `append_sources` is what actually enforces the dedupe.
+    parsed: list = []
+    if filename not in existing_origins(snapshot):
+        try:
+            parsed = [
+                with_injection_flags(
+                    await asyncio.to_thread(ingest_uploaded_file, data, filename, "s0")
+                )
+            ]
+        except ValueError as exc:
+            raise HTTPException(422, f"could not ingest {filename!r}: {exc}") from exc
 
-    try:
-        source = ingest_uploaded_file(data, filename, source_id=f"s{len(notebook.sources) + 1}")
-    except ValueError as exc:
-        raise HTTPException(422, f"could not ingest {filename!r}: {exc}") from exc
-
-    notebook.sources.append(with_injection_flags(source))
-    save_notebook(notebook)
+    notebook = await _mutate_or_http(
+        notebook_id, lambda nb: append_sources(nb, parsed), create=True
+    )
     return _notebook_response(notebook)
 
 
@@ -607,6 +709,41 @@ async def _run_isolated(
         if _ACTIVE_RUNS.get(notebook_id) is run:
             del _ACTIVE_RUNS[notebook_id]
         _RUN_PROCESSES.pop(run_id, None)
+        await _prune_traces()
+
+
+async def _prune_traces() -> None:
+    """Trace-file housekeeping — at startup and after every run. See `traces.prune_traces`.
+
+    **The protected set is snapshotted HERE, on the event loop, not inside the worker thread.**
+    `_RUN_PROCESSES` is mutated from the loop, so building `set(...)` from it in another thread can
+    raise `RuntimeError: dictionary changed size during iteration` — in a `finally`, on an
+    otherwise successful request. A run that registers between this snapshot and the sweep is
+    covered by `prune_traces`'s young-file floor instead.
+
+    Deletions are LOGGED, not silent — an independent security review pointed out that this is the
+    only destructive operation in the project and the first version discarded `prune_traces`'s
+    return value, so an operator had no way to know what a sweep had taken.
+
+    Never propagates: a failed sweep must not turn a completed `ask` into a 500."""
+    protected = set(_RUN_PROCESSES)
+    try:
+        removed = await asyncio.to_thread(
+            prune_traces,
+            _TRACE_DIR,
+            max_age_seconds=trace_retention_seconds(),
+            max_files=max_trace_files(),
+            protected=protected,
+        )
+        if removed:
+            _log.info("pruned %d trace file(s): %s", len(removed), ", ".join(sorted(removed)))
+    except (OSError, SystemExit):
+        # SystemExit: a malformed RN_TRACE_* value (config.py raises it, matching every other
+        # `RN_*` reader). Housekeeping is not the place to take a request down over it — the
+        # misconfiguration surfaces loudly from `_config()` on any endpoint that runs a model.
+        pass
+
+
 
 
 @app.post("/notebooks/{notebook_id}/ask", response_model=AskResponse)
@@ -629,9 +766,21 @@ async def ask(notebook_id: str, body: AskRequest) -> AskResponse:
     )
     answer = Answer.model_validate(result)
 
-    notebook.turns.append(ChatTurn(question=body.question, answer=answer, run_id=run_id))
-    save_notebook(notebook)
+    # The turn is appended to a notebook re-loaded fresh AFTER the run, never to the snapshot this
+    # handler loaded before it: an RLM run takes up to `run_timeout_seconds`, and writing back a
+    # snapshot that old silently destroyed every source and note added while the model was working
+    # (reproduced live over HTTP before this slice — see the notebook-durability invariant).
+    #
+    # `create=True` even though the 404 for a genuinely missing notebook already fired above: if
+    # the file somehow vanished DURING the run, recreating it is strictly better than raising and
+    # throwing away an answer that was already generated and paid for.
+    turn = ChatTurn(question=body.question, answer=answer, run_id=run_id)
+    await _mutate_or_http(notebook_id, lambda nb: nb.turns.append(turn), create=True)
 
+    # Citations verify against the SNAPSHOT corpus — the blob the model actually read. Verifying
+    # against sources it never saw would be a different (and weaker) claim. Invariant 11's
+    # "re-verified fresh against the current sources" governs reading a turn BACK (`get_notebook`),
+    # and is unaffected.
     return AskResponse(text=answer.text, citations=_citation_responses(answer.citations, corpus))
 
 
@@ -889,10 +1038,10 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
     (`rlm_harness.sub_lm`) — a marker beyond that point in a long escalation prompt won't be found in
     THAT event, though it may still turn up in another one.
 
-    404s (never crashes) when the trace file doesn't exist at all — `traces/` has no retention
-    policy anywhere in this project, so a citation's "view reasoning" link is only as durable as a
-    file nobody has committed to keeping; a missing trace degrades this ONE affordance, not the
-    rest of the page."""
+    404s (never crashes) when the trace file doesn't exist at all — `traces.prune_traces` deletes
+    traces on a policy (`RN_TRACE_RETENTION_DAYS`/`RN_MAX_TRACE_FILES`), so a citation's "view
+    reasoning" link is durable for as long as that policy keeps its run's file and no longer. A
+    missing trace degrades this ONE affordance, not the rest of the page."""
     if not run_id.startswith(f"{notebook_id}-"):
         raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
     trace_path = _TRACE_DIR / f"{run_id}.jsonl"
