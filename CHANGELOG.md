@@ -1028,6 +1028,23 @@ questions with verifiable citations, and get a distilled research artifact out.
   was permanently unreachable for any notebook that already had turns, which is exactly the set most
   likely to want one.
 
+- **The overview can be saved as a note — closing the loop this project already had every piece
+  of.** Prompted by a direct question: does NotebookLM persist its overview? It does, and the
+  mechanism is not a special one — its generated artifacts BECOME notes, which is how they survive
+  at all. This project has had `Note`, `promote_note` and note-to-citable-source since the eleventh
+  slice; the overview simply had no way in.
+
+  `saveAsNoteButton` is a factory two call sites opt into (`renderTurn` and `generateOverview`),
+  NOT a line inside `renderAnswerWithCitations` — the restriction invariant 32 records still holds,
+  but its stated REASON was wrong. "Generated output is not something a user curates into notes" is
+  contradicted by the product being chased; the line that actually holds is about the surface:
+  things rendered IN the chat thread are the user's to curate, a Studio tab's artifact and a
+  podcast transcript are not part of that thread.
+
+  Verified live end to end: overview -> note -> promote -> a new source that later questions can
+  cite. A toy source whose summary restated it verbatim instead hit the documented dedup no-op,
+  which is the correct behaviour and worth having seen.
+
 - **Three more UX defects, all reported by a user actually using the thing.**
 
   **A notebook named in Chinese was rejected outright.** `notebook.slug`'s `[A-Za-z0-9._-]`

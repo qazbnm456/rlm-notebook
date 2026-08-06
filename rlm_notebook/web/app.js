@@ -575,6 +575,37 @@ function initSourcesPanel() {
 // `runId` is optional (Phase 1/2 call sites that predate the trace fusion, or a loaded turn saved
 // before `ChatTurn.run_id` existed, pass nothing) — when given, each citation span becomes
 // clickable, calling `showCitationTurn` against a shared detail slot appended once per answer.
+// The "+ Save as note" affordance, as a factory rather than a line inside
+// `renderAnswerWithCitations`. NotebookLM's own model is that generated artifacts BECOME notes, and
+// this project already has the whole mechanism (Note -> promote_note -> a real citable Source) —
+// what it lacked was any way to get an overview into it.
+//
+// The rule this preserves (blueprint's Notes addendum, audit round 1): the button belongs to a CALL
+// SITE that opts in, never to the shared renderer, which Guide tabs and the podcast transcript also
+// use. The line is what the user is looking at when they click: things rendered IN the chat thread
+// (an answer, the overview) are theirs to curate; a Studio tab's artifact and a podcast transcript
+// are not part of that thread.
+function saveAsNoteButton(text) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "btn save-as-note";
+  btn.textContent = "+ Save as note";
+  btn.addEventListener("click", async () => {
+    btn.disabled = true;
+    const original = btn.textContent;
+    try {
+      await addNote(text);
+      btn.textContent = "\u2713 Saved";
+    } finally {
+      setTimeout(() => {
+        btn.textContent = original;
+        btn.disabled = false;
+      }, 1500);
+    }
+  });
+  return btn;
+}
+
 function renderAnswerWithCitations(text, citations, runId) {
   const container = document.createElement("div");
 
@@ -675,13 +706,10 @@ function renderTurn(turn) {
     }
     // Appended HERE, by renderTurn itself — NOT inside renderAnswerWithCitations, which five OTHER
     // call sites (Guide/Podcast) also use and must never show this button (blueprint's Notes
-    // addendum, audit round 1).
-    const saveNoteBtn = document.createElement("button");
-    saveNoteBtn.type = "button";
-    saveNoteBtn.className = "btn save-as-note";
-    saveNoteBtn.textContent = "+ Save as note";
-    saveNoteBtn.addEventListener("click", () => addNote(turn.answer));
-    answer.appendChild(saveNoteBtn);
+    // addendum, audit round 1). `generateOverview` appends its own via the same factory, for the
+    // same reason: a shared helper the CALL SITE opts into, never a button the shared renderer
+    // grows on its own.
+    answer.appendChild(saveAsNoteButton(turn.answer));
   }
   wrapper.appendChild(answer);
 
@@ -809,6 +837,10 @@ async function generateOverview() {
       renderAnswerWithCitations(summary.value.text, summary.value.citations || [], summaryRun)
     );
     overview.appendChild(renderTickerAffordance(summaryRun));
+    // The overview is not persisted (no guide artifact is). Saving it as a note is the ONLY way to
+    // keep it — and, once promoted, the only way to make it citable by a later question. That is
+    // exactly the loop NotebookLM runs on, and every piece of it already existed here.
+    overview.appendChild(saveAsNoteButton(summary.value.text));
   } else {
     const err = document.createElement("div");
     err.textContent = `(could not generate an overview: ${summary.reason.message})`;

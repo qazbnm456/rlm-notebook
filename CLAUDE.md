@@ -573,13 +573,24 @@ assume any of them exist because an earlier design discussion mentioned them.
     unlike `POST /notebooks/{id}/notes` itself, which uses `load_or_create` like `add_sources` (a
     brand-new notebook can start life by adding a note).
 
-    **The "+ Save as note" button lives in `renderTurn` (Chat's own call site), never inside the
-    shared `renderAnswerWithCitations`.** That shared function is called from SIX sites (Chat plus
-    all four Guide-kind renders and the podcast transcript) — an earlier design draft would have
-    added the button INSIDE the shared function, leaking it onto Guide/Podcast artifacts, which are
-    generated output, not conversational turns a user is meant to curate into notes. Caught by an
-    independent pre-implementation audit before any code was written, not found live afterward:
-    don't move this button call into the shared function even as a "simplification."
+    **The "+ Save as note" button belongs to a CALL SITE that opts in, never to the shared
+    `renderAnswerWithCitations`.** That shared function is called from SIX sites (Chat plus all four
+    Guide-kind renders and the podcast transcript); an earlier design draft would have added the
+    button INSIDE it, leaking it onto every artifact. Caught by an independent pre-implementation
+    audit before any code was written — don't move it into the shared function even as a
+    "simplification". It is now a small factory (`saveAsNoteButton`) so the opting-in sites share
+    one implementation without the renderer growing one of its own.
+
+    **Two sites opt in: a Chat answer (`renderTurn`) and the chat overview (`generateOverview`).**
+    The original wording justified the restriction as "generated output is not something a user
+    curates into notes" — which the product this project chases contradicts: NotebookLM's generated
+    artifacts BECOME notes, and that is how they persist at all. The line that actually holds is
+    about the SURFACE, not about who authored the text: things rendered IN the chat thread are the
+    user's to curate; a Studio tab's artifact and a podcast transcript are not part of that thread.
+    It matters most for the overview, which like every guide artifact is NOT persisted — saving it
+    as a note is the only way to keep it, and promoting it the only way to make it citable by a
+    later question. Verified live end to end: overview -> note -> `promote_note` -> a new source
+    (and, with a toy source whose summary restated it verbatim, the documented dedup no-op instead).
 
 33. **YouTube source ingestion (`parsers/youtube.py`) fetches CAPTIONS ONLY — never the video or
     audio stream.** A deliberate, user-confirmed MVP scope decision (two real technical forks —
