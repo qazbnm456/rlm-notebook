@@ -78,6 +78,12 @@ api = [
     "python-multipart>=0.0.9",
 ]
 
+# Run the planner and/or sub-LM on a Claude Pro/Max SUBSCRIPTION instead of an API key
+# (`RN_MAIN_MODEL`/`RN_SUB_MODEL` = `claude-agent-sdk/<id>`), via rlm-harness's `ClaudeAgentLM`,
+# injected by `config.setup` (CLAUDE.md invariant 35). Installs the SDK that adapter needs; it ALSO
+# needs the Claude Code CLI installed and logged in — a runtime prerequisite pip cannot express.
+subscription = ["claude-agent-sdk>=0.1.60"]
+
 [dependency-groups]
 dev = [
     "pytest>=8.0",
@@ -87,6 +93,18 @@ dev = [
     # (now-removed) AGPL runtime dependency — see CLAUDE.md invariant 7.
     "reportlab>=4",
 ]
+# A dev-group MIRROR of the `subscription` extra above. It exists because an EXTRA is not synced by
+# default: a bare `uv sync` PRUNES claude-agent-sdk back out, and the next subscription run dies with
+# ClaudeAgentLM's ImportError for no reason the operator changed. The sibling `cve-reverser` hit this
+# for real and documented the same mirror; copied rather than rediscovered.
+subscription-sdk = ["claude-agent-sdk>=0.1.60"]
+
+# Bare `uv sync` default-installs `subscription-sdk` so the SDK is never pruned from the dev venv.
+# `dev` MUST stay listed — `default-groups` REPLACES uv's built-in `["dev"]`, it does not append, so
+# omitting it would prune the test dependencies. The public pip extra is unaffected. Opt out for one
+# sync with `uv sync --no-group subscription-sdk`.
+[tool.uv]
+default-groups = ["dev", "subscription-sdk"]
 
 [project.scripts]
 rlm-notebook = "rlm_notebook.cli:main"

@@ -17,6 +17,13 @@ from dataclasses import dataclass
 #: refuses any other `RN_INTERPRETER` rather than silently overriding it).
 PINNED_INTERPRETER = "pyodide"
 
+#: Model-string prefix routing a role onto the user's Claude Pro/Max SUBSCRIPTION through
+#: rlm-harness's `ClaudeAgentLM`, instead of building a `dspy.LM` against `RN_API_KEY`/`RN_BASE_URL`.
+#: A naming convention, so it lives here in the dspy-free module; `setup()` does the actual (lazy,
+#: dspy-bearing) wiring. Same sentinel and same placement as the sibling `cve-reverser`, which
+#: shipped this pattern first — deliberately not a second spelling of the same idea.
+SUBSCRIPTION_PREFIX = "claude-agent-sdk/"
+
 #: Default cap on the assembled corpus blob (CLAUDE.md invariant 8) — a `chars`, not `tokens`,
 #: budget, matching rlm-harness's own `max_output_chars` convention. This is a memory-safety cap on the
 #: pyodide/deno sandbox, not a tuning knob; raise it only once real usage shows headroom.
@@ -201,6 +208,39 @@ def max_trace_files() -> int:
     return _env_int_allowing_zero("RN_MAX_TRACE_FILES", _DEFAULT_MAX_TRACE_FILES)
 
 
+def _maybe_subscription_lm(model: str):
+    """A `ClaudeAgentLM` when a role's model carries the `claude-agent-sdk/` sentinel, else `None`
+    (which makes `rlm_harness.configure` build a `dspy.LM` from the `RN_*` proxy config exactly as
+    before).
+
+    Imports `ClaudeAgentLM` LAZILY, inside the sentinel branch ONLY, so `import rlm_notebook.config`
+    stays free of `dspy`/`rlm_harness` (this module's docstring promises that) and an API-key install
+    that never uses the sentinel never touches the optional SDK at all. `claude-agent-sdk` is the
+    `subscription` extra; rlm-harness defers that import to construction and raises an actionable
+    install hint when it's missing.
+
+    The stripped remainder is the Claude model — prefer a full id (`claude-sonnet-5`) over an alias
+    (`sonnet`), which drifts over time.
+    """
+    if not model.startswith(SUBSCRIPTION_PREFIX):
+        return None
+    name = model[len(SUBSCRIPTION_PREFIX) :].strip()
+    if not name:
+        # A bare `claude-agent-sdk/` otherwise builds an LM with an empty model name and fails only
+        # on the FIRST CALL, deep inside the retry wrapper, as the same opaque "Failed to produce a
+        # valid 'answer'" every other run failure reports — after ingestion has already run. Refuse
+        # at config time instead, the way invariant 9 (`RN_INTERPRETER`) and `_ocr_provider_from_env`
+        # already do for their own bad values. Found by an independent review; `cve-reverser` has
+        # the identical gap, so this is a lesson the sibling had not learned either, not a mis-copy.
+        raise SystemExit(
+            f"{model!r} names no model — expected {SUBSCRIPTION_PREFIX}<id>, e.g. "
+            f"{SUBSCRIPTION_PREFIX}claude-sonnet-5 (see .env.example)."
+        )
+    from rlm_harness import ClaudeAgentLM
+
+    return ClaudeAgentLM(name)
+
+
 def setup(config: NotebookConfig) -> NotebookConfig:
     """Configure rlm-harness (main + sub LM) for this process, and return `config` unchanged.
 
@@ -208,12 +248,31 @@ def setup(config: NotebookConfig) -> NotebookConfig:
     config through `rlm_harness.runtime.get_config()` when no `config=` is passed, so without this call
     a live run would silently inherit `RLMConfig.from_env()`'s own `RLM_*` defaults rather than the
     `RN_*` values the operator set.
+
+    **A role whose model is `claude-agent-sdk/<id>` runs on the user's Claude Pro/Max SUBSCRIPTION**
+    (`ClaudeAgentLM`, injected through `configure`'s public `main_lm=`/`sub_lm=` seam); every other
+    role is built from the `RN_*` proxy config, byte-identical to before. `configure` does NOT route
+    on the prefix itself — it calls `dspy.LM(cfg.main_model)` unconditionally for any seat left
+    unsupplied — so the sentinel only works because it is injected HERE. Mixed auth (a subscription
+    planner with a proxy sub-LM, or the reverse) is supported by construction, since each role is
+    tested independently.
+
+    This is the ONE place either entry point configures a model: `cli.py` calls it in-process and
+    `worker.py` calls it inside the API's isolated subprocess, so both get the subscription path
+    from this single change.
     """
     import rlm_harness
     from rlm_harness.config import RLMConfig
 
+    # None → configure builds a dspy.LM from the RN_* proxy config (the pre-existing behavior).
+    main_lm = _maybe_subscription_lm(config.main_model)
+    sub_lm = _maybe_subscription_lm(config.sub_model)
+
     rlm_harness.configure(
         RLMConfig(
+            # Inert for a seat whose LM is injected below (`configure` builds from config ONLY for
+            # un-supplied seats), but still what labels the trace and the log — so the sentinel
+            # string, not the stripped model id, is what a reader sees attributed to the run.
             main_model=config.main_model,
             sub_model=config.sub_model,
             api_key=config.api_key,
@@ -225,6 +284,8 @@ def setup(config: NotebookConfig) -> NotebookConfig:
             max_output_chars=config.max_output_chars,
             adapter=config.adapter,
             max_retries=1,
-        )
+        ),
+        main_lm=main_lm,
+        sub_lm=sub_lm,
     )
     return config

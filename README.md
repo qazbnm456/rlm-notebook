@@ -23,6 +23,20 @@ set -a; . ./.env; set +a      # nothing auto-loads .env
 brew install deno             # the sandbox a live run executes in
 ```
 
+Instead of an API key, a role can run on your **Claude Pro/Max subscription** — prefix the model
+with `claude-agent-sdk/`:
+
+```bash
+uv sync --extra api --extra subscription   # plus the Claude Code CLI, installed and logged in
+export RN_MAIN_MODEL=claude-agent-sdk/claude-sonnet-5
+export RN_SUB_MODEL=claude-agent-sdk/claude-fable-5   # or leave unset to inherit the main model
+```
+
+No `RN_API_KEY`/`RN_BASE_URL` is used for a role on that path, and mixing is fine (one role on the
+subscription, the other on a proxy). `ClaudeAgentLM` refuses to start when `ANTHROPIC_API_KEY` is
+set, since the Claude Code CLI silently prefers it over subscription OAuth and would bill API
+credit instead. See CLAUDE.md invariant 35.
+
 ```bash
 # ask a one-off question grounded in one or more sources — nothing is saved
 uv run rlm-notebook ask "what does the source say about X?" \
