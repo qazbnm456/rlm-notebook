@@ -167,7 +167,7 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
   const stop = document.createElement("button");
   stop.type = "button";
   stop.className = "btn run-stop";
-  stop.textContent = "\u23f9 Stop";
+  stop.textContent = t("run.stop", "\u23f9 Stop");
   node.appendChild(stop);
 
   const started = Date.now();
@@ -185,7 +185,7 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 
   stop.addEventListener("click", async () => {
     stop.disabled = true;
-    text.textContent = "Stopping\u2026";
+    text.textContent = t("run.stopping", "Stopping\u2026");
     // Cancel every run this action started, not "whatever this notebook is doing" — a notebook-
     // scoped cancel would leave `/overview`'s second run burning a model call to completion.
     await Promise.all(
@@ -217,7 +217,7 @@ function renderTickerAffordance(runId) {
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "ticker-toggle trace-face";
-  toggle.textContent = `⌁ ${events.length} step${events.length === 1 ? "" : "s"}`;
+  toggle.textContent = t("err.steps", `⌁ ${events.length} step${events.length === 1 ? "" : "s"}`, { n: events.length });
 
   const detail = document.createElement("div");
   detail.className = "ticker-detail trace-face";
@@ -250,7 +250,7 @@ function renderTickerAffordance(runId) {
 // checked before writing the DOM — discards a stale response rather than an AbortController, since
 // this is a plain GET with no cleanup the browser needs told about.
 async function showCitationTurn(runId, citation, detailArea) {
-  // Clicking the SAME citation again collapses the panel, rather than blanking it to "Loading…"
+  // Clicking the SAME citation again collapses the panel, rather than blanking it to t("cite.loading", "Loading…")
   // and re-fetching the identical payload — which is what it used to do, and read as a flash with
   // nothing ever closing. (An earlier version of this comment justified the change by saying the
   // ticker affordance in this same page "already toggles on re-click". It did not — `.ticker-detail`
@@ -274,7 +274,7 @@ async function showCitationTurn(runId, citation, detailArea) {
   detailArea._requestToken = token;
   detailArea._shownKey = key;
   detailArea.hidden = false;
-  detailArea.textContent = "Loading…";
+  detailArea.textContent = t("cite.loading", "Loading…");
   try {
     const params = new URLSearchParams({ source_id: citation.source_id, locator: citation.locator });
     const data = await api(
@@ -284,7 +284,7 @@ async function showCitationTurn(runId, citation, detailArea) {
     detailArea.textContent = "";
     const note = document.createElement("div");
     note.className = "citation-detail-note";
-    note.textContent = "Where the model read this source (not proof the surrounding prose is faithful):";
+    note.textContent = t("cite.traceHead", "Where the model read this source (not proof the surrounding prose is faithful):");
     detailArea.appendChild(note);
     const pre = document.createElement("pre");
     pre.className = "citation-detail-payload trace-face";
@@ -292,7 +292,7 @@ async function showCitationTurn(runId, citation, detailArea) {
     detailArea.appendChild(pre);
   } catch (err) {
     if (detailArea._requestToken !== token) return;
-    detailArea.textContent = `(error) ${err.message}`;
+    detailArea.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
   }
 }
 
@@ -350,7 +350,7 @@ async function showSourceViewer(sourceId, locator, quote) {
   const body = document.getElementById("source-viewer-body");
   overlay.hidden = false;
   title.textContent = sourceId;
-  body.textContent = "Loading…";
+  body.textContent = t("cite.loading", "Loading…");
 
   try {
     const source = await api(
@@ -376,7 +376,7 @@ async function showSourceViewer(sourceId, locator, quote) {
     if (targetSection) targetSection.scrollIntoView({ block: "center" });
   } catch (err) {
     if (controller.signal.aborted) return;
-    body.textContent = `(error) ${err.message}`;
+    body.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
   }
 }
 
@@ -477,28 +477,75 @@ async function suggestTitle(notebookId, generation) {
 // and says which one: a form that accepts a value and then quietly loses to the env would be a UI
 // that lies, which is worse than not having the control.
 
-const _SETTING_ROWS = [
-  {
-    key: "output_language",
-    label: "Output language",
-    placeholder: "e.g. Traditional Chinese",
-    help: "Leave empty to let each notebook resolve its own from your browser, its sources and your questions.",
-  },
-  {
-    key: "tts_voice_host_a",
-    label: "Podcast voice — host A",
-    placeholder: "e.g. zh-TW-YunJheNeural or host-a",
+// A FUNCTION, not a module-level const: the labels go through `t()`, and a const would freeze
+// whatever language was active when the script loaded.
+function settingRows() {
+  const voiceHelp = t(
+    "settings.voiceHelp",
+    "Leave empty for the provider's default: edge-tts follows the notebook's language, chatterbox uses its shipped host-a / host-b voices."
+  );
+  return [
+    {
+      key: "output_language",
+      label: t("settings.outputLanguage", "Output language"),
+      placeholder: t("settings.outputLanguagePlaceholder", "e.g. Traditional Chinese"),
+      help: t(
+        "settings.outputLanguageHelp",
+        "Leave empty to let each notebook resolve its own from your browser, its sources and your questions."
+      ),
+    },
     // Provider-aware on purpose: with chatterbox `default_voices` returns null for EVERY language,
     // so "empty" means its two shipped clips, not "follow the language" (invariant 43).
-    help: "Leave empty for the provider's default: edge-tts follows the notebook's language, chatterbox uses its shipped host-a / host-b voices.",
-  },
-  {
-    key: "tts_voice_host_b",
-    label: "Podcast voice — host B",
-    placeholder: "e.g. zh-TW-HsiaoChenNeural or host-b",
-    help: "Leave empty for the provider's default: edge-tts follows the notebook's language, chatterbox uses its shipped host-a / host-b voices.",
-  },
-];
+    {
+      key: "tts_voice_host_a",
+      label: t("settings.voiceA", "Podcast voice — host A"),
+      placeholder: "e.g. zh-TW-YunJheNeural or host-a",
+      help: voiceHelp,
+    },
+    {
+      key: "tts_voice_host_b",
+      label: t("settings.voiceB", "Podcast voice — host B"),
+      placeholder: "e.g. zh-TW-HsiaoChenNeural or host-b",
+      help: voiceHelp,
+    },
+  ];
+}
+
+// The INTERFACE language row. Client-side only — it never reaches the server, because it is not a
+// server setting: `RN_OUTPUT_LANGUAGE` decides what the MODEL writes, this decides what the buttons
+// say, and a reader who wants a Chinese interface over English papers needs both to be expressible.
+function renderUiLanguageRow(body) {
+  const wrap = document.createElement("div");
+  wrap.className = "setting-row";
+
+  const label = document.createElement("label");
+  label.textContent = t("settings.uiLanguage", "Interface language");
+  label.htmlFor = "setting-ui-language";
+  wrap.appendChild(label);
+
+  const select = document.createElement("select");
+  select.id = "setting-ui-language";
+  const current = uiLang();
+  UI_LANGUAGES.forEach((lang) => {
+    const option = document.createElement("option");
+    option.value = lang.code;
+    option.textContent = lang.label;
+    option.selected = lang.code === current;
+    select.appendChild(option);
+  });
+  select.addEventListener("change", () => setUiLang(select.value));
+  wrap.appendChild(select);
+
+  const help = document.createElement("div");
+  help.className = "setting-help";
+  help.textContent = t(
+    "settings.uiLanguageHelp",
+    "Only affects the text on this screen, never what the model writes."
+  );
+  wrap.appendChild(help);
+
+  body.appendChild(wrap);
+}
 
 function renderSettings(state_) {
   const body = document.getElementById("settings-body");
@@ -515,7 +562,9 @@ function renderSettings(state_) {
   }
 
   const inputs = new Map();
-  _SETTING_ROWS.forEach((row) => {
+  renderUiLanguageRow(body);
+
+  settingRows().forEach((row) => {
     const entry = state_[row.key] || { value: null, source: "default", env_var: "" };
     const wrap = document.createElement("div");
     wrap.className = "setting-row";
@@ -549,7 +598,7 @@ function renderSettings(state_) {
   const save = document.createElement("button");
   save.type = "button";
   save.className = "btn btn-primary";
-  save.textContent = "Save";
+  save.textContent = t("settings.save", "Save");
   save.addEventListener("click", async () => {
     save.disabled = true;
     const payload = {};
@@ -563,7 +612,7 @@ function renderSettings(state_) {
         body: JSON.stringify(payload),
       }));
     } catch (err) {
-      alert(`Could not save settings: ${err.message}`);
+      alert(t("settings.saveFailed", `Could not save settings: ${err.message}`, { message: err.message }));
     } finally {
       save.disabled = false;
     }
@@ -580,11 +629,11 @@ function initSettings() {
   document.getElementById("settings-open").addEventListener("click", async () => {
     closeSourceViewer(); // one overlay at a time — both carry z-index 1000, so DOM order would decide
     overlay.hidden = false;
-    document.getElementById("settings-body").textContent = "Loading…";
+    document.getElementById("settings-body").textContent = t("cite.loading", "Loading…");
     try {
       renderSettings(await api("/settings"));
     } catch (err) {
-      document.getElementById("settings-body").textContent = `(error) ${err.message}`;
+      document.getElementById("settings-body").textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
     }
   });
   document.getElementById("settings-close").addEventListener("click", close);
@@ -765,7 +814,7 @@ function initSourcesPanel() {
       store.emit("notebook:titled", { title: state.title, notebookId: state.notebookId });
       if (isFirstSource) void suggestTitle(state.notebookId, notebookGeneration);
     } catch (err) {
-      alert(`Could not add source: ${err.message}`);
+      alert(t("err.addSource", `Could not add source: ${err.message}`, { message: err.message }));
     } finally {
       submitBtn.disabled = false;
     }
@@ -810,7 +859,7 @@ function saveAsNoteButton(text) {
   const btn = document.createElement("button");
   btn.type = "button";
   btn.className = "btn save-as-note";
-  btn.textContent = "+ Save as note";
+  btn.textContent = t("chat.saveAsNote", "+ Save as note");
   btn.title =
     "Keep a copy in Notes (Studio, right). A note can later be PROMOTED into a source, which is "
     + "what makes it citable by a later question.";
@@ -819,7 +868,7 @@ function saveAsNoteButton(text) {
     const original = btn.textContent;
     try {
       await addNote(text);
-      btn.textContent = "\u2713 Saved";
+      btn.textContent = t("chat.saved", "\u2713 Saved");
     } finally {
       setTimeout(() => {
         btn.textContent = original;
@@ -890,7 +939,7 @@ function renderAnswerWithCitations(text, citations, runId) {
         const trace = document.createElement("button");
         trace.type = "button";
         trace.className = "citation-row-trace";
-        trace.textContent = "⌁ trace";
+        trace.textContent = t("cite.trace", "⌁ trace");
         trace.addEventListener("click", (event) => {
           event.stopPropagation();
           showCitationTurn(runId, citation, detailArea);
@@ -973,13 +1022,15 @@ function renderChatOverview() {
 
   const overview = state.overview;
   if (!overview) {
-    el.appendChild(overviewStarter("\u2728 Generate overview", "\u2026or just ask a question below."));
+    el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Generate overview"), t("chat.orJustAsk", "\u2026or just ask a question below.")));
     return;
   }
 
   const head = document.createElement("div");
   head.className = "chat-overview-head";
-  head.textContent = overview.stale ? "Overview \u00b7 sources have changed since this" : "Overview";
+  head.textContent = overview.stale
+    ? t("chat.overviewStale", "Overview \u00b7 sources have changed since this")
+    : t("chat.overview", "Overview");
   el.appendChild(head);
 
   el.appendChild(renderAnswerWithCitations(overview.text, overview.citations || [], overview.run_id));
@@ -993,13 +1044,13 @@ function renderChatOverview() {
   if (overview.starter_questions && overview.starter_questions.length) {
     const label = document.createElement("div");
     label.className = "chat-overview-head";
-    label.textContent = "Start with";
+    label.textContent = t("chat.startWith", "Start with");
     el.appendChild(label);
     el.appendChild(starterQuestionRow(overview.starter_questions));
   }
 
   if (overview.stale) {
-    el.appendChild(overviewStarter("\u21bb Regenerate overview", ""));
+    el.appendChild(overviewStarter(t("chat.regenerateOverview", "\u21bb Regenerate overview"), ""));
   }
 }
 
@@ -1068,7 +1119,7 @@ async function generateOverview() {
   const status = runStatus({
     notebookId,
     runIds: [`${base}-summary`, `${base}-faq`],
-    label: "Reading your sources\u2026",
+    label: t("chat.readingSources", "Reading your sources\u2026"),
     onCancel: () => {
       cancelled = true;
       overviewToken += 1; // strand this generation's own response
@@ -1107,9 +1158,9 @@ async function generateOverview() {
     }
     el.textContent = "";
     const note = document.createElement("div");
-    note.textContent = `(could not generate an overview: ${err.message})`;
+    note.textContent = t("chat.overviewFailed", `(could not generate an overview: ${err.message})`, { message: err.message });
     el.appendChild(note);
-    el.appendChild(overviewStarter("\u21bb Try again", ""));
+    el.appendChild(overviewStarter(t("chat.tryAgain", "\u21bb Try again"), ""));
   }
 }
 
@@ -1119,9 +1170,9 @@ function supersededNote(el) {
   el.textContent = "";
   const note = document.createElement("div");
   note.className = "empty-note";
-  note.textContent = "That overview was superseded by a newer one.";
+  note.textContent = t("chat.overviewSuperseded", "That overview was superseded by a newer one.");
   el.appendChild(note);
-  el.appendChild(overviewStarter("\u2728 Generate overview", ""));
+  el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Generate overview"), ""));
 }
 
 function initChatPanel() {
@@ -1164,7 +1215,7 @@ function initChatPanel() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.notebookId) {
-      alert("Open or name a notebook first.");
+      alert(t("err.openNotebookFirst", "Open or name a notebook first."));
       return;
     }
     const question = input.value.trim();
@@ -1189,14 +1240,14 @@ function initChatPanel() {
     const status = runStatus({
       notebookId: askedNotebookId,
       runIds: [runId],
-      label: "Thinking\u2026",
+      label: t("chat.thinking", "Thinking\u2026"),
       onCancel: () => {
         cancelled = true;
         store.emit("chat:pending", { pending: false });
         const row = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
         if (row) {
           row.classList.remove("is-pending");
-          row.textContent = "(stopped)";
+          row.textContent = t("chat.stopped", "(stopped)");
         }
       },
     });
@@ -1232,7 +1283,7 @@ function initChatPanel() {
       status.finish();
       if (cancelled) return;
       pendingTurn.pending = false;
-      pendingTurn.answer = `(error) ${err.message}`;
+      pendingTurn.answer = t("err.generic", `(error) ${err.message}`, { message: err.message });
       pendingTurn.citations = [];
       history.innerHTML = "";
       history.appendChild(empty);
@@ -1263,7 +1314,7 @@ function renderGuideContent(kind, data, runId) {
 
   if (kind === "faq") {
     if (!data.items || !data.items.length) {
-      container.textContent = "(no FAQ items — the sources didn't produce enough to ask about)";
+      container.textContent = t("studio.noFaq", "(no FAQ items — the sources didn't produce enough to ask about)");
       return container;
     }
     data.items.forEach((item) => {
@@ -1281,7 +1332,7 @@ function renderGuideContent(kind, data, runId) {
 
   // "timeline"
   if (!data.events || !data.events.length) {
-    container.textContent = "(no timeline events — the sources didn't produce enough to place in time)";
+    container.textContent = t("studio.noTimeline", "(no timeline events — the sources didn't produce enough to place in time)");
     return container;
   }
   data.events.forEach((event) => {
@@ -1307,12 +1358,20 @@ const GUIDE_LABELS = {
   insight: "key insight",
 };
 
+function guideLabel(kind) {
+  return t(`studio.kind.${kind}`, GUIDE_LABELS[kind] || kind);
+}
+
 const GUIDE_HINTS = {
   summary: "A few paragraphs covering what all your sources say, with citations you can check.",
   faq: "The questions your sources actually answer, each with its answer and a citation.",
   timeline: "Dated events pulled out of your sources and put in order.",
   insight: "The single most important takeaway, in one sentence.",
 };
+
+function guideHint(kind) {
+  return t(`studio.tip.${kind}`, GUIDE_HINTS[kind] || "");
+}
 
 function initStudioPanel() {
   const tabs = document.querySelectorAll("#guide-tabs .tab");
@@ -1354,7 +1413,7 @@ function initStudioPanel() {
     const status = runStatus({
       notebookId: state.notebookId,
       runIds: [runId],
-      label: `Generating the ${GUIDE_LABELS[kind] || kind}\u2026`,
+      label: t("studio.generating", `Generating the ${guideLabel(kind)}\u2026`, { kind: guideLabel(kind) }),
       onCancel: () => {
         cancelled = true;
         body.classList.remove("is-pending");
@@ -1379,7 +1438,7 @@ function initStudioPanel() {
       status.finish();
       if (cancelled) return;
       body.classList.remove("is-pending");
-      body.textContent = `(error) ${err.message}`;
+      body.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
     }
   }
 
@@ -1397,7 +1456,7 @@ function initStudioPanel() {
     if (!state.notebookId || !state.sources.length) {
       const note = document.createElement("p");
       note.className = "empty-note";
-      note.textContent = "Add a source first, then generate this.";
+      note.textContent = t("studio.addSourceFirst", "Add a source first, then generate this.");
       body.appendChild(note);
       return;
     }
@@ -1406,12 +1465,12 @@ function initStudioPanel() {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "btn btn-primary";
-    btn.textContent = `\u2728 Generate ${GUIDE_LABELS[kind] || kind}`;
+    btn.textContent = t("studio.generate", `\u2728 Generate ${guideLabel(kind)}`, { kind: guideLabel(kind) });
     btn.addEventListener("click", () => fetchKind(kind));
     offer.appendChild(btn);
     const hint = document.createElement("p");
     hint.className = "empty-note";
-    hint.textContent = GUIDE_HINTS[kind] || "";
+    hint.textContent = guideHint(kind);
     offer.appendChild(hint);
     body.appendChild(offer);
   }
@@ -1512,7 +1571,7 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
   if (stale) {
     const note = document.createElement("div");
     note.className = "chat-overview-head";
-    note.textContent = "Audio Overview · sources have changed since this";
+    note.textContent = t("podcast.stale", "Podcast · sources have changed since this");
     body.appendChild(note);
   }
 
@@ -1536,7 +1595,9 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
   // found this listed among invariant 43's "handled" consequences when it was not.
   const ext = (suffix || "").replace(/^\./, "");
   download.download = ext ? `${stem || "notebook"}.${ext}` : stem || "notebook";
-  download.textContent = ext ? `\u2913 Download ${ext}` : "\u2913 Download audio";
+  download.textContent = ext
+    ? t("podcast.download", `\u2913 Download ${ext}`, { ext })
+    : t("podcast.downloadPlain", "\u2913 Download audio");
   body.appendChild(download);
 
   if (runId && tickerLogs.has(runId)) body.appendChild(renderTickerAffordance(runId));
@@ -1637,7 +1698,7 @@ function initPodcastPlayer() {
 
   generateBtn.addEventListener("click", async () => {
     if (!state.notebookId) {
-      alert("Open or name a notebook first.");
+      alert(t("err.openNotebookFirst", "Open or name a notebook first."));
       return;
     }
     generateBtn.disabled = true;
@@ -1650,7 +1711,7 @@ function initPodcastPlayer() {
     const status = runStatus({
       notebookId: state.notebookId,
       runIds: [runId],
-      label: "Writing the script\u2026",
+      label: t("podcast.writing", "Writing the script\u2026"),
       onCancel: () => {
         cancelled = true;
         body.classList.remove("is-pending");
@@ -1673,7 +1734,7 @@ function initPodcastPlayer() {
       body.innerHTML = "";
 
       if (!data.utterances.length) {
-        body.textContent = "(no podcast script — the sources didn't produce enough to discuss)";
+        body.textContent = t("podcast.empty", "(no podcast script — the sources didn't produce enough to discuss)");
         return;
       }
 
@@ -1698,7 +1759,7 @@ function initPodcastPlayer() {
       if (cancelled) return;
       body.classList.remove("is-pending");
       body.innerHTML = "";
-      body.textContent = `(error) ${err.message}`;
+      body.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
     } finally {
       generateBtn.disabled = false;
     }
@@ -1735,7 +1796,7 @@ function renderNoteItem(note) {
   const promoteBtn = document.createElement("button");
   promoteBtn.type = "button";
   promoteBtn.className = "btn note-promote";
-  promoteBtn.textContent = "→ Promote to source";
+  promoteBtn.textContent = t("notes.promote", "→ Promote to source");
   promoteBtn.title =
     "Turn this note into a real source. Only then can a later question cite it — a note on its own "
     + "is just text, with no citations of its own.";
@@ -1751,7 +1812,7 @@ function renderNoteItem(note) {
       store.emit("sources:changed", { sources: state.sources });
       store.emit("notes:changed", { notes: state.notes });
     } catch (err) {
-      alert(`Could not promote note: ${err.message}`);
+      alert(t("err.promoteNote", `Could not promote note: ${err.message}`, { message: err.message }));
       promoteBtn.disabled = false;
     }
   });
@@ -1771,7 +1832,7 @@ function renderNoteItem(note) {
       state.notes = notebook.notes;
       store.emit("notes:changed", { notes: state.notes });
     } catch (err) {
-      alert(`Could not delete note: ${err.message}`);
+      alert(t("err.deleteNote", `Could not delete note: ${err.message}`, { message: err.message }));
       deleteBtn.disabled = false;
     }
   });
@@ -1792,7 +1853,7 @@ async function addNote(text) {
     state.notes = notebook.notes;
     store.emit("notes:changed", { notes: state.notes });
   } catch (err) {
-    alert(`Could not save note: ${err.message}`);
+    alert(t("err.saveNote", `Could not save note: ${err.message}`, { message: err.message }));
   }
 }
 
@@ -1801,7 +1862,7 @@ function initNotesPanel() {
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     if (!state.notebookId) {
-      alert("Open or name a notebook first.");
+      alert(t("err.openNotebookFirst", "Open or name a notebook first."));
       return;
     }
     const input = document.getElementById("note-text");
@@ -1827,6 +1888,25 @@ function initNotesPanel() {
 }
 
 // --- Boot -------------------------------------------------------------------------------------
+
+// Static markup FIRST, before any panel renders: every `init*` below writes copy of its own, and a
+// panel that rendered against the English strings would keep them until something re-rendered it.
+document.documentElement.lang = uiLang();
+applyStaticI18n();
+
+// A language change re-applies the static markup (in `setUiLang`) and re-renders every panel that
+// holds generated copy. Cheaper and far less error-prone than threading a language argument through
+// each renderer — and it means a renderer added later is translated by construction rather than by
+// somebody remembering to subscribe.
+window.addEventListener("ui-lang-changed", () => {
+  renderChatOverview();
+  store.emit("sources:changed", { sources: state.sources });
+  store.emit("notes:changed", { notes: state.notes });
+  const settingsOverlay = document.getElementById("settings-overlay");
+  if (settingsOverlay && !settingsOverlay.hidden) {
+    document.getElementById("settings-open").click();
+  }
+});
 
 initTheme();
 initSettings();

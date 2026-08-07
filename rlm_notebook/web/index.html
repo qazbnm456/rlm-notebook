@@ -5,7 +5,7 @@
 
 <div class="layout">
   <header class="header">
-    <button type="button" id="new-notebook" class="wordmark" aria-label="Start a new notebook" title="Start a new notebook">rlm-notebook</button>
+    <button type="button" id="new-notebook" class="wordmark" aria-label="Start a new notebook" data-i18n-title="app.newNotebook" title="Start a new notebook">rlm-notebook</button>
 
     <div class="notebook-title" id="notebook-title" hidden></div>
 
@@ -15,16 +15,17 @@
         class="notebook-input"
         list="notebook-list"
         placeholder="notebook id…"
+        data-i18n-placeholder="app.notebookIdPlaceholder"
         autocomplete="off"
       />
       <datalist id="notebook-list"></datalist>
-      <button id="notebook-open" class="btn btn-primary">Open</button>
+      <button id="notebook-open" class="btn btn-primary" data-i18n="app.open">Open</button>
     </div>
 
     <div class="header-actions">
-    <button id="settings-open" class="header-btn" title="Settings" aria-label="Settings">⚙</button>
+    <button id="settings-open" class="header-btn" data-i18n-title="app.settings" title="Settings" aria-label="Settings">⚙</button>
 
-    <button id="theme-toggle" class="header-btn" title="Toggle Paper / Study theme" aria-label="Toggle theme">
+    <button id="theme-toggle" class="header-btn" data-i18n-title="app.theme" title="Toggle Paper / Study theme" aria-label="Toggle theme">
       ☀
     </button>
     </div>
@@ -32,93 +33,90 @@
 
   <main class="cols" id="cols">
     <section class="col col-sources" id="col-sources">
-      <div class="panel-head">Sources</div>
+      <div class="panel-head" data-i18n="sources.head">Sources</div>
 
       <form id="add-source-form" class="add-source">
         <div class="tabs" id="source-kind-tabs">
-          <button type="button" class="tab is-active" data-kind="url">URL</button>
-          <button type="button" class="tab" data-kind="text">Paste text</button>
-          <button type="button" class="tab" data-kind="file">File</button>
+          <button type="button" class="tab is-active" data-kind="url" data-i18n="sources.tab.url">URL</button>
+          <button type="button" class="tab" data-kind="text" data-i18n="sources.tab.text">Paste text</button>
+          <button type="button" class="tab" data-kind="file" data-i18n="sources.tab.file">File</button>
         </div>
 
         <div class="tab-body" data-kind-body="url">
           <input type="url" id="source-url" placeholder="https://…" />
-          <p class="hint">A web page, or a YouTube link — captions only, never the video/audio itself.</p>
+          <p class="hint" data-i18n="sources.url.hint">A web page, or a YouTube link — captions only, never the video/audio itself.</p>
         </div>
         <div class="tab-body" data-kind-body="text" hidden>
-          <textarea id="source-text" rows="4" placeholder="Paste text to ingest…"></textarea>
+          <textarea id="source-text" rows="4" placeholder="Paste text to ingest…" data-i18n-placeholder="sources.text.placeholder"></textarea>
         </div>
         <div class="tab-body" data-kind-body="file" hidden>
           <input type="file" id="source-file" accept=".pdf,.txt,.md" />
-          <p class="hint">PDF, TXT, or Markdown — one file per upload.</p>
+          <p class="hint" data-i18n="sources.file.hint">PDF, TXT, or Markdown — one file per upload.</p>
         </div>
 
-        <button type="submit" class="btn btn-primary btn-block">Add source</button>
+        <button type="submit" class="btn btn-primary btn-block" data-i18n="sources.add">Add source</button>
       </form>
 
       <ul class="source-list" id="source-list"></ul>
-      <p class="empty-note" id="sources-empty">No sources yet. Add one above.</p>
+      <p class="empty-note" id="sources-empty" data-i18n="sources.empty">No sources yet. Add one above.</p>
     </section>
 
     <section class="col col-chat" id="col-chat">
-      <div class="panel-head">Chat</div>
+      <div class="panel-head" data-i18n="chat.head">Chat</div>
 
       <!-- The overview lives ABOVE the history list, not inside it: `ask` rebuilds #chat-history
            wholesale from state.turns after every answer, which would wipe anything else in there. -->
       <div class="chat-overview" id="chat-overview" hidden></div>
 
       <div class="chat-history" id="chat-history">
-        <p class="empty-note" id="chat-empty">Ask a question once you've added a source.</p>
+        <p class="empty-note" id="chat-empty" data-i18n="chat.empty">Ask a question once you've added a source.</p>
       </div>
 
       <form id="ask-form" class="ask-form">
-        <textarea id="ask-input" rows="2" placeholder="Ask a grounded question…"></textarea>
-        <button type="submit" class="btn btn-primary" id="ask-submit">Ask</button>
+        <textarea id="ask-input" rows="2" placeholder="Ask a grounded question…" data-i18n-placeholder="chat.placeholder"></textarea>
+        <button type="submit" class="btn btn-primary" id="ask-submit" data-i18n="chat.ask">Ask</button>
       </form>
     </section>
 
     <section class="col col-studio" id="col-studio">
-      <div class="panel-head">Studio</div>
-      <p class="panel-sub">Things made FROM your sources. Nothing here runs until you ask it to.</p>
+      <div class="panel-head" data-i18n="studio.head">Studio</div>
+      <p class="panel-sub" data-i18n="studio.sub">Things made FROM your sources. Nothing here runs until you ask it to.</p>
 
       <!-- Every tab explains itself on hover rather than spending rail space on a paragraph — the
            same `title=` treatment `toolscout`/`cve-reverser` use for their own controls. -->
       <div class="guide-tabs" id="guide-tabs">
-        <button type="button" class="tab is-active" data-guide-kind="summary"
+        <button type="button" class="tab is-active" data-i18n="studio.tab.summary" data-i18n-title="studio.tip.summary" data-guide-kind="summary"
                 title="A few paragraphs covering what all your sources say, with citations you can check.">Summary</button>
-        <button type="button" class="tab" data-guide-kind="faq"
+        <button type="button" class="tab" data-i18n="studio.tab.faq" data-i18n-title="studio.tip.faq" data-guide-kind="faq"
                 title="The questions your sources actually answer, each with its answer and a citation.">FAQ</button>
-        <button type="button" class="tab" data-guide-kind="timeline"
+        <button type="button" class="tab" data-i18n="studio.tab.timeline" data-i18n-title="studio.tip.timeline" data-guide-kind="timeline"
                 title="Dated events pulled out of your sources and put in order.">Timeline</button>
-        <button type="button" class="tab" data-guide-kind="insight"
+        <button type="button" class="tab" data-i18n="studio.tab.insight" data-i18n-title="studio.tip.insight" data-guide-kind="insight"
                 title="The single most important takeaway, in one sentence.">Insight</button>
       </div>
       <button type="button" class="btn guide-regenerate" id="guide-regenerate"
+              data-i18n="studio.regenerate" data-i18n-title="studio.regenerateTip"
               title="Run this one again from your current sources.">↻ Regenerate</button>
       <div class="guide-body" id="guide-body"></div>
 
       <div class="podcast-section">
-        <div class="panel-head">Podcast</div>
-        <p class="panel-sub">Two hosts discuss your sources, as an episode you can play or download.</p>
+        <div class="panel-head" data-i18n="podcast.head">Podcast</div>
+        <p class="panel-sub" data-i18n="podcast.sub">Two hosts discuss your sources, as an episode you can play or download.</p>
         <button type="button" class="btn btn-primary btn-block" id="podcast-generate"
-                title="Writes a two-host script grounded in your sources, then speaks it. The slowest thing here.">
-          Generate podcast
-        </button>
+                data-i18n="podcast.generate" data-i18n-title="podcast.generateTip"
+                title="Writes a two-host script grounded in your sources, then speaks it. The slowest thing here.">Generate podcast</button>
         <div class="podcast-body" id="podcast-body"></div>
       </div>
 
       <div class="notes-section">
-        <div class="panel-head">Notes</div>
-        <p class="panel-sub">
-          Your own scratchpad. Save an answer from Chat with <b>+ Save as note</b>, then
-          <b>promote</b> a note to turn it into a source later questions can cite.
-        </p>
+        <div class="panel-head" data-i18n="notes.head">Notes</div>
+        <p class="panel-sub" data-i18n="notes.sub">Your own scratchpad. Save an answer from Chat with "+ Save as note", then promote a note to turn it into a source later questions can cite.</p>
         <form id="add-note-form" class="add-note">
-          <textarea id="note-text" rows="3" placeholder="Write a note…"></textarea>
-          <button type="submit" class="btn btn-primary btn-block">Add note</button>
+          <textarea id="note-text" rows="3" placeholder="Write a note…" data-i18n-placeholder="notes.placeholder"></textarea>
+          <button type="submit" class="btn btn-primary btn-block" data-i18n="notes.add">Add note</button>
         </form>
         <ul class="note-list" id="note-list"></ul>
-        <p class="empty-note" id="notes-empty">No notes yet.</p>
+        <p class="empty-note" id="notes-empty" data-i18n="notes.empty">No notes yet.</p>
       </div>
     </section>
   </main>
@@ -130,7 +128,7 @@
   <div class="modal-overlay" id="settings-overlay" hidden>
     <div class="modal" role="dialog" aria-modal="true" aria-labelledby="settings-title">
       <div class="modal-head">
-        <div id="settings-title" class="modal-title">Settings</div>
+        <div id="settings-title" class="modal-title" data-i18n="settings.head">Settings</div>
         <button type="button" class="modal-close" id="settings-close" aria-label="Close">✕</button>
       </div>
       <div class="modal-body" id="settings-body"></div>
@@ -148,4 +146,5 @@
   </div>
 </div>
 
+<script src="/i18n.js"></script>
 <script src="/app.js"></script>

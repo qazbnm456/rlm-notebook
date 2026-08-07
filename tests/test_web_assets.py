@@ -232,3 +232,74 @@ def test_the_studio_panels_say_what_they_are_for():
         tab = html[html.index(marker) : html.index(">", html.index(marker))]
         assert "title=" in tab or "title=" in html[html.index(marker) - 200 : html.index(marker)], kind
 
+
+def _i18n_keys():
+    """Every key the zh-Hant table defines, from the source rather than by running JS."""
+    src = (WEB / "i18n.js").read_text(encoding="utf-8")
+    start = src.index('"zh-Hant": {')
+    depth, i = 0, src.index("{", start)
+    for j in range(i, len(src)):
+        if src[j] == "{":
+            depth += 1
+        elif src[j] == "}":
+            depth -= 1
+            if depth == 0:
+                break
+    table = src[i : j + 1]
+    return set(re.findall(r'^\s*"([\w.]+)":', table, re.MULTILINE))
+
+
+def test_every_translation_key_used_by_the_ui_exists_in_the_table():
+    """A typo'd key is invisible at runtime — `t()` falls back to the English text and the interface
+    silently stays half-translated. This is the only place that can catch it, since this project has
+    no JS test runner (invariant 29)."""
+    defined = _i18n_keys()
+    assert len(defined) > 60, len(defined)
+
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    used = set(re.findall(r'data-i18n(?:-title|-placeholder|-html)?="([\w.]+)"', html))
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    # `\b` matters: without it this also matches the tail of `createElement("div")`.
+    used |= set(re.findall(r'\bt\(\s*"([\w.]+)"', js))
+    # Template-literal keys (`studio.kind.${kind}`) are checked by their known expansions instead.
+    for kind in ("summary", "faq", "timeline", "insight"):
+        used |= {f"studio.kind.{kind}", f"studio.tip.{kind}"}
+
+    missing = sorted(used - defined)
+    assert not missing, f"used but not translated: {missing}"
+
+
+def test_every_t_call_passes_an_english_fallback():
+    """`STRINGS.en` is deliberately EMPTY: the English UI is whatever the markup and the code
+    already say, so it can never drift out of sync with a translation table nobody updated. That
+    only works if every call site carries its own fallback — a bare `t("key")` would render the KEY
+    to an English reader."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    bare = re.findall(r'\bt\(\s*"[\w.]+"\s*\)', js)
+    assert not bare, bare
+
+
+def test_the_interface_language_is_separate_from_the_output_language():
+    """Two different questions: what the MODEL writes (invariant 39, a server setting) and what the
+    BUTTONS say (this, a browser preference). Folding them together would make "Chinese interface
+    over English papers" unexpressible, and would put a UI preference into a prompt."""
+    raw = (WEB / "i18n.js").read_text(encoding="utf-8")
+    # Comments stripped: this file EXPLAINS the separation, so it names the server setting in prose.
+    # The assertion is about the code.
+    i18n = "\n".join(
+        line for line in raw.splitlines() if not line.lstrip().startswith("//")
+    )
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+    # The UI language lives in localStorage and is never sent anywhere.
+    assert "localStorage" in i18n
+    assert "RN_OUTPUT_LANGUAGE" not in i18n
+    assert "output_language" not in i18n
+    # ...and the settings PUT body carries only the server settings, never the UI language.
+    assert "setting-ui-language" in app
+    put = app[app.index("function initSettings()") :]
+    assert "ui_language" not in put
+
+    # Simplified Chinese must NOT resolve to the Traditional table: shipping Traditional text to a
+    # Simplified reader is worse than leaving it in English.
+    assert "hant|tw|hk|mo" in raw
+

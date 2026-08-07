@@ -1157,3 +1157,20 @@ input:focus {
   font-weight: 600;
 }
 
+/* The settings page's one non-text control (interface language). Matches the text inputs beside it
+   rather than inheriting the UA's own select chrome, which looks foreign on both themes. */
+.setting-row select {
+  width: 100%;
+  padding: 0.5em 0.6em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  color: var(--text);
+  font: inherit;
+}
+
+.setting-row select:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+

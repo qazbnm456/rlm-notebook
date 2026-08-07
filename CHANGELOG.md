@@ -1285,6 +1285,20 @@ questions with verifiable citations, and get a distilled research artifact out.
   configured provider, and the CLI corrects its default extension only when the user did not choose
   the path themselves.
 
+- **A Traditional Chinese interface.** Batch two of the UX pass.
+
+  Kept SEPARATE from the notebook's output language, which is a server setting deciding what the
+  model writes. This one is a browser preference deciding what the buttons say — a reader may well
+  want a Chinese interface over English papers, and folding the two together makes that
+  unexpressible. It lives in `localStorage`, never reaches the server, and never reaches a prompt.
+  Detected from the browser, switchable in Settings.
+
+  The English table is deliberately empty: English is whatever the markup and the code already say,
+  with every call site carrying its own fallback, so there is no second copy to drift. Two tripwires
+  guard the parts that fail silently — a key used but not translated (the interface would just stay
+  half-English) and a call with no English fallback (an English reader would see the key).
+  Simplified Chinese deliberately does not resolve to the Traditional table.
+
 - **A UX pass over the whole product surface, from a user's list of seven.** Batch one of three.
 
   **"Pressed generate, it said Finished, then nothing appeared."** Reproduced as a design fault

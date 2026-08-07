@@ -1615,4 +1615,28 @@ them exist because an earlier design discussion mentioned them.
     has no JS test runner (invariant 29): no tab-click path to `fetchKind`, four `runStatus` mounts,
     cancellation by run id, both overview halves cancelled, and every panel carrying its sentence.
 
+48. **The INTERFACE language (`web/i18n.js`) is a browser preference, deliberately separate from
+    the OUTPUT language (invariant 39, a server setting).** One decides what the buttons say, the
+    other what the model writes. A reader in Taiwan may well want a Chinese interface over English
+    papers, and folding the two together makes that combination unexpressible — so the UI language
+    lives in `localStorage`, is never sent to the server, and never reaches a prompt. The settings
+    page carries both, on separate rows, saying which is which. A test pins the separation.
+
+    **`STRINGS.en` is EMPTY on purpose.** English is whatever `index.html` and `app.js` already say:
+    static markup carries `data-i18n` / `-title` / `-placeholder` and keeps its own text as the
+    fallback, and every `t(key, fallback)` call passes its English at the call site. There is
+    therefore no English table to drift out of sync with a translation nobody updated — and a
+    tripwire fails the build on a bare `t("key")`, which would render the KEY to an English reader.
+    A second tripwire fails on a key used but not translated, because a typo is otherwise invisible:
+    `t()` falls back and the interface silently stays half-English.
+
+    **`zh-CN`/`zh-Hans` deliberately does NOT resolve to the Traditional table** — shipping
+    Traditional text to a Simplified reader is worse than leaving it in English. Detection is
+    `localStorage` → `navigator.languages` → English.
+
+    **A language change re-renders, rather than threading a language argument through every
+    renderer.** `setUiLang` re-applies the static markup and dispatches `ui-lang-changed`; the boot
+    handler re-runs the panel renders. A renderer added later is translated by construction instead
+    of by somebody remembering to subscribe.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.
