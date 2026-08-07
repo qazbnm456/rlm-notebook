@@ -61,6 +61,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import os
@@ -829,6 +830,36 @@ class AskResponse(BaseModel):
     citations: list[CitationResponse]
 
 
+@contextlib.contextmanager
+def _announced(*run_ids: str):
+    """Mark run ids as COMING before any pre-work, so a client that opened its ticker first keeps
+    waiting instead of concluding the run does not exist.
+
+    A user reported `no run '…-summary' found` the moment they generated an overview on a BRAND-NEW
+    notebook, and it reproduced first try. The window is not the one invariant 29 already closed
+    (between the exclusive-create and the `_RUN_PROCESSES` registration a few lines later) — it is
+    much larger and sits BEFORE the exclusive-create happens at all: every one of these handlers
+    calls `_resolve_language` first, which is a real model round trip in its own subprocess. On a
+    new notebook `output_language` is by definition unresolved, so that call always happens, always
+    takes longer than `_TRACE_FILE_WAIT_GRACE`, and the ticker gave up while the language run was
+    still going. `traces/…-lang.jsonl` sitting beside the summary trace afterwards is the fingerprint.
+
+    Reuses `_RUN_PROCESSES` rather than adding a second registry: `stream_run` already reads it as
+    "is anything still going to write this file", which is exactly the question. `setdefault` so an
+    id `_run_isolated` has already claimed is never downgraded, and the release only removes an id
+    still sitting at the `None` placeholder — a spawned run belongs to `_run_isolated`'s own
+    `finally`.
+    """
+    for run_id in run_ids:
+        _RUN_PROCESSES.setdefault(run_id, None)
+    try:
+        yield
+    finally:
+        for run_id in run_ids:
+            if _RUN_PROCESSES.get(run_id) is None:
+                _RUN_PROCESSES.pop(run_id, None)
+
+
 def _derive_run_id(notebook_id: str, client_token: str | None) -> str:
     """The run id THIS call will use. A client-supplied token is sanitized through the same
     whitelist `notebook.slug()` already uses for notebook ids (it becomes a filename component too)
@@ -1012,7 +1043,10 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
         raise HTTPException(413, str(exc)) from exc
 
     run_id = _derive_run_id(notebook_id, body.run_id)
-    language = await _resolve_language(notebook, request, config, run_id)
+    with _announced(run_id):
+        # ANNOUNCED across the language call: that is the window a client's ticker sits in,
+        # and on a new notebook it is always a real model round trip (see `_announced`).
+        language = await _resolve_language(notebook, request, config, run_id)
     result = await _run_isolated(
         notebook_id,
         _dotted(AnswerQuestion),
@@ -1078,7 +1112,12 @@ async def suggest_title(
         # The title follows the notebook's resolved language too. Consequence to accept: the UI
         # fires `/title` right after the FIRST source, before any question exists, so resolution
         # runs with two of its three signals and serialises two cheap calls into that path.
-        language = await _resolve_language(notebook, request, config, run_id)
+        #
+        # Announced like every other run-taking endpoint. Today's UI never opens a ticker on the
+        # title run, but this endpoint accepts `run_id` exactly like the others, so a client CAN —
+        # and a rule with one silent exception is the kind that gets rediscovered as a bug.
+        with _announced(run_id):
+            language = await _resolve_language(notebook, request, config, run_id)
         title = await _run_isolated(
             notebook_id,
             _dotted(SuggestTitle),
@@ -1145,7 +1184,10 @@ async def generate_overview(
     # Resolved ONCE, BEFORE the gather. Calling `_resolve_language` inside each branch would fire
     # two concurrent resolutions deriving the same `-lang` id — one 409s on the exclusive-create
     # gate and both race to persist. Caught by this slice's pre-implementation audit.
-    language = await _resolve_language(notebook, request, config, base)
+    with _announced(summary_run, faq_run):
+        # ANNOUNCED across the language call: that is the window a client's ticker sits in,
+        # and on a new notebook it is always a real model round trip (see `_announced`).
+        language = await _resolve_language(notebook, request, config, base)
     kwargs = {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE}
 
     summary, faq = await asyncio.gather(
@@ -1190,7 +1232,10 @@ async def guide(
 
     task_cls, output_model = _GUIDE_TASKS[kind]
     run_id = _derive_run_id(notebook_id, body.run_id)
-    language = await _resolve_language(notebook, request, config, run_id)
+    with _announced(run_id):
+        # ANNOUNCED across the language call: that is the window a client's ticker sits in,
+        # and on a new notebook it is always a real model round trip (see `_announced`).
+        language = await _resolve_language(notebook, request, config, run_id)
     result = await _run_isolated(
         notebook_id,
         _dotted(task_cls),
@@ -1289,7 +1334,10 @@ async def audio(
     provider = _tts_provider(config)
 
     run_id = _derive_run_id(notebook_id, body.run_id)
-    language = await _resolve_language(notebook, request, config, run_id)
+    with _announced(run_id):
+        # ANNOUNCED across the language call: that is the window a client's ticker sits in,
+        # and on a new notebook it is always a real model round trip (see `_announced`).
+        language = await _resolve_language(notebook, request, config, run_id)
     # BEFORE the script run, not after: a language this provider has no id for, or a voice it does
     # not know, can never produce audio, and finding that out afterwards wastes a real model call
     # (invariant 19, extended from the provider NAME to the provider's own inputs).
@@ -1443,7 +1491,13 @@ async def _tail_trace_events(run_id: str):
 
     waited = 0.0
     while not trace_path.exists():
-        if waited >= _TRACE_FILE_WAIT_GRACE:
+        # An ANNOUNCED run is still coming, however long its pre-work takes (`_announced`) — the
+        # grace only bounds an id nobody is going to write. Without this the ticker gave up during
+        # the language-resolution model call that every one of these handlers does first, which a
+        # user hit on their very first overview.
+        if run_id in _RUN_PROCESSES:
+            waited = 0.0
+        elif waited >= _TRACE_FILE_WAIT_GRACE:
             yield {"step": None, "kind": "not_found", "summary": f"no run {run_id!r} found"}
             return
         await asyncio.sleep(_TRACE_POLL_INTERVAL)

@@ -1213,6 +1213,138 @@ def test_stream_run_reports_not_found_after_the_grace_period_when_no_trace_ever_
     assert "not_found" in resp.text
 
 
+def test_stream_run_keeps_waiting_for_an_announced_run_whose_trace_does_not_exist_yet(
+    client, monkeypatch, tmp_path
+):
+    """A user reported `no run '…-summary' found` on their first-ever overview, and it reproduced
+    first try. The window is NOT the one invariant 29 closed (between the exclusive-create and the
+    `_RUN_PROCESSES` registration) — it is much larger and sits BEFORE the exclusive-create happens
+    at all: every run-taking handler calls `_resolve_language` first, and on a new notebook that is
+    always a real model round trip, always longer than the grace period.
+
+    `_announced` marks the id as coming; this pins that the stream then waits INDEFINITELY rather
+    than reporting the run missing. Grace is set far below the delay so a regression fails fast
+    rather than by timing luck.
+    """
+    monkeypatch.setattr(api, "_TRACE_FILE_WAIT_GRACE", 0.05)
+    monkeypatch.setattr(api, "_TRACE_POLL_INTERVAL", 0.01)
+    monkeypatch.setattr(api, "_TRACE_DIR", tmp_path)
+
+    run_id = "mynb-late"
+    trace = tmp_path / f"{run_id}.jsonl"
+
+    async def _write_the_trace_late():
+        # Far longer than the grace: without the announcement this is guaranteed to have given up.
+        await asyncio.sleep(0.5)
+        trace.write_text(
+            json.dumps({"type": "run_start", "step_id": 0, "payload": {}}) + "\n"
+            + json.dumps({"type": "run_end", "step_id": 1, "payload": {}}) + "\n",
+            encoding="utf-8",
+        )
+
+    async def _go():
+        with api._announced(run_id):
+            writer = asyncio.create_task(_write_the_trace_late())
+            events = [event async for event in api._tail_trace_events(run_id)]
+            await writer
+        return events
+
+    events = asyncio.run(_go())
+
+    assert not any(e.get("kind") == "not_found" for e in events), events
+    assert events[-1]["kind"] == "done"
+
+
+def test_overview_announces_its_runs_before_the_language_call(client, monkeypatch, tmp_path):
+    """The reported bug, end to end. Pinning the `_announced` MECHANISM was not enough — deleting
+    the announcement from `/overview` itself left that green, which is exactly the hollow-test shape
+    this project keeps catching. Here the language resolution is made slow on purpose and a ticker
+    is opened alongside the request, the way the browser does it.
+    """
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    monkeypatch.setattr(api, "_TRACE_FILE_WAIT_GRACE", 0.05)
+    monkeypatch.setattr(api, "_TRACE_POLL_INTERVAL", 0.01)
+
+    async def _slow_language(notebook, request, config, run_id):
+        # Stands in for the real model round trip, which on a NEW notebook always happens and
+        # always outlasts the grace period.
+        await asyncio.sleep(0.4)
+        return "English"
+
+    monkeypatch.setattr(api, "_resolve_language", _slow_language)
+    _mock_runner(monkeypatch, {"text": "an overview", "citations": []})
+
+    token = "ticker"
+    summary_run = f"mynb-{token}-summary"
+
+    async def _go():
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+            async def _stream():
+                async with ac.stream(
+                    "GET", f"/notebooks/mynb/runs/{summary_run}/stream"
+                ) as resp:
+                    return "".join([chunk async for chunk in resp.aiter_text()])
+
+            streamed, posted = await asyncio.gather(
+                _stream(),
+                ac.post("/notebooks/mynb/overview", json={"run_id": token}),
+            )
+            return streamed, posted
+
+    streamed, posted = asyncio.run(_go())
+
+    assert posted.status_code == 200, posted.text
+    assert "not_found" not in streamed, streamed[:300]
+
+
+def test_every_run_taking_handler_announces_before_resolving_the_language():
+    """A source-tree assertion covering the four handlers the behavioural test above cannot each
+    afford a slow-language integration run for. The rule is uniform on purpose: a rule with one
+    silent exception is the kind that gets rediscovered as a bug report."""
+    from pathlib import Path as _Path
+
+    lines = (
+        _Path(__file__).resolve().parent.parent / "rlm_notebook" / "api.py"
+    ).read_text().splitlines()
+    calls = [i for i, line in enumerate(lines) if "await _resolve_language(" in line]
+    assert len(calls) == 5, calls  # ask, title, overview, guide, audio
+
+    for index in calls:
+        depth = len(lines[index]) - len(lines[index].lstrip())
+        # Walk up to the nearest ENCLOSING block header. Indentation, not a fixed column: `/title`
+        # sits one level deeper than the rest because it is also inside a `try:`.
+        for j in range(index - 1, -1, -1):
+            candidate = lines[j]
+            if not candidate.strip() or candidate.lstrip().startswith("#"):
+                continue
+            if len(candidate) - len(candidate.lstrip()) < depth:
+                assert "with _announced(" in candidate, (index + 1, candidate.strip())
+                break
+        else:
+            raise AssertionError(f"no enclosing block found for line {index + 1}")
+
+
+def test_announced_release_does_not_steal_a_run_that_actually_started(client):
+    """`_announced` must not pop an id `_run_isolated` has taken ownership of — that entry is how
+    `stream_run` tells "still writing" from "the writer exited", and `_run_isolated`'s own `finally`
+    is what clears it."""
+    run_id = "mynb-owned"
+    sentinel = object()
+    with api._announced(run_id):
+        assert api._RUN_PROCESSES[run_id] is None
+        api._RUN_PROCESSES[run_id] = sentinel  # stands in for the spawned process
+    assert api._RUN_PROCESSES.get(run_id) is sentinel
+    api._RUN_PROCESSES.pop(run_id, None)
+
+    # And an id that never started IS released, so a failed request cannot make the stream wait
+    # forever for a run that will never come.
+    with api._announced(run_id):
+        pass
+    assert run_id not in api._RUN_PROCESSES
+
+
 def test_stream_run_synthesizes_a_terminal_event_for_a_dead_process_with_no_run_end(client, monkeypatch):
     """A killpg-cancelled run's TraceRecorder never reaches __exit__, so no run_end is ever
     written — the stream must still reach a terminal state instead of hanging forever."""

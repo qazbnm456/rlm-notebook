@@ -1285,6 +1285,27 @@ questions with verifiable citations, and get a distilled research artifact out.
   configured provider, and the CLI corrects its default extension only when the user did not choose
   the path themselves.
 
+- **Fix `no run '…-summary' found` on the first overview of a new notebook.** Reported from real
+  use and reproduced on the first attempt.
+
+  The ticker opens before the request and waits five seconds for the run's trace file. But every
+  run-taking handler resolves the output language first, and that is a real model round trip in its
+  own subprocess — on a new notebook it always happens, because the language has by definition never
+  been resolved, and it always takes longer than five seconds. So the client gave up while the
+  language run was still going, on a request that then succeeded normally. `traces/…-lang.jsonl`
+  sitting beside the summary trace is the fingerprint.
+
+  This is a different window from the one the trace-stream slice already closed: that one was
+  microseconds between reserving the trace file and registering the process, this one is minutes
+  and sits before either. Run ids are now ANNOUNCED before any pre-work, and the stream waits
+  indefinitely for an announced run while still bounding one nobody will ever write. Applied to all
+  five run-taking handlers, including `/title`, which no client streams today but could.
+
+  The first regression test was hollow — it pinned the mechanism and stayed green with the fix
+  deleted from the very endpoint that was reported. Mutation-testing caught that; the behavioural
+  test now makes language resolution slow and opens a ticker alongside the request the way a browser
+  does.
+
 - **Twenty-fifth slice: the local TTS provider is Chatterbox now, not Kokoro — and the reason is the
   language matrix, not audio quality.**
 

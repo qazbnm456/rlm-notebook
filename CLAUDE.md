@@ -507,7 +507,8 @@ them exist because an earlier design discussion mentioned them.
       before the error propagates — otherwise a failed spawn permanently occupies that run id and
       a legitimate retry gets a false 409 forever.
     - **`_RUN_PROCESSES` (run-id-keyed) is a SEPARATE map from `_ACTIVE_RUNS` (notebook-id-keyed),
-      deliberately not reused, and a run is RESERVED in it (value `None`) before it is spawned.**
+      deliberately not reused, and a run is RESERVED in it (value `None`) before it is spawned —
+      and, since invariant 46, ANNOUNCED in it before the handler's pre-work even begins.**
       An ABSENT key means finished/cancelled/never-started; a key present with `None` means the
       subprocess is still being spawned. Registering only after `runner.start_run` returned left a
       window — the whole `await`, a real subprocess spawn — where the trace file already existed and
@@ -1542,5 +1543,39 @@ them exist because an earlier design discussion mentioned them.
     火箭` — because that IS how the designation is written in Chinese. A prompt rule cannot reach
     the last letter of a model designation; a provider whose Chinese G2P transliterates Latin
     (rather than passing it through) is the fix for that class, not a stricter sentence here.
+
+46. **Every run-taking handler ANNOUNCES its run id (`api._announced`) before any pre-work, not
+    just before the spawn.** A user generated an overview on a brand-new notebook and the ticker
+    said `no run 'nb-…-summary' found`; it reproduced on the first attempt.
+
+    **This is a DIFFERENT window from the one invariant 29 closed, and much larger.** That one sat
+    between `_run_isolated`'s exclusive-create and its `_RUN_PROCESSES` registration a few lines
+    later — microseconds, widened by concurrency. This one sits BEFORE the exclusive-create happens
+    at all: every one of these handlers calls `_resolve_language` first (invariant 39), which is a
+    real model round trip in its own subprocess. On a NEW notebook `output_language` is by
+    definition unresolved, so that call ALWAYS happens and always outlasts
+    `_TRACE_FILE_WAIT_GRACE` (5s) — the client opens its ticker, waits five seconds for a trace
+    file that cannot exist yet, and reports the run missing. `traces/…-lang.jsonl` sitting beside
+    the summary trace afterwards is the fingerprint. The request itself succeeds throughout; only
+    the ticker lies.
+
+    `_announced` reuses `_RUN_PROCESSES` rather than adding a second registry, because `stream_run`
+    already reads it as "is anything still going to write this file" — which is exactly the
+    question. `setdefault` so an id `_run_isolated` has already claimed is never downgraded, and
+    the release only removes an id still sitting at the `None` placeholder: a spawned run belongs
+    to `_run_isolated`'s own `finally`. A handler that fails before spawning DOES release, so a
+    failed request can never make a stream wait forever. `_tail_trace_events` resets its grace
+    counter while the id is announced, so the bound still applies to an id nobody will ever write.
+
+    **Applied to all FIVE run-taking handlers, including `/title`, which no client currently
+    streams.** It accepts `run_id` exactly like the others, so a client can; a rule with one silent
+    exception is the kind that gets rediscovered as a bug report.
+
+    **The first regression test for this was hollow and mutation-testing caught it.** Pinning the
+    `_announced` mechanism passed happily with the announcement DELETED from `/overview` — the
+    reported bug itself. The behavioural test now makes language resolution slow on purpose and
+    opens a ticker alongside the request the way a browser does, and a source-tree assertion covers
+    the remaining four handlers by walking up to each `_resolve_language` call's enclosing block
+    (indentation, not a fixed column — `/title` sits one level deeper, inside a `try:`).
 
 See `CHANGELOG.md` for what shipped in the current slice and why.
