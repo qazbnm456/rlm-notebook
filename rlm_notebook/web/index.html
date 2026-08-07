@@ -66,11 +66,14 @@
     <section class="col col-chat" id="col-chat">
       <div class="panel-head" data-i18n="chat.head">Chat</div>
 
-      <!-- The overview lives ABOVE the history list, not inside it: `ask` rebuilds #chat-history
-           wholesale from state.turns after every answer, which would wipe anything else in there. -->
-      <div class="chat-overview" id="chat-overview" hidden></div>
-
       <div class="chat-history" id="chat-history">
+        <!-- The overview lives INSIDE the scrolling thread, as its first entry. It used to be a
+             sibling above it, `flex: 0 0 auto` with `max-height: 45%`, which permanently ate half
+             the chat column and squeezed the conversation into a strip — reported as the overview
+             covering the conversation. Everything that rebuilds this list goes through
+             `rebuildHistory`, which re-appends this node; that is what the old structure was
+             avoiding, and it is three lines. -->
+        <div class="chat-overview" id="chat-overview" hidden></div>
         <p class="empty-note" id="chat-empty" data-i18n="chat.empty">Ask a question once you've added a source.</p>
       </div>
 

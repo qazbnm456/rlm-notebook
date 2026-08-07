@@ -20,6 +20,7 @@ import types
 from typing import ClassVar
 
 import pytest
+from pydantic import ValidationError
 
 fastapi = pytest.importorskip("fastapi")
 # Only the two concurrency tests at the bottom need a real ASGI client (TestClient serialises
@@ -30,7 +31,7 @@ from _pdf_fixtures import make_text_pdf_bytes
 from fastapi.testclient import TestClient
 
 from rlm_notebook import api, cli
-from rlm_notebook.notebook import load_notebook
+from rlm_notebook.notebook import load_notebook, notebook_path
 from rlm_notebook.schema import FAQ, KeyInsight, Summary, Timeline
 
 _FAIL_URL = "https://example.com/fails-to-fetch"
@@ -2351,3 +2352,56 @@ def test_every_citation_response_is_checked_against_its_own_artifacts_text():
         args = [a.strip() for a in call.split(",")]
         assert len(args) == 3, f"_citation_responses({call}) does not pass the prose it checks against"
         assert args[2] not in ("", '""', "None"), call
+
+
+def test_follow_up_questions_come_back_with_the_answer_and_survive_a_reload(client, monkeypatch):
+    """`Answer.follow_ups` rides the SAME run that wrote the answer — no second model call — so the
+    only thing that can break is the wiring: a field declared on the schema and never returned looks
+    exactly like a model that offered none."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        {
+            "text": "Voyager 1 crossed in 2012.",
+            "citations": [],
+            "follow_ups": ["What powers it?", "Where is Voyager 2?"],
+        },
+    )
+
+    asked = client.post("/notebooks/mynb/ask", json={"question": "q"}).json()
+    assert asked["follow_ups"] == ["What powers it?", "Where is Voyager 2?"]
+
+    turn = client.get("/notebooks/mynb").json()["turns"][0]
+    assert turn["follow_ups"] == ["What powers it?", "Where is Voyager 2?"]
+
+
+def test_a_turn_saved_before_follow_ups_existed_still_loads(client, monkeypatch):
+    """Same backward-compatible precedent `ChatTurn.run_id`, `Notebook.notes` and
+    `Citation.answer_span` set: an older notebook file has no such key at all."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, {"text": "an answer", "citations": []})
+    client.post("/notebooks/mynb/ask", json={"question": "q"})
+
+    path = notebook_path("mynb")
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    del raw["turns"][0]["answer"]["follow_ups"]
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    turn = client.get("/notebooks/mynb").json()["turns"][0]
+    assert turn["follow_ups"] == []
+
+
+def test_follow_ups_are_not_citation_verified():
+    """A question is a prompt, not a claim, so invariant 5 has nothing to check — and nothing in the
+    schema should suggest otherwise. Pinned because "citations everywhere" is the house style here,
+    and adding them to this field would imply a guarantee that cannot exist."""
+    from rlm_notebook.schema import Answer
+
+    assert Answer.model_fields["follow_ups"].annotation == list[str]
+    assert Answer(text="x").follow_ups == []
+    # A model that returns objects here is rejected at the schema boundary rather than silently
+    # producing chips that claim a grounding they do not have.
+    with pytest.raises(ValidationError):
+        Answer(text="x", follow_ups=[{"question": "q", "citations": []}])

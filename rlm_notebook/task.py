@@ -37,6 +37,13 @@ this is the first question in the conversation, `history` says so plainly.
 
 {CITATION_RULES}
 
+Also fill `follow_ups` with two or three questions a reader might naturally ask NEXT, in the same
+language as your answer. Each one must be answerable from `sources` — they are an offer, so
+proposing something the corpus cannot support wastes the reader's next turn. Keep them short and
+specific; skip any that just rephrase the question you were asked. If nothing worthwhile follows,
+leave the list empty rather than padding it. They carry no citations: a question is a prompt, not
+a claim.
+
 {validate_before_submit_rule("validate_answer")}
 """
 

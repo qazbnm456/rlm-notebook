@@ -642,6 +642,12 @@ body.is-resizing .cols {
 }
 
 /* The one being read in the reference list below, or hovered there. */
+/* The other half of `linkReference`: pointing at a reference row lights up every stroke it backs. */
+.citation.is-linked {
+  background: color-mix(in oklch, var(--accent) 22%, transparent);
+}
+
+/* Same split on the stroke: hover owns `background`, focus owns the underline. */
 .citation.is-focused {
   background: var(--highlight-wash);
   border-radius: 2px;
@@ -1176,13 +1182,13 @@ body.is-resizing .cols {
   border-left: 3px solid var(--studio-accent);
   border-radius: var(--radius);
   background: var(--surface-1);
-  /* A guide Summary runs to several paragraphs. Without a bound this is a flex item whose automatic
-     minimum size is its content, so it refuses to shrink, .chat-history (min-height: 0) collapses to
-     nothing, and the column's own scroll takes the ask box off screen. Found by an independent
-     review reading the flex chain, not by seeing it. */
+  /* NO `max-height` and no scroller of its own any more: it is the THREAD's first entry now, so a
+     long overview simply scrolls away as the conversation grows. The bound existed because this was
+     a sibling ABOVE the list — a flex item whose automatic minimum size is its content, which would
+     have collapsed `.chat-history` to nothing — and it cost the conversation 45% of the column
+     permanently, which a user reported as the overview covering the chat. Inside the scroller both
+     problems are gone: there is no competing flex item left to squeeze. */
   flex: 0 0 auto;
-  max-height: 45%;
-  overflow-y: auto;
 }
 
 /* Paired with the `display` above — see the .modal-overlay/.ticker-detail rules for the mechanism
@@ -2273,8 +2279,9 @@ body.is-resizing .cols {
   overflow-y: auto;
   /* NO border/background of its own. `.run-status` is already a bordered card, so a second one
      around a single log line rendered as an empty box inside an empty box. */
+  position: relative;
   margin-top: 0.35rem;
-  padding-top: 0.35rem;
+  padding-top: 0.5rem;
   border-top: 1px solid var(--border);
   font-family: "JetBrains Mono", ui-monospace, monospace;
   font-size: 0.7rem;
@@ -2285,17 +2292,67 @@ body.is-resizing .cols {
    right edge, leaving a hand's width of empty box between "啟動" and "GenerateSummary" on a wide
    panel. Here every part sits at its natural width, left to right, and only the detail claims a
    whole line. The left rail carries the kind colour — the shape `cve-reverser`'s `.tstep` uses. */
+/* A TIMELINE, not a list of independent rows: one continuous rail with a node per step, so the log
+   reads as a single process advancing. The shape Cursor and Devin use for an agent's step list, and
+   the reason a per-line left border did not do the job — four separate 2px bars read as four
+   unrelated items. */
 .run-log-line {
+  position: relative;
   display: flex;
   flex-wrap: wrap;
   align-items: baseline;
   gap: 0.1rem 0.55rem;
-  padding: 0.2rem 0 0.2rem 0.5rem;
-  border-left: 2px solid var(--border);
+  padding: 0.25rem 0 0.35rem 1rem;
 }
 
-.run-log-line + .run-log-line {
-  margin-top: 0.15rem;
+/* The rail: drawn per row and running the full height, so it connects to the next row without the
+   container having to know how many there are. Stops at the last row. */
+.run-log-line::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 0.9em;
+  bottom: -0.35rem;
+  width: 1px;
+  background: var(--border);
+}
+
+.run-log-line:last-child::before {
+  display: none;
+}
+
+/* The node. `background` carries the step's kind colour, set by the `kind-*` rules below. */
+.run-log-line::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0.45em;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+}
+
+/* The step being watched right now. DISJOINT properties from the `kind-*::after` rules below, which
+   own `background` at the same specificity and are declared later — setting `background` here would
+   be a rule that silently does nothing for every step that has a kind, which is the collision shape
+   invariant 44 records twice already. The node keeps its kind colour and gains a pulse and a ring. */
+.run-log-line.is-current::after {
+  animation: run-pulse 1.2s ease-in-out infinite;
+  /* Every other user of this keyframe has a reduced-motion opt-out; this one shipped without. */
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--accent) 25%, transparent);
+}
+
+.run-log-line.is-past {
+  color: var(--text-faint);
+}
+
+.run-log-line.is-expandable {
+  cursor: pointer;
+}
+
+.run-log-line.is-expandable:hover .run-log-detail {
+  color: var(--text-dim);
 }
 
 .run-log-at {
@@ -2320,10 +2377,12 @@ body.is-resizing .cols {
 /* Its OWN row under the headline, not trailing off the end of it: the model's reasoning is a
    sentence, and a sentence squeezed into the tail of a label wraps into the meta column. */
 .run-log-detail {
-  /* Its own line under the headline, full width. */
+  /* Its own line under the headline, full width. Clamped to ONE line once the step is in the past,
+     opened by a click — a long run otherwise turns the log into the wall of prose the panel it
+     lives in is trying not to be. */
   flex: 1 0 100%;
   display: -webkit-box;
-  -webkit-line-clamp: 3;
+  -webkit-line-clamp: 1;
   -webkit-box-orient: vertical;
   overflow: hidden;
   margin-top: 0.1rem;
@@ -2347,9 +2406,9 @@ body.is-resizing .cols {
 .run-log-line.kind-tool .run-log-what { color: var(--accent); }
 .run-log-line.kind-escalation .run-log-what { color: var(--studio-accent); }
 .run-log-line.kind-done .run-log-what { color: var(--ok, var(--text)); }
-.run-log-line.kind-tool { border-left-color: var(--accent); }
-.run-log-line.kind-escalation { border-left-color: var(--studio-accent); }
-.run-log-line.kind-done { border-left-color: var(--ok, var(--text-faint)); }
+.run-log-line.kind-tool::after { background: var(--accent); }
+.run-log-line.kind-escalation::after { background: var(--studio-accent); }
+.run-log-line.kind-done::after { background: var(--ok, var(--text-faint)); }
 
 /* --- Studio rail: four views, collapsible ------------------------------------------------------
    It was three sections stacked in one scrolling column. A notebook with a generated guide, an
@@ -2517,11 +2576,17 @@ body.is-resizing .cols {
   gap: 0.6rem;
 }
 
+/* A reference is a compact ROW that opens, not a card full of quotes. The previous version rendered
+   every quote as an always-visible blockquote, so one source cited eight times filled the whole
+   column and the list stopped being scannable — reported with a screenshot. The shape here is the
+   one Kagi's assistant and Google's AI answers both use: number, title, a small provenance chip, a
+   single clamped line of the passage, and everything else behind a click. */
+
 .ref-card {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   background: var(--surface-2);
-  padding: 0.55rem 0.65rem;
+  padding: 0.5rem 0.6rem;
   transition: border-color 160ms ease, background 160ms ease;
 }
 
@@ -2529,10 +2594,21 @@ body.is-resizing .cols {
   border-color: var(--border-strong);
 }
 
-/* The one a citation click sent the reader to. */
+/* Pointing at the answer's stroke lights up this row, and vice versa (`linkReference`). Kept
+   DISJOINT from `.is-focused` below, which owns `border-color`, so a hover over one reference can
+   never wipe the focus ring on another — the collision invariant 44 records. */
+.ref-card.is-linked {
+  background: color-mix(in oklch, var(--accent) 12%, var(--surface-2));
+}
+
+/* Focus owns `border-color` and NOTHING else. It used to set `background` too — the same property
+   `.is-linked` above sets, at equal specificity and declared later — so hovering the row you had
+   just clicked a citation to reach gave no feedback at all. An independent review caught the CSS
+   comment and invariant 58 both claiming a disjointness that was only half true, which is the exact
+   mistake invariant 44 already records happening twice. */
 .ref-card.is-focused {
   border-color: var(--accent);
-  background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .ref-card.is-unverified {
@@ -2541,7 +2617,7 @@ body.is-resizing .cols {
 
 .ref-card-head {
   display: flex;
-  align-items: baseline;
+  align-items: flex-start;
   gap: 0.45rem;
   width: 100%;
   border: none;
@@ -2553,39 +2629,103 @@ body.is-resizing .cols {
   cursor: pointer;
 }
 
-.ref-card-name {
+.ref-card-main {
   flex: 1 1 auto;
   min-width: 0;
-  color: var(--accent);
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+.ref-card-name {
+  min-width: 0;
+  color: var(--text);
   font-size: 0.82rem;
+  line-height: 1.35;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.ref-card-uses {
-  flex: none;
+.ref-card-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.35rem;
   font-size: 0.68rem;
   color: var(--text-faint);
 }
 
+/* The provenance chip: a hostname for a web source, the kind for anything else. */
+.ref-card-chip {
+  padding: 0.05rem 0.3rem;
+  border-radius: 3px;
+  background: var(--surface-1);
+  color: var(--text-dim);
+  font-variant-numeric: tabular-nums;
+}
+
+.ref-card-uses {
+  font-variant-numeric: tabular-nums;
+}
+
+.ref-card-unverified {
+  color: var(--bad);
+}
+
+.ref-card-caret {
+  flex: none;
+  color: var(--text-faint);
+  transition: transform 140ms ease;
+}
+
+.ref-card.is-open .ref-card-caret {
+  transform: rotate(90deg);
+}
+
+/* Two lines, clamped. Enough to recognise the passage, never enough to become the wall of text
+   this replaced. */
+.ref-card-snippet {
+  margin-top: 0.35rem;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  color: var(--text-dim);
+  font-size: 0.76rem;
+  line-height: 1.5;
+}
+
+.ref-card.is-open .ref-card-snippet {
+  display: none;
+}
+
+.ref-card-body {
+  margin-top: 0.5rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+
+.ref-card-body[hidden] {
+  display: none;
+}
+
 .ref-card-passage {
   margin-top: 0.55rem;
-  padding-top: 0.55rem;
-  border-top: 1px solid var(--border);
   max-height: 24rem;
   overflow-y: auto;
   font-size: 0.8rem;
   line-height: 1.6;
 }
 
-.ref-card-passage[hidden] {
-  display: none;
-}
 
 /* One line under an answer, in place of a second copy of the list. */
 .reference-link {
-  margin-top: 0.7rem;
+  /* Its OWN line with real space above it. As an inline-block button it sat immediately after the
+     answer's last word, which a user reported as too close to the end of the message. */
+  display: block;
+  width: fit-content;
+  margin-top: 1rem;
   padding: 0;
   border: none;
   background: none;
@@ -2774,5 +2914,141 @@ body.is-resizing .studio-grip {
 /* The icon is the whole control when collapsed, so it gets the accent on hover like any other. */
 .col-studio.is-collapsed .studio-view-tab:hover .tab-icon {
   color: var(--accent);
+}
+
+/* --- Markdown, as rendered by `renderMarkdownInto` ---------------------------------------------
+   Answers arrive written in markdown whether or not anyone asked for it, and we used to show the
+   raw `**bold**` and `## heading` characters. Everything here is deliberately restrained: these
+   blocks live INSIDE a chat bubble, so they must read as a well-set message rather than as a page. */
+
+.md-p {
+  margin: 0 0 0.65em;
+}
+
+.md-p:last-child {
+  margin-bottom: 0;
+}
+
+.md-head {
+  margin: 1.1em 0 0.45em;
+  font-size: 0.95em;
+  font-weight: 700;
+  line-height: 1.35;
+  color: var(--text);
+}
+
+.md-head:first-child {
+  margin-top: 0;
+}
+
+.md-list {
+  margin: 0 0 0.65em;
+  padding-left: 1.35em;
+}
+
+.md-list .md-list {
+  margin: 0.25em 0 0;
+}
+
+.md-list li {
+  margin: 0.2em 0;
+}
+
+.md-quote {
+  margin: 0 0 0.65em;
+  padding: 0.1em 0 0.1em 0.8em;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-dim);
+}
+
+.md-quote p {
+  margin: 0.2em 0;
+}
+
+.md-code {
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  background: var(--surface-1);
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.88em;
+}
+
+.md-pre {
+  margin: 0 0 0.65em;
+  padding: 0.6em 0.75em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-1);
+  /* Its OWN scroller: a long line must never make the page scroll sideways. */
+  overflow-x: auto;
+}
+
+.md-pre code {
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 0.82em;
+  line-height: 1.55;
+  white-space: pre;
+}
+
+/* Same reasoning as `.md-pre`: a wide table scrolls inside its own box. */
+.md-table-wrap {
+  margin: 0 0 0.65em;
+  overflow-x: auto;
+}
+
+.md-table {
+  border-collapse: collapse;
+  font-size: 0.92em;
+}
+
+.md-table th,
+.md-table td {
+  padding: 0.3em 0.6em;
+  border: 1px solid var(--border);
+  text-align: left;
+  vertical-align: top;
+}
+
+.md-table th {
+  background: var(--surface-1);
+  font-weight: 600;
+}
+
+/* A link is SHOWN, never navigable — see `renderInline`. Styled as text with a hint of a link so it
+   does not read as a broken one: dotted, not underlined, and no pointer cursor. */
+.md-link {
+  border-bottom: 1px dotted var(--text-faint);
+  color: var(--text);
+  /* It copies on click, so it has to look operable — but never like a link that navigates. */
+  cursor: copy;
+}
+
+.md-link:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.md-link:hover {
+  border-bottom-color: var(--accent);
+}
+
+.run-log-line.is-current .run-log-detail,
+.run-log-line.is-expanded .run-log-detail {
+  -webkit-line-clamp: 12;
+}
+
+/* How long the step took, shown rather than hidden in a tooltip — the log is a scroller, so a tip
+   anchored inside it is clipped by its own container. */
+.run-log-took {
+  flex: none;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+  opacity: 0.75;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .run-log-line.is-current::after {
+    animation: none;
+  }
 }
 

@@ -66,7 +66,14 @@ async def wait_result(run: Run, *, timeout: float | None = None) -> dict:
         stdout, stderr = await asyncio.wait_for(run.process.communicate(), timeout=timeout)
     except TimeoutError:
         run.cancel()
-        raise RunError(f"run {run.run_id!r} timed out after {timeout}s and was cancelled") from None
+        # Names the knob. "timed out after 300.0s and was cancelled" tells a reader what happened
+        # and nothing about what to do, and the default is path-dependent (`config`'s
+        # `_default_run_timeout`), so the number alone does not even identify which default was in
+        # force.
+        raise RunError(
+            f"run {run.run_id!r} timed out after {timeout}s and was cancelled "
+            f"(the wall-clock backstop; raise RN_RUN_TIMEOUT_SECONDS if the model is simply slow)"
+        ) from None
 
     text = stdout.decode("utf-8", errors="replace")
     lines = [line for line in text.strip().splitlines() if line]

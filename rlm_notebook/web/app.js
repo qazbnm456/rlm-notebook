@@ -286,16 +286,49 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
     logToggle.classList.toggle("is-open", !log.hidden);
   });
 
+  //: When the previous step landed, so each row can show how long IT took rather than only when it
+  //: started. "Where is it stuck" is a question about durations, and a column of absolute stamps
+  //: makes the reader subtract.
+  let lastStepAt = null;
+
   function appendLog(event) {
     const headline = traceHeadline(event);
     if (!headline) return;
+    const now = Date.now();
     const line = document.createElement("div");
     line.className = `run-log-line kind-${event.kind || "other"}`;
 
+    // Only the newest step is "current": it carries the pulsing node on the rail and shows its
+    // detail in full, while everything above it collapses to a clamped line. The shape Cursor and
+    // Devin both use for an agent's step list, and the reason is the same — a finished step is a
+    // record, the running one is the thing you are watching.
+    const previous = log.lastElementChild;
+    if (previous) {
+      previous.classList.remove("is-current");
+      previous.classList.add("is-past");
+    }
+    line.classList.add("is-current");
+
     const at = document.createElement("span");
     at.className = "run-log-at";
-    at.textContent = formatTimecode((Date.now() - started) / 1000);
+    at.textContent = formatTimecode((now - started) / 1000);
     line.appendChild(at);
+
+    // VISIBLE, not a tooltip. It was `data-tip` on this element, which lives inside `.run-log`'s
+    // own scroller — an independent review measured the tip clipped by that box, the ancestor case
+    // `test_no_tooltip_host_clips_its_own_tooltip` states it cannot see. Text needs no hover, works
+    // on touch, and can be copied.
+    //
+    // Measured from `started` for the FIRST row rather than skipped: that gap is the wait for the
+    // model's first response, which is the slow one the status line already singles out.
+    const gap = (now - (lastStepAt === null ? started : lastStepAt)) / 1000;
+    const took = document.createElement("span");
+    took.className = "run-log-took";
+    // One decimal below ten seconds: most steps in a fast run are sub-second, and `+0s` on every
+    // row says nothing at all.
+    took.textContent = `+${gap < 10 ? gap.toFixed(1) : Math.round(gap)}s`;
+    line.appendChild(took);
+    lastStepAt = now;
 
     const what = document.createElement("span");
     what.className = "run-log-what";
@@ -324,6 +357,12 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
       what.appendChild(reasoningText);
     }
     line.appendChild(what);
+    // A past step opens on click. The detail is clamped rather than dropped, so the log stays
+    // readable while a long run accumulates steps and nothing is actually lost.
+    if (event.detail) {
+      line.classList.add("is-expandable");
+      line.addEventListener("click", () => line.classList.toggle("is-expanded"));
+    }
     log.appendChild(line);
     log.scrollTop = log.scrollHeight;
     logToggle.hidden = false;
@@ -409,6 +448,14 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
     stopped = true;
     clearInterval(timer);
     node.classList.add("is-done");
+    // Nothing is "current" once the run is over. Without this the last step kept its pulsing rail
+    // node and its 12-line detail while the header already said Finished — a status line and a log
+    // disagreeing about whether anything is still happening.
+    const current = log.querySelector(".run-log-line.is-current");
+    if (current) {
+      current.classList.remove("is-current");
+      current.classList.add("is-past");
+    }
     noteRunFinished(notebookId);
   }
 
@@ -972,7 +1019,7 @@ async function openNotebook(notebookId) {
   store.emit("notebook:titled", { title: state.title, notebookId: notebook.id });
   store.emit("sources:changed", { sources: state.sources });
   store.emit("notes:changed", { notes: state.notes });
-  state.turns.forEach((turn) => store.emit("chat:turnAdded", { turn }));
+  state.turns.forEach((turn) => store.emit("chat:turnAdded", { turn, restoring: true }));
   refreshNotebookList();
 }
 
@@ -1591,6 +1638,378 @@ function saveAsNoteButton(text) {
   return btn;
 }
 
+// --- Markdown ---------------------------------------------------------------------------------
+//
+// A deliberately SMALL subset, HAND-WRITTEN, built entirely with `createElement`/`textContent`.
+// Answers arrived full of raw `**bold**`, `## headings` and `- lists` because the model writes
+// markdown whether or not anyone asked it to, and we were rendering the source text verbatim.
+//
+// No library, and no `innerHTML` with an interpolated string — the same discipline `bugcademy`'s
+// studio states outright for the same reason: every string here came out of a model that has been
+// reading source content an attacker may have written (invariants 6 and 29). The sibling studios
+// build markup as HTML strings with an `esc()` helper; one missed `esc()` there is an XSS sink, and
+// building nodes removes the failure mode rather than guarding it.
+//
+// **A link is rendered but NOT navigable**, and that is the one place this diverges from what a
+// markdown renderer usually does. Invariant 1 refuses to let the model reach a URL because a
+// prompt-injected source could steer it into exfiltrating notebook contents to an address of the
+// attacker's choosing; an `<a href>` in an answer is the same hazard with the reader's click as the
+// transport, and it would arrive looking exactly like a citation-grounded reference. The URL is
+// shown on hover and COPIED on click, so reaching it stays a deliberate act with an address the
+// reader has seen. One line to flip if that trade stops being worth it.
+//
+// Every block callback receives RAW OFFSETS into the original string and appends through `emit`,
+// never by creating text nodes itself. That is what keeps the citation strokes exact: `emit` is
+// where a highlighted range is split out, so markdown structure and citation ranges compose instead
+// of one having to be applied on top of the other's output.
+
+const MD_FENCE = /^\s*(```|~~~)/;
+const MD_HEADING = /^(#{1,6})\s+(.*)$/;
+const MD_QUOTE = /^\s*>\s?(.*)$/;
+const MD_BULLET = /^(\s*)([-*+])\s+(.*)$/;
+const MD_ORDERED = /^(\s*)(\d{1,9})[.)]\s+(.*)$/;
+const MD_RULE = /^\s*([-*_])(\s*\1){2,}\s*$/;
+const MD_TABLE_DIVIDER = /^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)+\|?\s*$/;
+
+//: Inline markers, longest-first so `**` is tried before `*`.
+const MD_INLINE = [
+  { open: "`", close: "`", tag: "code", className: "md-code" },
+  { open: "**", close: "**", tag: "strong" },
+  { open: "__", close: "__", tag: "strong" },
+  { open: "*", close: "*", tag: "em" },
+  { open: "_", close: "_", tag: "em" },
+];
+
+function mdLines(text) {
+  const out = [];
+  let start = 0;
+  for (const line of text.split("\n")) {
+    out.push({ text: line, start, end: start + line.length });
+    start += line.length + 1;
+  }
+  return out;
+}
+
+// `[label](url)` — the label's raw range, plus the url as plain text.
+function mdLinkAt(text, at, limit) {
+  if (text[at] !== "[") return null;
+  const close = text.indexOf("]", at + 1);
+  if (close === -1 || close >= limit || text[close + 1] !== "(") return null;
+  const end = text.indexOf(")", close + 2);
+  if (end === -1 || end >= limit) return null;
+  return { labelFrom: at + 1, labelTo: close, url: text.slice(close + 2, end), end: end + 1 };
+}
+
+//: A simplified CommonMark "flanking" rule, and it is not pedantry: without it `3 * 4 * 5` becomes
+//: `3 <em>4</em> 5` and `my_var and other_var_name` becomes `my<em>var and other</em>var_name`.
+//: Multiplication and snake_case identifiers both appear in this project's own subject matter.
+//: Backticks are exempt — code spans have no flanking rule in CommonMark either.
+const mdIsSpace = (ch) => !ch || /\s/.test(ch);
+const mdIsWord = (ch) => !!ch && /[\w\u00c0-\uffff]/.test(ch);
+
+function mdMarkerOpens(text, marker, at) {
+  if (marker.tag === "code") return true;
+  // An opener must hug its content: `* 4` is a bullet or a multiplication, never emphasis.
+  if (mdIsSpace(text[at + marker.open.length])) return false;
+  // `_` additionally never opens inside a word, which is what protects `snake_case`.
+  if (marker.open.startsWith("_")) return !mdIsWord(text[at - 1]);
+  return true;
+}
+
+function mdMarkerCloses(text, marker, at) {
+  if (marker.tag === "code") return true;
+  if (mdIsSpace(text[at - 1])) return false;
+  if (marker.close.startsWith("_")) return !mdIsWord(text[at + marker.close.length]);
+  return true;
+}
+
+//: The first VALID closing marker at or after `from`, or -1.
+function mdFindClose(text, marker, from, limit) {
+  let at = text.indexOf(marker.close, from);
+  while (at !== -1 && at < limit) {
+    if (at > from && mdMarkerCloses(text, marker, at)) return at;
+    at = text.indexOf(marker.close, at + 1);
+  }
+  return -1;
+}
+
+function renderInline(parent, text, from, to, emit) {
+  let cursor = from;
+  let plain = from;
+  const flush = (upTo) => {
+    if (upTo > plain) emit(parent, plain, upTo);
+  };
+
+  while (cursor < to) {
+    const link = mdLinkAt(text, cursor, to);
+    if (link) {
+      flush(cursor);
+      const span = document.createElement("span");
+      span.className = "md-link";
+      // Shown, never navigable — see the note at the top of this section.
+      span.dataset.tip = link.url;
+      // ...and COPYABLE, which the tooltip alone is not: `[data-tip]::after` is CSS generated
+      // content, which no browser lets you select, and it only appears on hover — so an
+      // independent review found the "see and copy it deliberately" affordance half-missing and
+      // unreachable by keyboard or touch entirely. A click copies; `tabindex` makes it reachable.
+      // Still not navigable: this writes to the clipboard, it never follows anything.
+      span.tabIndex = 0;
+      span.setAttribute("role", "button");
+      const copyUrl = () => {
+        navigator.clipboard?.writeText(link.url).then(
+          () => {
+            const was = span.dataset.tip;
+            span.dataset.tip = t("md.urlCopied", "Link address copied");
+            setTimeout(() => {
+              span.dataset.tip = was;
+            }, 1400);
+          },
+          () => {},
+        );
+      };
+      span.addEventListener("click", copyUrl);
+      span.addEventListener("keydown", (event) => {
+        if (event.key === "Enter" || event.key === " ") {
+          event.preventDefault();
+          copyUrl();
+        }
+      });
+      renderInline(span, text, link.labelFrom, link.labelTo, emit);
+      parent.appendChild(span);
+      cursor = plain = link.end;
+      continue;
+    }
+
+    const marker = MD_INLINE.find(
+      (m) =>
+        text.startsWith(m.open, cursor)
+        && mdMarkerOpens(text, m, cursor)
+        && mdFindClose(text, m, cursor + m.open.length, to) !== -1
+    );
+    if (marker) {
+      const innerFrom = cursor + marker.open.length;
+      const closeAt = mdFindClose(text, marker, innerFrom, to);
+      // A marker whose partner is past this block, or which wraps nothing, is literal text.
+      if (closeAt !== -1 && closeAt < to && closeAt > innerFrom) {
+        flush(cursor);
+        const node = document.createElement(marker.tag);
+        if (marker.className) node.className = marker.className;
+        if (marker.tag === "code") {
+          // Inline code is verbatim by definition: no nested inline parsing, but still emitted
+          // through `emit` so a citation stroke can cross it.
+          emit(node, innerFrom, closeAt);
+        } else {
+          renderInline(node, text, innerFrom, closeAt, emit);
+        }
+        parent.appendChild(node);
+        cursor = plain = closeAt + marker.close.length;
+        continue;
+      }
+    }
+    cursor += 1;
+  }
+  flush(to);
+}
+
+function mdTableRowCells(line) {
+  const trimmed = line.text.trim().replace(/^\|/, "").replace(/\|$/, "");
+  const cells = [];
+  let from = line.start + line.text.indexOf(trimmed);
+  for (const piece of trimmed.split("|")) {
+    // Each cell's own padding is trimmed OFF THE RANGE rather than off a string, so the offsets
+    // still point at the original text and a citation stroke inside a cell lands correctly.
+    const lead = piece.length - piece.trimStart().length;
+    const tail = piece.length - piece.trimEnd().length;
+    cells.push({ from: from + lead, to: from + piece.length - tail });
+    from += piece.length + 1;
+  }
+  return cells;
+}
+
+// Renders `text` into `root` as blocks. `emit(parent, from, to)` appends the raw slice, and owns
+// citation splitting.
+function renderMarkdownInto(root, text, emit) {
+  const lines = mdLines(text);
+  let i = 0;
+
+  const startsTable = (index) =>
+    index + 1 < lines.length
+    && lines[index].text.includes("|")
+    && MD_TABLE_DIVIDER.test(lines[index + 1].text);
+
+  const isBlockStart = (line, index) =>
+    !line.text.trim()
+    || MD_FENCE.test(line.text)
+    || MD_HEADING.test(line.text)
+    || MD_QUOTE.test(line.text)
+    || MD_BULLET.test(line.text)
+    || MD_ORDERED.test(line.text)
+    || MD_RULE.test(line.text)
+    // Without this a table written directly under a sentence — no blank line, which is how people
+    // actually write one — was swallowed by the paragraph and its pipes shown raw, the exact
+    // symptom this renderer exists to remove.
+    || startsTable(index);
+
+  while (i < lines.length) {
+    const line = lines[i];
+
+    if (!line.text.trim()) {
+      i += 1;
+      continue;
+    }
+
+    if (MD_FENCE.test(line.text)) {
+      const fence = line.text.trim().slice(0, 3);
+      const body = [];
+      i += 1;
+      while (i < lines.length && !lines[i].text.trim().startsWith(fence)) {
+        body.push(lines[i]);
+        i += 1;
+      }
+      i += 1; // the closing fence, or the end of the text
+      const pre = document.createElement("pre");
+      pre.className = "md-pre";
+      const code = document.createElement("code");
+      if (body.length) emit(code, body[0].start, body[body.length - 1].end);
+      pre.appendChild(code);
+      root.appendChild(pre);
+      continue;
+    }
+
+    if (MD_RULE.test(line.text)) {
+      root.appendChild(document.createElement("hr"));
+      i += 1;
+      continue;
+    }
+
+    const heading = line.text.match(MD_HEADING);
+    if (heading) {
+      // Shifted down two levels (h1..h6 -> h3..h6): these sit INSIDE a chat bubble, so an `<h1>`
+      // would outrank the panel's own heading and read as a page title.
+      const level = Math.min(6, 2 + heading[1].length);
+      const node = document.createElement(`h${level}`);
+      node.className = "md-head";
+      const from = line.start + line.text.indexOf(heading[2], heading[1].length);
+      renderInline(node, text, from, line.end, emit);
+      root.appendChild(node);
+      i += 1;
+      continue;
+    }
+
+    if (MD_QUOTE.test(line.text)) {
+      const quote = document.createElement("blockquote");
+      quote.className = "md-quote";
+      while (i < lines.length && MD_QUOTE.test(lines[i].text)) {
+        const inner = lines[i].text.match(MD_QUOTE);
+        const para = document.createElement("p");
+        const from = lines[i].start + lines[i].text.length - inner[1].length;
+        renderInline(para, text, from, lines[i].end, emit);
+        quote.appendChild(para);
+        i += 1;
+      }
+      root.appendChild(quote);
+      continue;
+    }
+
+    if (MD_BULLET.test(line.text) || MD_ORDERED.test(line.text)) {
+      i = renderMdList(root, lines, i, text, emit, 0);
+      continue;
+    }
+
+    // A GitHub pipe table needs its divider row to be a table at all; without it the pipes are
+    // ordinary text and rendering a table would invent structure the model did not write.
+    if (startsTable(i)) {
+      const table = document.createElement("table");
+      table.className = "md-table";
+      const head = document.createElement("thead");
+      const headRow = document.createElement("tr");
+      mdTableRowCells(line).forEach((cell) => {
+        const th = document.createElement("th");
+        renderInline(th, text, cell.from, cell.to, emit);
+        headRow.appendChild(th);
+      });
+      head.appendChild(headRow);
+      table.appendChild(head);
+      const body = document.createElement("tbody");
+      i += 2;
+      // A row must LOOK like one: leading pipe, or at least as many separators as the header has
+      // columns. Otherwise ordinary prose that happens to contain a pipe was pulled into the table.
+      const columns = mdTableRowCells(line).length;
+      const leadingPipe = line.text.trim().startsWith("|");
+      // Matched against the HEADER's own shape: a header that opens with `|` means every row does,
+      // which is what keeps ordinary prose containing a single pipe out of the table.
+      const looksLikeRow = (l) =>
+        (leadingPipe ? l.text.trim().startsWith("|") : true)
+        && (l.text.match(/\|/g) || []).length >= columns - 1;
+      while (i < lines.length && lines[i].text.trim() && looksLikeRow(lines[i])) {
+        const row = document.createElement("tr");
+        mdTableRowCells(lines[i]).forEach((cell) => {
+          const td = document.createElement("td");
+          renderInline(td, text, cell.from, cell.to, emit);
+          row.appendChild(td);
+        });
+        body.appendChild(row);
+        i += 1;
+      }
+      table.appendChild(body);
+      const scroller = document.createElement("div");
+      scroller.className = "md-table-wrap";
+      scroller.appendChild(table);
+      root.appendChild(scroller);
+      continue;
+    }
+
+    // Paragraph: everything up to a blank line or the next block starter.
+    const para = document.createElement("p");
+    para.className = "md-p";
+    const from = line.start;
+    let last = line;
+    i += 1;
+    while (i < lines.length && !isBlockStart(lines[i], i)) {
+      last = lines[i];
+      i += 1;
+    }
+    renderInline(para, text, from, last.end, emit);
+    root.appendChild(para);
+  }
+}
+
+// Lists, one nesting level at a time. `indent` is the column the current level starts at, so a
+// deeper item opens a nested list and a shallower one ends this call.
+function renderMdList(root, lines, start, text, emit, indent) {
+  const ordered = !lines[start].text.match(MD_BULLET);
+  const list = document.createElement(ordered ? "ol" : "ul");
+  list.className = "md-list";
+  let i = start;
+
+  while (i < lines.length) {
+    const line = lines[i];
+    const match = line.text.match(MD_BULLET) || line.text.match(MD_ORDERED);
+    if (!match) break;
+    const depth = match[1].length;
+    if (depth < indent) break;
+    if (depth > indent) {
+      // A level whose first item is already indented has no `<li>` to nest under, and appending to
+      // the list itself produced `<ul>` directly inside `<ul>` — invalid, and it renders unindented.
+      let host = list.lastElementChild;
+      if (!host) {
+        host = document.createElement("li");
+        list.appendChild(host);
+      }
+      i = renderMdList(host, lines, i, text, emit, depth);
+      continue;
+    }
+    const item = document.createElement("li");
+    const body = match[match.length - 1];
+    const from = line.start + line.text.length - body.length;
+    renderInline(item, text, from, line.end, emit);
+    list.appendChild(item);
+    i += 1;
+  }
+  root.appendChild(list);
+  return i;
+}
+
 function renderAnswerWithCitations(text, citations, runId) {
   const container = document.createElement("div");
 
@@ -1598,11 +2017,11 @@ function renderAnswerWithCitations(text, citations, runId) {
   // "this sentence" and "reference 2" are visibly the same thing.
   const numbers = new Map();
   citations.forEach((citation) => {
-    const key = `${citation.source_id}\u0000${citation.locator}`;
+    const key = referenceKey(citation);
     if (!numbers.has(key)) numbers.set(key, numbers.size + 1);
   });
   const referenceNumberFor = (citation) =>
-    numbers.get(`${citation.source_id}\u0000${citation.locator}`) || 0;
+    numbers.get(referenceKey(citation)) || 0;
 
   // Locate each citation's quote as a literal substring of the RAW answer text (never
   // pre-escaped — a DOM text node needs no escaping, only innerHTML does). The model may
@@ -1621,41 +2040,85 @@ function renderAnswerWithCitations(text, citations, runId) {
     if (at !== -1) matches.push({ start: at, end: at + needle.length, citation });
   });
   matches.sort((a, b) => a.start - b.start);
-
-  let cursor = 0;
+  // Overlapping spans: keep the first, drop the rest. Done HERE rather than inside `emit`, which
+  // walks ranges per text run and would otherwise have to re-decide the same thing every time.
+  const ranges = [];
   matches.forEach((match) => {
-    if (match.start < cursor) return; // overlapping quotes — keep the first, skip the rest
-    if (match.start > cursor) {
-      container.appendChild(document.createTextNode(text.slice(cursor, match.start)));
-    }
+    if (ranges.length && match.start < ranges[ranges.length - 1].end) return;
+    ranges.push(match);
+  });
+
+  // Every fragment emitted for a given citation, so the reference number can be stamped on the LAST
+  // one after the whole answer is built. Deciding "is this the last fragment" inside `emit` — the
+  // first version's `sliceTo === match.end` — is wrong whenever a span's final characters are
+  // markdown syntax the renderer DROPS (a closing `**`, a backtick, a link's `](url)`): no emit
+  // call ever reaches `match.end`, so no fragment qualified and the stroke got NO number at all,
+  // while the References panel numbered it anyway. Found by an independent review fuzzing the
+  // renderer; the invariant even reasoned about this line and had the direction backwards, since
+  // duplicate numbers were the risk it guarded and zero numbers was the one that happened.
+  const fragments = new Map();
+
+  const strokeFor = (match, slice) => {
     const span = document.createElement("span");
     span.className = match.citation.verified ? "citation" : "citation is-unverified";
     // A number, so a stroke can be matched to its entry in the reference list below — and so the
     // page reads as annotated prose rather than as a block of highlighter. Set as a CSS counter
     // rather than injected text, which keeps the answer's own words exactly as the model wrote
-    // them (a copy-paste must not pick up UI furniture).
-    span.dataset.reference = String(referenceNumberFor(match.citation));
+    // them (a copy-paste must not pick up UI furniture). Only the LAST fragment carries it: a
+    // stroke crossing an inline `**bold**` is emitted as more than one span, and every fragment
+    // carrying the number would print it two or three times. Stamped after the render, below.
+    const seen = fragments.get(match) || [];
+    seen.push(span);
+    fragments.set(match, seen);
     // The coordinate this stroke points at, so `focusReference` can light up every stroke sharing
     // it. `.citation.is-focused` has been in the stylesheet promising that since the References
     // view landed, with nothing ever setting it — found by an independent review.
     span.dataset.refKey = referenceKey(match.citation);
     span.title = `${match.citation.source_id} · ${match.citation.locator}`;
-    span.textContent = text.slice(match.start, match.end);
+    span.textContent = slice;
+    // The other half of the reciprocal highlight: pointing at a stroke lights up its reference row,
+    // exactly as pointing at the row lights up the stroke. Registered whether or not the stroke is
+    // clickable — a reader hovering prose is asking "which source is this", and the answer should
+    // not depend on whether the turn happens to carry a run id.
+    const key = referenceKey(match.citation);
+    span.addEventListener("mouseenter", () => linkReference(key, true));
+    span.addEventListener("mouseleave", () => linkReference(key, false));
     if (runId) {
       span.classList.add("citation-clickable");
-      // The inline stroke, when a quote CAN be located (same-language answers). Its detail panel
-      // is created here so it belongs to this span rather than to a shared slot.
       // Opens the References view and takes the reader to that entry, rather than expanding a
       // panel inside the paragraph they are reading — which pushed the rest of the answer down and
       // made a crowded column worse.
       span.addEventListener("click", () => focusReference(match.citation));
     }
-    container.appendChild(span);
-    cursor = match.end;
+    return span;
+  };
+
+  // The ONE place raw text becomes nodes. The markdown renderer hands it raw offsets and never
+  // creates a text node itself, which is what lets block structure and citation ranges compose:
+  // a stroke that crosses a heading boundary or an inline marker is split here, not lost.
+  const emit = (parent, from, to) => {
+    if (to <= from) return;
+    let cursor = from;
+    ranges.forEach((match) => {
+      if (match.end <= cursor || match.start >= to) return;
+      const sliceFrom = Math.max(match.start, cursor);
+      const sliceTo = Math.min(match.end, to);
+      if (sliceFrom > cursor) {
+        parent.appendChild(document.createTextNode(text.slice(cursor, sliceFrom)));
+      }
+      parent.appendChild(strokeFor(match, text.slice(sliceFrom, sliceTo)));
+      cursor = sliceTo;
+    });
+    if (cursor < to) parent.appendChild(document.createTextNode(text.slice(cursor, to)));
+  };
+
+  renderMarkdownInto(container, text, emit);
+
+  // Exactly one number per citation, on its last fragment — decided here, where every fragment is
+  // known, rather than guessed at while emitting.
+  fragments.forEach((spans, match) => {
+    spans[spans.length - 1].dataset.reference = String(referenceNumberFor(match.citation));
   });
-  if (cursor < text.length) {
-    container.appendChild(document.createTextNode(text.slice(cursor)));
-  }
 
   if (citations.length) {
     container.appendChild(renderReferenceLink(citations));
@@ -1723,6 +2186,18 @@ function renderTurn(turn) {
     // same reason: a shared helper the CALL SITE opts into, never a button the shared renderer
     // grows on its own.
     answer.appendChild(saveAsNoteButton(turn.answer));
+    // Suggested next questions, from the SAME run that produced the answer — no extra model call.
+    // A user found this affordance on the overview and pointed out it appeared exactly once per
+    // notebook and never again. Labelled "Ask next" rather than the overview's "Start with":
+    // deliberately NOT unified, because the overview's appears before any conversation exists, and
+    // "ask next" there would be asking the reader to continue something they have not begun.
+    if (turn.follow_ups && turn.follow_ups.length) {
+      const label = document.createElement("div");
+      label.className = "chat-overview-head";
+      label.textContent = t("chat.askNext", "Ask next");
+      answer.appendChild(label);
+      answer.appendChild(starterQuestionRow(turn.follow_ups));
+    }
   }
   wrapper.appendChild(answer);
 
@@ -1920,6 +2395,19 @@ function supersededNote(el) {
 function initChatPanel() {
   const history = document.getElementById("chat-history");
   const empty = document.getElementById("chat-empty");
+  const overviewEl = document.getElementById("chat-overview");
+
+  // ONE rebuild, used by every path that redraws the thread. The overview is the thread's first
+  // entry now, so a `history.innerHTML = ""` that forgot to put it back would silently delete it —
+  // which is exactly what the old sibling layout was avoiding.
+  const rebuildHistory = (turns, pending) => {
+    history.textContent = "";
+    history.appendChild(overviewEl);
+    history.appendChild(empty);
+    empty.hidden = turns.length > 0 || Boolean(pending);
+    turns.forEach((turn) => history.appendChild(renderTurn(turn)));
+    if (pending) history.appendChild(renderTurn(pending));
+  };
   const form = document.getElementById("ask-form");
   const input = document.getElementById("ask-input");
   const submitBtn = document.getElementById("ask-submit");
@@ -1949,12 +2437,9 @@ function initChatPanel() {
   store.on("notebook:switched", () => {
     overviewToken += 1; // a notebook switch strands any generation still in flight
     renderChatOverview();
-    history.innerHTML = "";
-    // Un-hide the placeholder too: `chat:turnAdded` hides it, and without this a switch FROM a
-    // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at
-    // all. Latent before the wordmark button made "go to an empty notebook" a one-click action.
-    empty.hidden = false;
-    history.appendChild(empty);
+    // The placeholder comes back too: `chat:turnAdded` hides it, and without this a switch FROM a
+    // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at all.
+    rebuildHistory([]);
   });
 
   // Chat's own reaction to the corpus changing. Re-render only — deliberately NOT a token bump:
@@ -1965,10 +2450,15 @@ function initChatPanel() {
   store.on("sources:changed", () => renderChatOverview());
   renderChatOverview();
 
-  store.on("chat:turnAdded", ({ turn }) => {
+  store.on("chat:turnAdded", ({ turn, restoring }) => {
     empty.hidden = true;
     history.appendChild(renderTurn(turn));
-    history.scrollTop = history.scrollHeight;
+    // Only a NEW turn scrolls to the bottom. Replaying a saved conversation on open used to run
+    // this once per turn, so a returning reader landed with the overview — and, on a notebook with
+    // turns but no overview yet, the "Generate overview" button — already a thousand pixels above
+    // the fold. Invariant 57 says the overview scrolls AWAY as the conversation grows; starting
+    // there is a different thing.
+    if (!restoring) history.scrollTop = history.scrollHeight;
   });
 
   store.on("chat:pending", ({ pending }) => {
@@ -2042,10 +2532,7 @@ function initChatPanel() {
       if (generation !== notebookGeneration) return;
       state.turns = notebook.turns;
       refreshReferenceView();
-      history.innerHTML = "";
-      history.appendChild(empty);
-      empty.hidden = state.turns.length > 0;
-      state.turns.forEach((turn) => history.appendChild(renderTurn(turn)));
+      rebuildHistory(state.turns);
       void result; // already folded into notebook.turns above
     } catch (err) {
       status.finish();
@@ -2053,11 +2540,7 @@ function initChatPanel() {
       pendingTurn.pending = false;
       pendingTurn.answer = t("err.generic", `(error) ${err.message}`, { message: err.message });
       pendingTurn.citations = [];
-      history.innerHTML = "";
-      history.appendChild(empty);
-      empty.hidden = true;
-      state.turns.forEach((turn) => history.appendChild(renderTurn(turn)));
-      history.appendChild(renderTurn(pendingTurn));
+      rebuildHistory(state.turns, pendingTurn);
     } finally {
       store.emit("chat:pending", { pending: false });
     }
@@ -2837,7 +3320,7 @@ function showStudioView(view) {
 function collectReferences() {
   const byCoordinate = new Map();
   const add = (citation) => {
-    const key = `${citation.source_id}\u0000${citation.locator}`;
+    const key = referenceKey(citation);
     const existing = byCoordinate.get(key);
     if (!existing) {
       byCoordinate.set(key, { ...citation, quotes: citation.quote ? [citation.quote] : [], uses: 1 });
@@ -2868,8 +3351,40 @@ function refreshReferenceView() {
   if (host && !host.closest("[data-view-body]")?.hidden) renderReferenceView();
 }
 
+//: The coordinate key, and the SEPARATOR is load-bearing. It used to be U+0000, which meant every
+//: `[data-ref-key="…"]` selector built from it matched NOTHING: `CSS.escape` maps U+0000 to U+FFFD
+//: by spec, and so does the CSS tokenizer when it parses a selector, so there is no spelling of that
+//: selector that could ever match. The reciprocal highlight was dead on arrival and `focusReference`
+//: had never once focused a card — found by an independent review measuring it in a real browser
+//: rather than by reading. U+001F round-trips through `CSS.escape` and is just as impossible inside
+//: a source id or a locator.
+const REFERENCE_KEY_SEP = "\u001f";
+
 function referenceKey(citation) {
-  return `${citation.source_id}\u0000${citation.locator}`;
+  return `${citation.source_id}${REFERENCE_KEY_SEP}${citation.locator}`;
+}
+
+//: A source's HOST or kind, the small grey chip Kagi and Google both put beside a reference title
+//: so a row's provenance reads at a glance without opening anything.
+function referenceOrigin(source) {
+  if (!source) return "";
+  if (source.kind === "web" || source.kind === "youtube") {
+    try {
+      return new URL(source.origin).hostname.replace(/^www\./, "");
+    } catch {
+      return source.kind;
+    }
+  }
+  return source.kind;
+}
+
+// Reciprocal highlight: pointing at a reference lights up the strokes it backs, and pointing at a
+// stroke lights up its reference. The thing the user pointed at in Kagi's assistant — without it a
+// numbered stroke and a numbered row are two lists the reader has to join up by eye.
+function linkReference(key, on) {
+  document
+    .querySelectorAll(`.citation[data-ref-key="${CSS.escape(key)}"], .ref-card[data-ref-key="${CSS.escape(key)}"]`)
+    .forEach((el) => el.classList.toggle("is-linked", on));
 }
 
 function renderReferenceView() {
@@ -2877,13 +3392,16 @@ function renderReferenceView() {
   const empty = document.getElementById("references-empty");
   if (!host) return;
   const references = collectReferences();
-  host.innerHTML = "";
+  host.textContent = "";
   empty.hidden = references.length > 0;
 
   references.forEach((reference, index) => {
+    const source = (state.sources || []).find((s) => s.id === reference.source_id);
     const item = document.createElement("div");
     item.className = reference.verified ? "ref-card" : "ref-card is-unverified";
     item.dataset.refKey = referenceKey(reference);
+    item.addEventListener("mouseenter", () => linkReference(item.dataset.refKey, true));
+    item.addEventListener("mouseleave", () => linkReference(item.dataset.refKey, false));
 
     const head = document.createElement("button");
     head.type = "button";
@@ -2894,41 +3412,86 @@ function renderReferenceView() {
     number.textContent = String(index + 1);
     head.appendChild(number);
 
+    // Title on the first line, provenance on the second — one ROW, not a card full of quotes. The
+    // previous version rendered every quote as a full blockquote, always open, so a source cited
+    // eight times filled the whole column and the list stopped being scannable at all.
+    const main = document.createElement("span");
+    main.className = "ref-card-main";
+
     const name = document.createElement("span");
     name.className = "ref-card-name";
-    const source = (state.sources || []).find((s) => s.id === reference.source_id);
     name.textContent = source ? sourceLabel(source) : reference.source_id;
-    head.appendChild(name);
+    main.appendChild(name);
 
+    const meta = document.createElement("span");
+    meta.className = "ref-card-meta";
+    const origin = referenceOrigin(source);
+    if (origin) {
+      const chip = document.createElement("span");
+      chip.className = "ref-card-chip";
+      chip.textContent = origin;
+      meta.appendChild(chip);
+    }
     if (reference.locator && reference.locator !== "whole") {
       const locator = document.createElement("span");
       locator.className = "reference-locator";
       locator.textContent = reference.locator;
-      head.appendChild(locator);
+      meta.appendChild(locator);
     }
-
     const uses = document.createElement("span");
     uses.className = "ref-card-uses";
     uses.textContent = t("references.uses", `${reference.uses}\u00d7`, { n: reference.uses });
-    head.appendChild(uses);
+    meta.appendChild(uses);
+    if (!reference.verified) {
+      const badge = document.createElement("span");
+      badge.className = "ref-card-unverified";
+      badge.textContent = t("cite.unverifiedShort", "unverified");
+      meta.appendChild(badge);
+    }
+    main.appendChild(meta);
+    head.appendChild(main);
 
-    const passage = document.createElement("div");
-    passage.className = "ref-card-passage";
-    passage.hidden = true;
+    const caret = document.createElement("span");
+    caret.className = "ref-card-caret";
+    caret.textContent = "\u203a";
+    head.appendChild(caret);
+    item.appendChild(head);
 
-    // The card opens INTO the original passage: click the reference, the source text slides out
-    // beneath it, with the quoted span highlighted. That is the whole loop the user asked for, and
-    // it stays inside this view rather than throwing a modal over the page.
+    // One clamped line of the passage, so a row says what it is without being opened. Kagi's
+    // popover and Google's card both lead with a snippet for the same reason.
+    if (reference.quotes.length) {
+      const snippet = document.createElement("div");
+      snippet.className = "ref-card-snippet";
+      snippet.textContent = reference.quotes[0];
+      item.appendChild(snippet);
+    }
+
+    const body = document.createElement("div");
+    body.className = "ref-card-body";
+    body.hidden = true;
+
+    // Opening the row reveals every passage cited from this coordinate, then the original text with
+    // the first one highlighted — the whole loop, still inside this view rather than over the page.
     head.addEventListener("click", async () => {
-      if (!passage.hidden) {
-        passage.hidden = true;
+      if (!body.hidden) {
+        body.hidden = true;
         item.classList.remove("is-open");
         return;
       }
       item.classList.add("is-open");
-      passage.hidden = false;
-      if (passage.dataset.loaded) return;
-      passage.textContent = t("cite.loading", "Loading…");
+      body.hidden = false;
+      if (body.dataset.loaded) return;
+      body.textContent = "";
+      reference.quotes.forEach((quote) => {
+        const blockquote = document.createElement("blockquote");
+        blockquote.className = "reference-quote";
+        blockquote.textContent = quote;
+        body.appendChild(blockquote);
+      });
+      const passage = document.createElement("div");
+      passage.className = "ref-card-passage";
+      passage.textContent = t("cite.loading", "Loading\u2026");
+      body.appendChild(passage);
       try {
         const data = await api(
           `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(reference.source_id)}`
@@ -2942,20 +3505,13 @@ function renderReferenceView() {
               renderTextWithOptionalHighlight(block.text, reference.quotes[0] || null)
             );
           });
-        passage.dataset.loaded = "1";
+        body.dataset.loaded = "1";
       } catch (err) {
         passage.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
       }
     });
 
-    item.appendChild(head);
-    reference.quotes.forEach((quote) => {
-      const blockquote = document.createElement("blockquote");
-      blockquote.className = "reference-quote";
-      blockquote.textContent = quote;
-      item.appendChild(blockquote);
-    });
-    item.appendChild(passage);
+    item.appendChild(body);
     host.appendChild(item);
   });
 }

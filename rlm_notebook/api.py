@@ -526,6 +526,10 @@ class ChatTurnResponse(BaseModel):
     answer: str
     citations: list[CitationResponse]
     run_id: str | None = None
+    #: Suggested next questions, from the SAME run that produced the answer (`schema.Answer`). Not
+    #: verified against anything — a question is a prompt, not a claim (invariant 5 has nothing to
+    #: check). Empty for every turn persisted before the field existed.
+    follow_ups: list[str] = []
 
 
 class NoteResponse(BaseModel):
@@ -611,6 +615,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
                 answer=t.answer.text,
                 citations=_citation_responses(t.answer.citations, corpus, t.answer.text),
                 run_id=t.run_id,
+                follow_ups=t.answer.follow_ups,
             )
             for t in notebook.turns
         ],
@@ -952,6 +957,7 @@ class AskRequest(RunOptions):
 class AskResponse(BaseModel):
     text: str
     citations: list[CitationResponse]
+    follow_ups: list[str] = []
 
 
 @contextlib.contextmanager
@@ -1203,6 +1209,7 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
     return AskResponse(
         text=answer.text,
         citations=_citation_responses(answer.citations, corpus, answer.text),
+        follow_ups=answer.follow_ups,
     )
 
 

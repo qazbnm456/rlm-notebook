@@ -185,3 +185,40 @@ def test_the_settings_filename_is_not_globbed_by_the_notebook_listing(tmp_path):
     write_settings({"output_language": "Japanese"}, tmp_path)
     assert settings_path(tmp_path).exists()
     assert list_notebook_summaries(base_dir=tmp_path) == ([], [])
+
+
+def test_the_run_timeout_default_follows_how_the_model_is_served(monkeypatch):
+    """A `claude-agent-sdk/` model spawns a Claude Code CLI subprocess per LM call (invariant 35),
+    and one WHOLE run has to fit inside this bound. A user on that path hit
+    `502 … timed out after 300.0s` with a trace file holding one `run_start` and nothing else — the
+    run was cancelled before its first step ever returned, so the backstop was cutting off runs
+    rather than catching runaways.
+
+    A backstop's only real question is whether it sits far enough past a legitimate run; 300s
+    demonstrably did not on this path, and does on the other.
+    """
+    monkeypatch.delenv("RN_RUN_TIMEOUT_SECONDS", raising=False)
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    assert NotebookConfig.from_env().run_timeout_seconds == 300.0
+
+    monkeypatch.setenv("RN_MAIN_MODEL", "claude-agent-sdk/claude-sonnet-5")
+    assert NotebookConfig.from_env().run_timeout_seconds == 1800.0
+
+    # An explicit value still wins on BOTH paths — the point is the default, not a floor.
+    monkeypatch.setenv("RN_RUN_TIMEOUT_SECONDS", "45")
+    assert NotebookConfig.from_env().run_timeout_seconds == 45.0
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    assert NotebookConfig.from_env().run_timeout_seconds == 45.0
+
+
+def test_the_step_budget_is_this_projects_own_choice_not_the_harness_default(monkeypatch):
+    """25, not rlm-harness's 10. Pinned because it looks like a value someone drifted and is
+    actually a decision: exhausting the budget loses a run already paid for, unused headroom costs
+    nothing (the loop ends when the model submits), and a runaway is bounded by the wall-clock
+    timeout instead — which is a bound the step budget cannot be."""
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    monkeypatch.delenv("RN_MAX_ITERATIONS", raising=False)
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    assert NotebookConfig.from_env().max_iterations == 25

@@ -90,6 +90,17 @@ class Answer(BaseModel):
 
     text: str
     citations: list[Citation] = Field(default_factory=list)
+    #: Two or three questions THESE sources can answer next, in the reader's language.
+    #:
+    #: On the ANSWER rather than from a second model call, which is the whole point: the model has
+    #: the corpus and its own answer in context already, so this costs nothing extra. Starter
+    #: questions previously existed only on the overview (invariant 38), so the affordance a user
+    #: found useful appeared exactly once per notebook and never again.
+    #:
+    #: NOT citation-grounded and deliberately not verified: a question is a prompt, not a claim, so
+    #: invariant 5 has nothing to check. Optional and defaulting to empty, so every turn persisted
+    #: before this field existed still loads.
+    follow_ups: list[str] = Field(default_factory=list)
 
 
 class Summary(BaseModel):

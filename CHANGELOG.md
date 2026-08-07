@@ -1652,3 +1652,83 @@ questions with verifiable citations, and get a distilled research artifact out.
   translation key, a `t` shadowed in three closures, Escape-during-rename that could still commit,
   arrow keys silently rewriting a collapsed panel's width, `localStorage` written on every
   `pointermove`, and hover rules that were inert on the element they were pointing at.
+
+- **Five things a user asked for after reading real answers on the page.**
+
+  **Markdown is rendered.** Answers arrived full of raw `**bold**`, `## headings` and `- lists`,
+  because the model writes markdown whether or not anyone asked. The renderer is hand-written and
+  builds DOM nodes — no library, no HTML strings, the exception `bugcademy`'s studio states outright
+  for the reason that applies here too: every string came out of a model that has been reading
+  source content an attacker may have written, and one missed `esc()` in a string-building renderer
+  is an XSS sink. Headings, nested lists, blockquotes, inline and fenced code, tables, rules, bold
+  and italic. **A link is shown but not clickable** — invariant 1 refuses to let the model reach a
+  URL because a prompt-injected source could steer it into exfiltrating notebook contents, and an
+  `<a href>` in an answer is that same hazard with the reader's click as the transport. The URL is
+  visible so it can be copied deliberately.
+
+  The renderer never creates a text node: it walks raw offsets and appends through `emit`, which
+  owns citation splitting. That is what lets markdown structure and highlighter strokes compose — a
+  stroke crossing an inline `**bold**` is split into fragments, and only the last carries the
+  reference number. Verified against a real DOM shim under `node` before it was believed: nested
+  lists land inside their `<li>`, a `<script>` in a code fence stays text, zero anchors created.
+
+  **Every answer now suggests what to ask next.** `Answer.follow_ups` comes from the SAME run that
+  wrote the answer, so it costs no extra model call; starter questions previously existed only on
+  the overview, appearing once per notebook and never again. Not citation-grounded — a question is a
+  prompt, not a claim. The overview keeps "Start with" and a turn says "Ask next", deliberately not
+  unified: the overview's appears before any conversation exists.
+
+  **The overview stopped covering the conversation.** It was a sibling above the thread with
+  `max-height: 45%`, so it permanently owned half the chat column. It is the thread's first entry
+  now and scrolls away as the conversation grows.
+
+  **The References view is a list of rows again.** It rendered every quote as an always-visible
+  blockquote, so one source cited eight times filled the column. Now: number, title, a hostname
+  chip, the use count, one clamped line of the passage, everything else behind a click — the shape
+  Kagi's assistant and Google's AI answers both use. And the part a user actually pointed at:
+  pointing at a reference lights up the strokes it backs, pointing at a stroke lights up its row.
+
+  **The run log is a timeline** — one rail with a node per step, the current one pulsing and open,
+  past ones clamped and expandable, each timestamp carrying how long that step took. Four separate
+  left borders read as four unrelated items; a rail reads as one process advancing.
+
+  Also: the reference link under an answer gets its own line and real space above it.
+
+- **What two independent reviews then found in that slice.** Both ran the real code rather than
+  reading it — one fuzzed the markdown renderer against a DOM shim under `node` (~62,000
+  documents), the other drove `app.js` in headless Chrome.
+
+  **The reciprocal highlight had never worked, in this slice or the one that introduced
+  `focusReference`.** `referenceKey` joined its coordinate with U+0000, and `CSS.escape` maps
+  U+0000 to U+FFFD by spec — as does the CSS tokenizer parsing the selector — so every
+  `[data-ref-key="..."]` lookup matched nothing at all. Measured in a browser; invisible to the
+  Python suite and to any amount of reading. The separator is U+001F now.
+
+  **A citation's reference number vanished whenever its span ended on markdown syntax the renderer
+  drops** — a closing `**`, a backtick, a link's `](url)`. `isLast` was decided while emitting, and
+  no emit ever reached the span's end in those cases, so the stroke got no number while the
+  References panel numbered it anyway. Stamped after the render now, where every fragment is known.
+
+  Also fixed: emphasis follows a flanking rule, so `3 * 4 * 5` and `my_var and other_var_name` are
+  left alone; a table written directly under a sentence is no longer swallowed by the paragraph, and
+  prose containing a pipe is no longer swallowed by a table; a list whose first item is indented no
+  longer emits `<ul>` inside `<ul>`; the run log's step duration is visible text rather than a
+  tooltip clipped by the log's own scroller, and the first row measures from the run's start;
+  `is-current` is cleared when a run finishes; `.is-focused` and `.is-linked` are genuinely disjoint
+  now rather than only claimed to be; the new pulse has a reduced-motion opt-out; opening a notebook
+  no longer lands scrolled past the overview; and a markdown link's URL can actually be copied,
+  which the tooltip alone never allowed.
+
+  Three tests were widened after mutation testing walked past them: the navigable-link check missed
+  `setAttribute("href")`, a template-literal `createElement(`a`)` and a `window.location`
+  assignment, and nothing pinned the chat overview's position inside the thread.
+
+- **`RN_MAX_ITERATIONS` is 25 and `RN_RUN_TIMEOUT_SECONDS` depends on how the model is served.** A
+  user hit `502 ... timed out after 300.0s` on the subscription path, with a trace file holding one
+  `run_start` and nothing else — cancelled before its first step ever returned. That path spawns a
+  Claude Code CLI subprocess per LM call (invariant 35), so the default is 1800s there and stays
+  300s for a direct API model. The step budget went from rlm-harness's own 10 to 25 because the
+  failure modes are not symmetric: exhausting it loses a run already paid for, unused headroom costs
+  nothing, and a runaway is bounded by the wall-clock timeout instead. A judgement, not a
+  measurement — the traces to hand show a Summary and an FAQ finishing in 3 steps each, on a small
+  corpus. The timeout error names the variable now.

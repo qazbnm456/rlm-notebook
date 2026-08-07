@@ -495,3 +495,83 @@ def test_the_studio_rail_thresholds_cannot_oscillate():
         "the drag handler no longer pairs the EXPAND threshold with the collapsed state; a swapped "
         "pair reintroduces the oscillation the constants above only look like they prevent"
     )
+
+
+def test_the_markdown_renderer_never_creates_a_navigable_link():
+    """A markdown link is SHOWN, never clickable, and that is a security decision rather than an
+    omission. Invariant 1 refuses to let the model reach a URL because a prompt-injected source
+    could steer it into exfiltrating notebook contents to an attacker-chosen address; an `<a href>`
+    in an answer is the same hazard with the reader's click as the transport, arriving dressed as a
+    citation-grounded reference.
+
+    Pinned because `createElement("a")` is the obvious thing a future edit adds — the renderer even
+    has the URL in hand at that point.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("const MD_FENCE")
+    end = script.index("function renderAnswerWithCitations")
+    renderer = script[start:end]
+    assert "mdLinkAt" in renderer, "the extraction no longer sees the renderer; this would pass vacuously"
+
+    # An independent review mutation-tested the first version of this list and got THREE navigable
+    # links past it: `setAttribute("href", url)`, a template-literal `createElement(`a`)`, and a
+    # click handler assigning `window.location`. A sink list is only as good as its worst omission,
+    # so the anchor check is now a pattern over any quoting, and navigation is covered as well as
+    # markup.
+    assert not re.search(r"""createElement\(\s*['"`]a['"`]""", renderer), (
+        "the markdown renderer creates an anchor element"
+    )
+    for sink in (".href", "setAttribute(\"href\"", "setAttribute('href'", "window.open",
+                 "location.assign", "location.replace", "window.location", "document.location"):
+        assert sink not in renderer, f"the markdown renderer builds a navigable link via {sink}"
+
+
+def test_the_markdown_renderer_builds_nodes_rather_than_markup():
+    """The whole reason this is hand-written instead of a library (invariant 29): every string it
+    handles came out of a model that has been reading source content an attacker may have written.
+    The sibling studios build markup as HTML strings with an `esc()` helper, where one missed call
+    is an XSS sink; `bugcademy` states the same exception for the same reason."""
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    renderer = script[script.index("const MD_FENCE") : script.index("function renderAnswerWithCitations")]
+    for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
+        assert sink not in renderer, f"the markdown renderer uses {sink}"
+    # And it must never make its own text nodes: `emit` owns that, which is what keeps a citation
+    # stroke splitting correctly across block and inline boundaries.
+    assert "createTextNode" not in renderer, (
+        "the markdown renderer creates text nodes directly; citation ranges are applied in `emit`, "
+        "so text bypassing it can never carry a highlighter stroke"
+    )
+
+
+
+def test_the_chat_overview_lives_inside_the_thread_and_is_always_put_back():
+    """Invariant 57's structure, pinned. The overview is `#chat-history`'s first child now, so any
+    path that clears the list without re-appending it silently DELETES the notebook's front page —
+    which is the risk the invariant names and accepts, and nothing was checking it.
+
+    Two assertions because the hazard has two halves: the markup has to nest it, and the code has to
+    have exactly one place that clears the list.
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    history_at = html.index('id="chat-history"')
+    overview_at = html.index('id="chat-overview"')
+    close_at = html.index("</div>", html.index('id="chat-empty"'))
+    assert history_at < overview_at < close_at, (
+        "#chat-overview is no longer nested inside #chat-history; it was a sibling pinned above the "
+        "thread, which cost the conversation 45% of the column permanently"
+    )
+
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function initChatPanel()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+    assert "const rebuildHistory" in body, "the extraction broke; this would pass vacuously"
+    # Comments stripped first: this file DISCUSSES `history.innerHTML = ""` in the comment explaining
+    # why exactly one place may do it, and counting that as a call site is a false positive that
+    # would make the assertion unfixable.
+    code = re.sub(r"//[^\n]*", "", body)
+    clears = re.findall(r"history\.(?:innerHTML|textContent)\s*=\s*\"\"", code)
+    assert len(clears) == 1, (
+        f"{len(clears)} places clear the chat history; exactly one (`rebuildHistory`) may, because "
+        f"it is the only one that puts the overview node back"
+    )

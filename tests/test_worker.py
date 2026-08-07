@@ -48,7 +48,7 @@ def test_emit_serializes_pydantic_models_via_model_dump(capsys):
 
     worker._emit({"ok": True, "result": Answer(text="hi", citations=[])})
     payload = json.loads(capsys.readouterr().out)
-    assert payload["result"] == {"text": "hi", "citations": []}
+    assert payload["result"] == {"text": "hi", "citations": [], "follow_ups": []}
 
 
 def test_main_reports_a_clean_error_on_malformed_stdin(monkeypatch, capsys):

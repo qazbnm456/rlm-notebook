@@ -119,7 +119,19 @@ class NotebookConfig:
 
     #: Pinned; kept as a field so the value actually configured is visible in the trace.
     interpreter: str = PINNED_INTERPRETER
-    max_iterations: int = 10
+    #: 25, not rlm-harness's own default of 10. The two failure modes are NOT symmetric: exhausting
+    #: the budget loses a run that has already been paid for, while unused headroom costs nothing at
+    #: all (the loop stops when the model submits) and a runaway is caught by `run_timeout_seconds`
+    #: below, which is a wall-clock bound the step budget cannot be. And this project's task is
+    #: unusually iterative for the family — the sibling projects hand their model ONE artifact,
+    #: while every task here explores a whole notebook's corpus blob by `.find()` and slicing, which
+    #: is the mechanic invariant 8 describes and it costs a step per probe.
+    #:
+    #: **A judgement, not a measurement**, and worth saying so: the traces available when this was
+    #: raised show a Summary and an FAQ finishing in 3 steps each — on a SMALL corpus, which says
+    #: nothing about a large one. 25 is chosen to sit clearly past where a plausible run ends, not
+    #: because anything was observed needing it.
+    max_iterations: int = 25
     max_llm_calls: int = 30
     max_tokens: int = 8192
     max_output_chars: int = 10_000
@@ -146,6 +158,14 @@ class NotebookConfig:
     #: `max_iterations`/`max_llm_calls` budget (which bounds the RLM loop's *steps*, not wall-clock
     #: time; a slow model/network can still run long past a small iteration budget). `cli.py`'s
     #: in-process commands don't use this at all — only the subprocess-isolated API path does.
+    #:
+    #: **The DEFAULT depends on the model path, because the two are an order of magnitude apart.**
+    #: A `claude-agent-sdk/` model (invariant 35) spawns a Claude Code CLI subprocess per LM call,
+    #: and one whole run has to fit inside this bound — so 300s could not cover a run whose FIRST
+    #: response was measured in minutes. A user hit exactly that: `502 … timed out after 300.0s`,
+    #: with a trace file holding one `run_start` and nothing else, i.e. the run was cancelled before
+    #: its first step ever returned. The API-key path stays at 300s, where a step measures in
+    #: single-digit seconds. See `_default_run_timeout`.
     run_timeout_seconds: float = 300.0
 
     @classmethod
@@ -171,7 +191,7 @@ class NotebookConfig:
             api_key=(os.getenv("RN_API_KEY") or "").strip() or None,
             base_url=(os.getenv("RN_BASE_URL") or "").strip() or None,
             interpreter=interpreter,
-            max_iterations=_env_int("RN_MAX_ITERATIONS", 10),
+            max_iterations=_env_int("RN_MAX_ITERATIONS", 25),
             max_llm_calls=_env_int("RN_MAX_LLM_CALLS", 30),
             max_tokens=_env_int("RN_MAX_TOKENS", 8192),
             max_output_chars=_env_int("RN_MAX_OUTPUT_CHARS", 10_000),
@@ -181,8 +201,22 @@ class NotebookConfig:
             tts_provider=(os.getenv("RN_TTS_PROVIDER") or "edge-tts").strip(),
             tts_voice_host_a=(os.getenv("RN_TTS_VOICE_HOST_A") or _DEFAULT_TTS_VOICE_HOST_A).strip(),
             tts_voice_host_b=(os.getenv("RN_TTS_VOICE_HOST_B") or _DEFAULT_TTS_VOICE_HOST_B).strip(),
-            run_timeout_seconds=_env_float("RN_RUN_TIMEOUT_SECONDS", 300.0),
+            run_timeout_seconds=_env_float("RN_RUN_TIMEOUT_SECONDS", _default_run_timeout(main)),
         )
+
+
+#: 300s for a direct API model, 1800s for the subscription path. NOT a guess at how long a run takes
+#: — it is a BACKSTOP, so the only question is whether it sits far enough past a legitimate run to
+#: never cut one off, and 300s demonstrably did not on the slower path. An explicit
+#: `RN_RUN_TIMEOUT_SECONDS` still wins, and the value actually in force is visible in the trace
+#: because it is an `RLMConfig` field.
+_SUBSCRIPTION_RUN_TIMEOUT = 1800.0
+_API_RUN_TIMEOUT = 300.0
+
+
+def _default_run_timeout(main_model: str) -> float:
+    """The wall-clock backstop appropriate to how `main_model` is served."""
+    return _SUBSCRIPTION_RUN_TIMEOUT if main_model.startswith(SUBSCRIPTION_PREFIX) else _API_RUN_TIMEOUT
 
 
 def max_upload_bytes() -> int:

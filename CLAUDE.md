@@ -1857,4 +1857,143 @@ them exist because an earlier design discussion mentioned them.
     dragging the panel away overwrite the user's own width with the minimum clamp; a drag commits
     only when it ends, and only if it ended open.
 
+55. **Markdown in an answer is rendered by a HAND-WRITTEN renderer that builds DOM nodes, and a link
+    in it is shown but NOT navigable.** Answers arrived full of raw `**bold**`, `## heading` and
+    `- list` characters because the model writes markdown whether or not anyone asked it to, and we
+    rendered the text verbatim.
+
+    **No library and no HTML strings**, which is invariant 29's rule stated where it costs the most.
+    The sibling studios build markup as HTML strings with an `esc()` helper; `bugcademy`'s studio
+    states the exception outright for the identical reason, and it is ours: every string here came
+    out of a model that has been reading source content an attacker may have written (invariant 6).
+    One missed `esc()` in a string-building renderer is an XSS sink; building nodes removes the
+    failure mode instead of guarding it. `test_the_markdown_renderer_builds_nodes_rather_than_markup`
+    pins it.
+
+    **A `[label](url)` renders its label with the URL revealed on hover and COPIED on click, never
+    an `<a href>`.** Invariant 1 refuses to let the MODEL reach a URL, because a prompt-injected
+    source could steer it into exfiltrating notebook contents to an attacker-chosen address; a
+    clickable link in an answer is the same hazard with the READER's click as the transport, and it
+    arrives dressed as a citation-grounded reference. Reaching it stays a deliberate act with an
+    address the reader has seen. A stated trade, not an omission — `createElement("a")` is exactly
+    what a later edit reaches for, since the renderer has the URL in hand at that point.
+
+    **Copy-on-click exists because "shown so a reader can copy it" was not true as first shipped.**
+    The URL reached the page only as `[data-tip]::after { content: attr(data-tip) }` — CSS generated
+    content, which no browser lets you select — on a `<span>` with no `tabindex`, so the *see* half
+    worked with a mouse and the *copy* half did not work at all. An independent review measured it.
+    The test that pins all this had to be widened too: mutation testing got THREE navigable links
+    past its first version — `setAttribute("href", …)`, a template-literal ``createElement(`a`)``,
+    and a click handler assigning `window.location`.
+
+    **The renderer never creates a text node.** It walks RAW OFFSETS into the original string and
+    appends through `emit`, which is where a citation range is split out. That is what lets block
+    structure and citation strokes compose rather than one being applied on top of the other's
+    output. Also pinned, because a renderer that made its own text nodes would silently produce
+    prose no stroke can ever reach.
+
+    **`data-reference` is stamped AFTER the whole answer is built, not decided while emitting — and
+    this invariant originally had the reasoning backwards.** A stroke crossing an inline `**bold**`
+    is emitted as several fragments, and the danger it named was the number printing two or three
+    times. The failure that actually happened is the opposite: `isLast` was `sliceTo === match.end`,
+    so whenever a span's final characters were syntax the renderer DROPS (a closing `**`, a
+    backtick, a link's `](url)`) no `emit` call ever reached `match.end`, nothing qualified, and the
+    stroke got NO number while the References panel numbered it anyway — precisely the two-lists-to
+    -join-by-eye that invariant 58 exists to remove. Collecting the fragments and stamping the last
+    one afterwards is decided where every fragment is known. Found by an independent review fuzzing
+    the renderer; duplicates were confirmed impossible across 17,058 located spans, so only the
+    guarded direction was ever real.
+
+    **Emphasis follows a simplified CommonMark flanking rule**, which is not pedantry: without it
+    `3 * 4 * 5` renders as `3 <em>4</em> 5` and `my_var and other_var_name` as
+    `my<em>var and other</em>var_name`. Multiplication and snake_case identifiers both appear in
+    this project's own subject matter.
+
+    **Known limits, stated rather than discovered later**: a blockquote does not nest other blocks
+    (a `- ` inside one is literal text); a `.md-link` tooltip inside a table is clipped by
+    `.md-table-wrap`'s own scroller — the ancestor case invariant 54 says is not covered, mitigated
+    by copy-on-click working everywhere; and `renderMdList` recurses per indent level, so ~3,400
+    levels overflow the stack, which needs ~5.8MB of answer text and is bounded in practice by the
+    corpus cap rather than by anything here.
+
+    **Verified with a real DOM shim under `node`, not by reading it** — nested lists land inside
+    their `<li>`, table-cell offsets survive whitespace trimming, a `<script>` inside a code fence
+    stays text, zero anchors are created. This project has no JS test runner (invariant 29), so that
+    check is a live verification like the model runs, and the two tests above are what CI keeps.
+
+56. **`Answer.follow_ups` comes from the SAME run that produced the answer — never a second model
+    call — and is not verified against anything.** Starter questions existed only on the overview
+    (invariant 38), so an affordance a user found useful appeared exactly once per notebook and
+    never again. The model already holds the corpus and its own answer in context when it submits,
+    so asking for two or three next questions in the same SUBMIT costs nothing; a separate
+    `dspy.Predict` per turn would have been a real call per answer for the same words.
+
+    Deliberately NOT citation-grounded: a question is a prompt, not a claim, so invariant 5 has
+    nothing to check. The instruction still requires each one be answerable from `sources` — an
+    unanswerable suggestion wastes the reader's next turn — but that is prompt compliance, with the
+    same residual-risk hedge as invariants 4 and 11. Optional and defaulting to empty, so every turn
+    persisted before the field existed still loads.
+
+    **The two labels are deliberately NOT unified.** The overview's row says "Start with" and a
+    turn's says "Ask next", sharing one renderer (`starterQuestionRow`). The overview's appears
+    before any conversation exists, where "ask next" would be asking the reader to continue
+    something they have not begun.
+
+57. **The chat overview is the THREAD's first entry, inside the scroller — not a panel pinned above
+    it.** It was a sibling of `.chat-history` with `flex: 0 0 auto` and `max-height: 45%`, so it
+    permanently owned up to half the chat column and squeezed the conversation into a strip; a user
+    reported it as the overview covering the chat. Inside the scroller it simply scrolls away as the
+    conversation grows.
+
+    **A returning reader must not LAND scrolled past it**, which is a different thing: `chat:turnAdded`
+    scrolls to the bottom, and replaying a saved conversation on open fired it once per turn, so the
+    overview — and on a notebook with turns but no overview yet, the "Generate overview" button —
+    started a thousand pixels above the fold. Only a genuinely new turn scrolls now.
+
+    The `max-height` it lost was there for a real reason — as a sibling it was a flex item whose
+    automatic minimum size is its content, which would have collapsed `.chat-history` to nothing —
+    and that reason evaporates once there is no competing flex item left. **Every path that redraws
+    the thread goes through `rebuildHistory`**, which re-appends the overview node; a
+    `history.innerHTML = ""` that forgot to would silently delete it, and avoiding exactly that is
+    why the old structure kept it outside.
+
+58. **A reference is a compact ROW that opens, and pointing at either end of a citation lights up
+    the other.** The References view rendered every quote as an always-visible `blockquote`, so one
+    source cited eight times filled the whole column — reported with a screenshot. The shape now is
+    the one Kagi's assistant and Google's AI answers both use: number, title, a provenance chip (a
+    hostname for a web source, the kind otherwise), the use count, TWO clamped lines of the passage,
+    and everything else behind a click.
+
+    **`linkReference` is the reciprocal highlight**, and it is the part a user actually pointed at:
+    without it a numbered stroke and a numbered row are two lists a reader has to join up by eye.
+    `.is-linked` is kept DISJOINT from `.is-focused` — hover owns `background`, focus owns
+    `border-color` plus an inset bar — so hovering one reference can never wipe the focus ring on
+    another. **The first version of this sentence was false**: `.is-focused` also set `background`,
+    at equal specificity and declared later, so hovering the row you had just clicked a citation to
+    reach gave no feedback at all. That is the identical mistake invariant 44 records — a claim that
+    the specificity was fixed when only the property had been — made a third time, and caught by an
+    independent review measuring it in a browser.
+
+    **`referenceKey`'s separator is `\u001f`, and U+0000 is a trap the whole feature fell into.**
+    Every lookup here is a `[data-ref-key="…"]` selector, and `CSS.escape` maps U+0000 to U+FFFD by
+    spec — as does the CSS tokenizer parsing the selector — so a key joined with a NUL can never
+    match ANY element. The reciprocal highlight was dead on arrival and `focusReference` had never
+    once focused a card, in this slice or the one that introduced it. Measured in a real browser by
+    an independent review; unreachable from the Python suite, and no amount of reading the JS would
+    have shown it.
+
+    **The run log is a TIMELINE**: one continuous rail with a node per step, the current step
+    pulsing and shown in full, past steps clamped to a line and expandable. Four per-line left
+    borders read as four unrelated items; a rail reads as one process advancing. Its node colour
+    comes from the step's KIND and its "current" signal is the animation plus a ring — disjoint
+    properties, because the two rules sit at equal specificity and a `background` on the current-step
+    rule would be dead for every step that has a kind. Each row shows how long its step took as
+    VISIBLE text, because "where is it stuck" is a question about durations and a column of absolute
+    stamps makes the reader subtract — visible rather than a tooltip because `.run-log` is a
+    scroller and a tip anchored inside it is clipped by its own container (invariant 54's ancestor
+    case, hit immediately by the first `data-tip` placed inside one). The FIRST row measures from
+    the run's start rather than having none, since that gap is the wait for the model's first
+    response, which is the slow one. `finish()` clears `is-current`, or the last step kept pulsing
+    and stayed expanded while the header already said Finished.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.
