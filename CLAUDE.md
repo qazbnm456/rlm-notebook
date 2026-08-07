@@ -984,6 +984,21 @@ them exist because an earlier design discussion mentioned them.
     which the markup and the JS spell the same way, and asserts up front that it can still see both
     known instances — so a future extraction failure fails the build instead of passing vacuously.
 
+    **A visible author `display` on a hidden-toggled class IS allowed — with a guard that OUTRANKS
+    it.** The podcast transcript can only fill the space the rest of its panel leaves through a flex
+    chain, and that needs `display: flex` on `.studio-view`, which is `hidden`-toggled. The pairing
+    that makes it safe is a `[hidden]` rule whose selector is one token LONGER, so it wins on
+    specificity regardless of source order. This tripwire compares by class NAME, so it would accept
+    a guard that loses the cascade; `test_the_podcast_transcript_is_not_capped_by_a_fixed_height`
+    computes specificity and is the one that actually checks it. Two fixed heights were tried first
+    and both were reported: `22rem` left a blank strip under the last line while the transcript
+    scrolled, and `60vh` made the panel taller than the column so the WHOLE column scrolled and took
+    the heading with it — two nested scrollers, worse than either.
+
+    **A flex column stretches its children to full width, and that is a DEFAULT, not a choice.**
+    Making `.podcast-body` a flex column turned the inline-block download link and the steps pill
+    into full-width boxes with their labels stranded on the left. Only what should span may span.
+
     **A re-click on an already-open citation detail COLLAPSES it** (`showCitationTurn`'s
     `_shownKey` check) rather than blanking the panel to "Loading…" and re-fetching the identical
     payload, which read as a flash with nothing ever closing. Keyed on WHICH citation is shown, so
@@ -1319,6 +1334,16 @@ them exist because an earlier design discussion mentioned them.
     trace stream, the citation-turn lookup and full source text (invariants 29 and 31). With no
     authentication (invariant 25), anyone who can reach this server can play any notebook's episode.
     Stated rather than folded silently into "same as everything else".
+
+    **The generate button has the same three states the chat overview has (invariant 38): no
+    episode -> a primary offer; an episode -> a QUIETER "Regenerate"; stale -> the same button
+    saying the sources moved.** It used to be one permanent primary button above a player that
+    already existed, which put the loudest control in the panel on the action a reader with an
+    episode is least likely to want, and made "have I already made one?" a question the button could
+    not answer. Deliberately NOT primary once an episode exists: regenerating costs a full model run
+    plus synthesis (invariant 43). Adding or removing a source re-syncs the BUTTON only — re-rendering
+    the panel would rebuild its `<audio>` and interrupt playback, the same reason `renumberStrokes`
+    re-stamps rather than re-renders (invariant 60).
 
     **`renderPodcast` is ONE function serving both the just-generated and the reopened case**, so a
     persisted episode can never render differently from a fresh one. It plays from the server URL,

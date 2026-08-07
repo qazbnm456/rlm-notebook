@@ -1433,8 +1433,8 @@ function initSourcesPanel() {
     tab.addEventListener("click", () => {
       tabs.forEach((tab) => tab.classList.remove("is-active"));
       tab.classList.add("is-active");
-      document.querySelectorAll(".tab-body").forEach((body) => {
-        body.hidden = body.dataset.kindBody !== tab.dataset.kind;
+      document.querySelectorAll(".tab-body").forEach((kindBody) => {
+        kindBody.hidden = kindBody.dataset.kindBody !== tab.dataset.kind;
       });
     });
   });
@@ -2924,7 +2924,12 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
     offsets.length === utterances.length &&
     offsets.every((v, i) => Number.isFinite(v) && v >= 0 && (i === 0 || v > offsets[i - 1]));
   const seek = (seconds) => {
-    player.currentTime = t;
+    // `seconds`, not `t`. This parameter was RENAMED from `t` to stop it shadowing the i18n
+    // function (an independent review found three such closures and warned that adding a
+    // translated string inside one would throw) — and the body was not renamed with it, so every
+    // seek assigned the i18n FUNCTION to `currentTime`, coerced to NaN, and did nothing. Clicking a
+    // timecode silently stopped working, reported by a user.
+    player.currentTime = seconds;
     // The play promise rejects when the media cannot start (the persisted file was cleared and
     // `audio/file` 404s, or autoplay policy blocks it). Seeking still worked; swallow it rather
     // than leaving an unhandled rejection in the console.
@@ -2989,9 +2994,31 @@ function initPodcastPlayer() {
     body.innerHTML = "";
   }
 
+  // THREE states, the same shape the chat overview already has (invariant 38): never generated ->
+  // an offer; generated -> the episode, with regeneration a quieter second action; generated but
+  // STALE -> the episode, marked, and the same regenerate button reading as the obvious next move.
+  // It used to be one permanent primary button sitting above a player that already existed, which
+  // put the most prominent control in the panel on the one action a reader with an episode is least
+  // likely to want — and made "have I already made one?" a question the button could not answer.
+  function syncGenerateButton() {
+    const podcast = state.podcast;
+    if (!podcast) {
+      generateBtn.textContent = t("podcast.generate", "Generate podcast");
+      generateBtn.className = "btn btn-primary btn-block";
+      return;
+    }
+    generateBtn.textContent = podcast.stale
+      ? t("podcast.regenerateStale", "\u21bb Regenerate \u00b7 sources have changed")
+      : t("podcast.regenerate", "\u21bb Regenerate podcast");
+    // Secondary once an episode exists: regenerating costs a full model run plus synthesis
+    // (invariant 43), so it must not be the loudest thing on a panel that already has what it makes.
+    generateBtn.className = "btn btn-block";
+  }
+
   // A persisted episode renders on open, which is the whole point of persisting it.
   store.on("notebook:switched", () => {
     clearPlayer();
+    syncGenerateButton();
     const podcast = state.podcast;
     if (!podcast || !state.notebookId) return;
     renderPodcast(body, {
@@ -3003,6 +3030,12 @@ function initPodcastPlayer() {
       stale: podcast.stale,
     });
   });
+
+  // Adding or removing a source flips `podcast.stale` server-side, and the button's LABEL carries
+  // that verdict — so it has to follow. Only the button: re-rendering the panel would rebuild its
+  // `<audio>` and interrupt playback, which is the same reason `renumberStrokes` re-stamps rather
+  // than re-renders. The stale marker inside the player catches up on the next open.
+  store.on("sources:changed", () => syncGenerateButton());
 
   generateBtn.addEventListener("click", async () => {
     if (!state.notebookId) {
@@ -3077,6 +3110,8 @@ function initPodcastPlayer() {
         suffix: data.audio_suffix,
         offsets: data.offsets,
       });
+      // The panel now HAS an episode, so the button stops offering to make one.
+      syncGenerateButton();
     } catch (err) {
       status.finish();
       if (cancelled) return;
@@ -3249,8 +3284,8 @@ function initStudioRail() {
 
   function show(view) {
     tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.view === view));
-    bodies.forEach((body) => {
-      body.hidden = body.dataset.viewBody !== view;
+    bodies.forEach((viewBody) => {
+      viewBody.hidden = viewBody.dataset.viewBody !== view;
     });
     localStorage.setItem(STUDIO_VIEW_KEY, view);
     // Expanding on selection: picking a view while collapsed can only mean "show me that".
@@ -3543,32 +3578,32 @@ function renderReferenceView() {
       item.appendChild(snippet);
     }
 
-    const body = document.createElement("div");
-    body.className = "ref-card-body";
-    body.hidden = true;
+    const cardBody = document.createElement("div");
+    cardBody.className = "ref-card-body";
+    cardBody.hidden = true;
 
     // Opening the row reveals every passage cited from this coordinate, then the original text with
     // the first one highlighted — the whole loop, still inside this view rather than over the page.
     head.addEventListener("click", async () => {
-      if (!body.hidden) {
-        body.hidden = true;
+      if (!cardBody.hidden) {
+        cardBody.hidden = true;
         item.classList.remove("is-open");
         return;
       }
       item.classList.add("is-open");
-      body.hidden = false;
-      if (body.dataset.loaded) return;
-      body.textContent = "";
+      cardBody.hidden = false;
+      if (cardBody.dataset.loaded) return;
+      cardBody.textContent = "";
       reference.quotes.forEach((quote) => {
         const blockquote = document.createElement("blockquote");
         blockquote.className = "reference-quote";
         blockquote.textContent = quote;
-        body.appendChild(blockquote);
+        cardBody.appendChild(blockquote);
       });
       const passage = document.createElement("div");
       passage.className = "ref-card-passage";
       passage.textContent = t("cite.loading", "Loading\u2026");
-      body.appendChild(passage);
+      cardBody.appendChild(passage);
       try {
         const data = await api(
           `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(reference.source_id)}`
@@ -3582,13 +3617,13 @@ function renderReferenceView() {
               renderTextWithOptionalHighlight(block.text, reference.quotes[0] || null)
             );
           });
-        body.dataset.loaded = "1";
+        cardBody.dataset.loaded = "1";
       } catch (err) {
         passage.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
       }
     });
 
-    item.appendChild(body);
+    item.appendChild(cardBody);
     host.appendChild(item);
   });
 }

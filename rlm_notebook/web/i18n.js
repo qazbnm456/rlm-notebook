@@ -125,6 +125,8 @@ const STRINGS = {
     "podcast.head": "Podcast",
     "podcast.sub": "兩位主持人討論你的來源，產出一集可以播放或下載的節目。",
     "podcast.generate": "產生 Podcast",
+    "podcast.regenerate": "↻ 重新產生 Podcast",
+    "podcast.regenerateStale": "↻ 重新產生 · 來源已變動",
     "podcast.generateTip": "先寫出一份以你的來源為依據的雙主持人腳本，再合成語音。這是這裡最慢的操作。",
     "podcast.writing": "正在撰寫腳本…",
     "podcast.stale": "Podcast · 來源在這之後有變動",

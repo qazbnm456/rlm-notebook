@@ -1811,3 +1811,27 @@ questions with verifiable citations, and get a distilled research artifact out.
   **Six of twelve front-end mutations walked past the tests** — including `i + 1` → `i`, the exact
   off-by-one the numbering change exists to fix — because every assertion checked that a token
   appeared somewhere rather than what it did. They assert structure now.
+
+- **Clicking a transcript timecode had silently stopped seeking, and it was a rename that did not
+  reach the body.** Fixing a shadowed `t` (the i18n function) renamed the parameter of the podcast's
+  `seek` to `seconds` and left `player.currentTime = t` behind — assigning a function coerces to
+  NaN, so every seek did nothing, with valid syntax, a resolvable identifier and no error anywhere.
+  `t` is now pinned as call-only: every occurrence in `app.js` must be a call, never a value.
+
+  **Three layout defects in the same panel, each the consequence of the previous fix.** The
+  utterance rows carried negative margins from when they were bare text, so inside the now-scrolling
+  transcript every row was wider than its box and the whole thing gained a horizontal scrollbar. The
+  transcript's fixed `22rem` (chosen when the podcast shared a column with two other sections) left
+  a blank strip below it; `60vh` then made the panel taller than the column, so the column itself
+  scrolled and took the heading away. Only a flex chain sizes this correctly, and the `display:
+  flex` it needs on a `hidden`-toggled class is safe because a longer `[hidden]` selector outranks
+  it. That flex column then stretched the download link and the steps pill to full width.
+
+  **The Generate podcast button now has the overview's three states** — offer / quieter regenerate /
+  regenerate-because-sources-moved — instead of one permanent primary button sitting above a player
+  that already existed.
+
+  Also: the answer-footer spacing added for chat answers was applying inside every transcript line;
+  and two `forEach` parameters named `body` collided with the podcast panel's own local, which made
+  the hidden-toggle tripwire flag `.podcast-body` — fixed by renaming the locals, which is what that
+  test's own docstring prescribes for its known false positive rather than loosening the check.

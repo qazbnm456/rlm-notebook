@@ -962,10 +962,11 @@ body.is-resizing .cols {
 
 .podcast-utterance.is-seekable {
   cursor: pointer;
-  border-radius: var(--radius);
-  padding: 0.35rem 0.5rem;
-  margin-left: -0.5rem;
-  margin-right: -0.5rem;
+  /* NO negative margins and no second padding. They date from when an utterance was bare text and
+     the hover needed to bleed past it; `.podcast-utterance` carries its own padding, background and
+     border now, so all they did was make every row wider than `.podcast-transcript.is-timed` — and
+     that box is `overflow-y: auto`, which computes `overflow-x` to `auto` as well, so the whole
+     transcript gained a horizontal scrollbar. Reported from a screenshot. */
   /* Only background and border transition — a colour change on the TEXT would fight the citation
      highlighter-stroke, which is this UI's signature interaction. Both are listed because hover
      moves `border-color` (see below) while `.is-speaking` moves `background`. */
@@ -1002,7 +1003,19 @@ body.is-resizing .cols {
    with `getBoundingClientRect`, so nothing here has to establish an `offsetParent` for it. */
 .podcast-transcript.is-timed {
   position: relative;
-  max-height: 22rem;
+  /* FILLS the space the rest of the panel leaves, rather than taking a share of the window. Two
+     wrong answers came first, both reported from screenshots: a fixed `22rem` (chosen when the
+     podcast shared a scrolling column with two other sections) left a blank strip under the last
+     line while the transcript itself scrolled, and `60vh` then made the panel taller than the
+     column, so the WHOLE right column scrolled and took the heading with it — two nested scrollers,
+     which is worse than either.
+
+     Only a flex chain gets this right, because the available height is what the other elements
+     leave over, and no fraction of the viewport knows that. `min-height` is what keeps the flex
+     item from refusing to shrink below its content — the default `auto` is why an unbounded flex
+     child overflows its parent. */
+  flex: 1 1 auto;
+  min-height: 6rem;
   overflow-y: auto;
 }
 
@@ -2706,11 +2719,12 @@ body.is-resizing .cols {
 
 /* One line under an answer, in place of a second copy of the list. */
 .reference-link {
-  /* Its OWN line with real space above it. As an inline-block button it sat immediately after the
-     answer's last word, which a user reported as too close to the end of the message. */
+  /* Its OWN line, but only a little space by default — the generous version below is for a chat
+     answer, where this is a footer. In a podcast utterance the same 1rem read as a blank strip
+     under every line of the transcript. */
   display: block;
   width: fit-content;
-  margin-top: 1rem;
+  margin-top: 0.45rem;
   padding: 0;
   border: none;
   background: none;
@@ -3075,3 +3089,61 @@ body.is-resizing .studio-grip {
 .starter-questions {
   gap: 0.45rem;
 }
+
+/* A chat answer ends in a footer, so its reference link gets room. A transcript line does not. */
+.turn-answer .reference-link,
+.chat-overview .reference-link {
+  margin-top: 1rem;
+}
+
+/* --- The podcast view fills its column ---------------------------------------------------------
+   The transcript can only fill what is left over if every box between it and the column says so.
+   `min-height: 0` at each level is the load-bearing half: a flex item's default minimum is its
+   CONTENT, so without it the chain refuses to shrink and the column scrolls instead.
+
+   The `display` on `.studio-view` is exactly what invariant 36 governs — that class is toggled with
+   the `hidden` attribute, and an author `display` outranks the UA stylesheet's `[hidden]` rule. It
+   is safe ONLY because of the guard directly below, whose selector is one token longer and so wins
+   on specificity regardless of order. Do not add the first rule without the second. */
+.col-studio .studio-view[data-view-body="podcast"] {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.col-studio .studio-view[data-view-body="podcast"][hidden] {
+  display: none;
+}
+
+.podcast-section {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+}
+
+.podcast-body {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1 1 auto;
+  /* Only the transcript grows; everything above it keeps its own height. Without this the audio
+     element, the download link and the steps pill all get an equal share of the column. */
+  align-items: stretch;
+}
+
+/* A flex column stretches its children to full width by default, which turned an inline-block
+   download link and the small steps pill into full-width boxes with their label stranded on the
+   left — reported from a screenshot. They keep their natural width; the player and the transcript,
+   which SHOULD span, are left alone. */
+.podcast-body > .btn,
+.podcast-body > .ticker-affordance {
+  align-self: flex-start;
+  flex: 0 0 auto;
+}
+
+.podcast-body > audio {
+  flex: 0 0 auto;
+}
+

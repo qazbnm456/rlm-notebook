@@ -757,3 +757,178 @@ def test_the_guide_cache_defines_every_method_its_callers_use():
     used = set(re.findall(r"\bcache\.(\w+)\(", body))
     missing = used - defined
     assert not missing, f"`cache` is called with methods it does not define: {sorted(missing)}"
+
+
+def _js_without_literals(script: str) -> str:
+    """`app.js` with comments and string/template literals blanked, so an identifier scan sees code
+    rather than prose. Crude on purpose — it only has to stop a `t` inside a message from counting."""
+    out = re.sub(r"//[^\n]*", "", script)
+    out = re.sub(r"/\*.*?\*/", "", out, flags=re.DOTALL)
+    out = re.sub(r"`(?:[^`\\]|\\.)*`", "``", out)
+    out = re.sub(r'"(?:[^"\\]|\\.)*"', '""', out)
+    out = re.sub(r"'(?:[^'\\]|\\.)*'", "''", out)
+    return out
+
+
+def test_the_i18n_function_is_never_used_as_a_value():
+    """`t` is the translation FUNCTION and nothing else, so every occurrence must be a call.
+
+    This exists because of a real, shipped, silent failure: three closures took a parameter named
+    `t`, an independent review pointed out that adding a translated string inside one would throw,
+    and the fix renamed the parameters — but the podcast's `seek` body still said
+    `player.currentTime = t`. Assigning a function to `currentTime` coerces to NaN, so clicking a
+    transcript timecode stopped seeking, with no error anywhere. A user found it.
+
+    A rename that does not reach the body is invisible to every other check here: the syntax is
+    valid, the identifier resolves, and the value is silently wrong.
+    """
+    code = _js_without_literals((WEB / "app.js").read_text(encoding="utf-8"))
+    offenders = []
+    for match in re.finditer(r"(?<![\w.$])t(?![\w(])", code):
+        line = code[: match.start()].count("\n") + 1
+        offenders.append(f"line {line}: {code.splitlines()[line - 1].strip()[:90]}")
+    assert not offenders, "`t` used as a value rather than called:\n  " + "\n  ".join(offenders)
+
+
+def test_the_podcast_seeks_to_the_time_it_was_given():
+    """The specific half of the rule above: `seek` must assign `currentTime` from its OWN parameter,
+    not from whatever identifier happened to be in scope."""
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    body = script[script.index("const seek = (") :]
+    body = body[: body.index("\n  };") + 4]
+    param = re.match(r"const seek = \((\w+)\)", body).group(1)
+    assert re.search(rf"player\.currentTime\s*=\s*{param}\b", body), (
+        f"`seek({param})` does not assign `currentTime` from `{param}`, so clicking a timecode "
+        f"seeks to NaN and silently does nothing"
+    )
+
+
+def test_the_podcast_button_offers_the_action_that_fits_the_state():
+    """Same three-state shape the chat overview has (invariant 38): no episode -> an offer;
+    an episode -> the player, with regeneration a quieter second action; stale -> the same button
+    reading as the obvious next move.
+
+    It used to be one permanent primary button sitting above a player that already existed, which
+    put the loudest control in the panel on the action a reader with an episode is least likely to
+    want — and made "have I already made one?" a question the button could not answer.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function initPodcastPlayer()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+
+    sync = body[body.index("function syncGenerateButton") : body.index("store.on(\"notebook:switched\"")]
+    assert "state.podcast" in sync, "the button no longer looks at whether an episode exists"
+    assert "podcast.stale" in sync, "the button no longer distinguishes a stale episode"
+    # Primary ONLY in the no-episode branch. Comparing POSITIONS passed with the regenerate branch
+    # also styled primary, because the first occurrence is in the early-return either way — so this
+    # reads the regenerate branch itself, which is everything after the early return.
+    regenerate_branch = sync[sync.index("podcast.stale") :]
+    assert "btn-primary" not in regenerate_branch, (
+        "regenerating is styled as the primary action, on a panel that already has an episode — it "
+        "costs a full model run plus synthesis (invariant 43)"
+    )
+    assert "btn-primary" in sync[: sync.index("podcast.stale")], (
+        "the no-episode offer is no longer the primary action"
+    )
+    # And it has to be re-synced everywhere the state can change, or the label lies.
+    for trigger in ('store.on("notebook:switched"', 'store.on("sources:changed"'):
+        at = body.index(trigger)
+        assert "syncGenerateButton" in body[at : at + 400], f"{trigger} does not re-sync the button"
+    assert "syncGenerateButton();" in body[body.index("renderPodcast(body, {", body.index("try {")) :], (
+        "a successful generation leaves the button still offering to generate"
+    )
+
+
+def test_the_podcast_transcript_is_not_capped_by_a_fixed_height():
+    """22rem was chosen when the podcast shared a scrolling column with two other sections, where a
+    tall transcript pushed everything below it off screen. It has its own view now (invariant 58),
+    so the fixed cap only left a blank strip under the last line while the transcript scrolled.
+
+    Pinned together with the reason it is a `max-height` and not `flex: 1`: filling would need an
+    author `display` on `.studio-view`, which is `hidden`-toggled, and any such rule above
+    `.studio-view[hidden]`'s specificity un-hides all four views at once — invariant 36's defect.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    rule = [body for sel, body in _rules(css) if sel.strip() == ".podcast-transcript.is-timed"]
+    assert rule, "the extraction broke; this would pass vacuously"
+    assert "overflow-y: auto" in rule[0], "the transcript no longer scrolls in its own box"
+    assert re.search(r"\bflex:\s*1", rule[0]), (
+        "the transcript no longer FILLS the space the rest of the panel leaves. Two fixed answers "
+        "were tried and both were reported: `22rem` left a blank strip under the last line while "
+        "the transcript scrolled, and `60vh` made the panel taller than the column so the whole "
+        "column scrolled and took the heading with it"
+    )
+    assert "max-height" not in rule[0], "a cap defeats the flex chain that sizes this"
+
+    # The chain only works if every box between it and the column can shrink below its content.
+    for selector in (
+        '.col-studio .studio-view[data-view-body="podcast"]',
+        ".podcast-section",
+        ".podcast-body",
+    ):
+        bodies = [b for sel, b in _rules(css) if sel.strip() == selector]
+        assert bodies, f"{selector} lost its rule, so the flex chain is broken"
+        assert "min-height: 0" in bodies[0], (
+            f"{selector} has no `min-height: 0`, so a flex item's default minimum (its CONTENT) "
+            f"stops the chain shrinking and the column scrolls instead"
+        )
+
+    # Filling the column requires `display: flex` on `.studio-view`, which is `hidden`-toggled — so
+    # every VISIBLE `display` on that class must be OUTRANKED by a `[hidden]` rule. Specificity, not
+    # mere presence: invariant 36's own tripwire compares by class name, so it would accept a guard
+    # that loses the cascade. `display: none` needs no guard (it hides either way), which is what
+    # `.col-studio.is-collapsed .studio-view` relies on.
+    def specificity(selector):
+        sel = re.sub(r"::[\w-]+", "", selector)
+        ids = len(re.findall(r"#[\w-]+", sel))
+        classes = len(re.findall(r"[.:\[][\w-]+", sel))
+        return (ids, classes)
+
+    guards = [
+        specificity(part)
+        for sel, body in _rules(css)
+        for part in sel.split(",")
+        if "studio-view" in _class_tokens(part)
+        and "[hidden]" in part
+        and re.search(r"\bdisplay\s*:\s*none\b", body)
+    ]
+    for sel, body in _rules(css):
+        for part in sel.split(","):
+            if "studio-view" not in _class_tokens(part) or "[hidden]" in part:
+                continue
+            if not re.search(r"\bdisplay\s*:\s*(?!none\b)\S+", body):
+                continue
+            mine = specificity(part)
+            assert any(g > mine for g in guards), (
+                f"`{part.strip()}` gives the hidden-toggled view a visible `display` and no "
+                f"`[hidden]` rule outranks it, so a hidden view stays on screen — the defect "
+                f"invariant 36 exists for, with all four views showing at once"
+            )
+
+
+def test_the_podcast_panels_small_controls_keep_their_own_width():
+    """`.podcast-body` became a flex COLUMN so the transcript could fill what the rest of the panel
+    leaves. A flex column stretches its children to full width by default, which turned the
+    inline-block download link and the small steps pill into full-width boxes with their labels
+    stranded on the left — reported from a screenshot, one fix after the last one.
+
+    The player and the transcript should span; the buttons should not. Pinned because the stretch is
+    a DEFAULT, so it comes back silently the moment someone adds another small control here.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    column = [b for sel, b in _rules(css) if sel.strip() == ".podcast-body"]
+    assert column and "flex-direction: column" in column[0], "the extraction broke"
+
+    exempt = {
+        token
+        for sel, body in _rules(css)
+        if "align-self: flex-start" in body
+        for part in sel.split(",")
+        if ".podcast-body >" in part
+        for token in _class_tokens(part.split(">")[-1])
+    }
+    assert {"btn", "ticker-affordance"} <= exempt, (
+        f"a small control in the podcast panel is stretched to full width by the flex column: "
+        f"exempted classes are {sorted(exempt)}"
+    )
