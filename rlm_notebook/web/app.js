@@ -137,6 +137,78 @@ function openTicker(notebookId, runId, onEvent) {
   });
 }
 
+// A shared "something is running" surface: a pulsing dot, the live action, a ticking elapsed
+// counter, and a Stop button. Same shape `nuclei-forge/studio`'s `.live-status` uses, and it exists
+// because of a real report: a generation takes a minute or more, the only feedback was one line of
+// text that ended on "finished" and then sat there, so the natural move is to press the button
+// again — which strands the first generation behind a staleness guard and looks like nothing
+// happened at all.
+//
+// `runIds` is a LIST because `/overview` fires two runs; cancelling per run id rather than per
+// notebook is what makes Stop actually stop everything (see `cancel_run`'s docstring).
+function runStatus({ notebookId, runIds, label, onCancel }) {
+  const node = document.createElement("div");
+  node.className = "run-status";
+
+  const dot = document.createElement("span");
+  dot.className = "run-dot";
+  node.appendChild(dot);
+
+  const text = document.createElement("span");
+  text.className = "run-text";
+  text.textContent = label;
+  node.appendChild(text);
+
+  const elapsed = document.createElement("span");
+  elapsed.className = "run-elapsed";
+  elapsed.textContent = "0:00";
+  node.appendChild(elapsed);
+
+  const stop = document.createElement("button");
+  stop.type = "button";
+  stop.className = "btn run-stop";
+  stop.textContent = "\u23f9 Stop";
+  node.appendChild(stop);
+
+  const started = Date.now();
+  const timer = setInterval(() => {
+    elapsed.textContent = formatTimecode((Date.now() - started) / 1000);
+  }, 1000);
+
+  let stopped = false;
+  function finish() {
+    if (stopped) return;
+    stopped = true;
+    clearInterval(timer);
+    node.classList.add("is-done");
+  }
+
+  stop.addEventListener("click", async () => {
+    stop.disabled = true;
+    text.textContent = "Stopping\u2026";
+    // Cancel every run this action started, not "whatever this notebook is doing" — a notebook-
+    // scoped cancel would leave `/overview`'s second run burning a model call to completion.
+    await Promise.all(
+      runIds.map((runId) =>
+        api(
+          `/notebooks/${encodeURIComponent(notebookId)}/runs/${encodeURIComponent(runId)}/cancel`,
+          { method: "POST" }
+        ).catch(() => {})
+      )
+    );
+    finish();
+    if (onCancel) onCancel();
+  });
+
+  return {
+    node,
+    setSummary(summary) {
+      if (!stopped && summary) text.textContent = summary;
+    },
+    finish,
+  };
+}
+
 function renderTickerAffordance(runId) {
   const events = tickerLogs.get(runId) || [];
   const wrapper = document.createElement("div");
@@ -739,6 +811,9 @@ function saveAsNoteButton(text) {
   btn.type = "button";
   btn.className = "btn save-as-note";
   btn.textContent = "+ Save as note";
+  btn.title =
+    "Keep a copy in Notes (Studio, right). A note can later be PROMOTED into a source, which is "
+    + "what makes it citable by a later question.";
   btn.addEventListener("click", async () => {
     btn.disabled = true;
     const original = btn.textContent;
@@ -983,16 +1058,27 @@ async function generateOverview() {
 
   el.hidden = false;
   el.textContent = "";
-  const pending = document.createElement("div");
-  pending.className = "chat-overview-head";
-  pending.textContent = "Reading your sources\u2026";
-  el.appendChild(pending);
 
-  // The server appends `-summary` to the run id it derives, so the ticker's target is predictable.
-  // Trace LINKS afterwards come from the server-returned `overview.run_id`, never a reconstruction.
+  // The server appends `-summary`/`-faq` to the run id it derives, so both targets are predictable:
+  // the ticker follows the summary, and Stop cancels BOTH (a notebook-scoped cancel would leave the
+  // FAQ run burning a model call to completion).
   const runToken = crypto.randomUUID();
-  void openTicker(notebookId, `${notebookId}-${runToken}-summary`, (event) => {
-    if (live() && event.summary) pending.textContent = event.summary;
+  const base = `${state.notebookSlug || notebookId}-${runToken}`;
+  let cancelled = false;
+  const status = runStatus({
+    notebookId,
+    runIds: [`${base}-summary`, `${base}-faq`],
+    label: "Reading your sources\u2026",
+    onCancel: () => {
+      cancelled = true;
+      overviewToken += 1; // strand this generation's own response
+      renderChatOverview(); // straight back to the pre-run state, nothing half-written left behind
+    },
+  });
+  el.appendChild(status.node);
+
+  void openTicker(notebookId, `${base}-summary`, (event) => {
+    if (live()) status.setSummary(event.summary);
   });
 
   try {
@@ -1001,17 +1087,41 @@ async function generateOverview() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ run_id: runToken }),
     });
-    if (!live()) return;
+    status.finish();
+    if (cancelled) return;
+    if (!live()) {
+      // SUPERSEDED, not lost. Saying nothing here is what made a real report read as "pressed
+      // generate, it said Finished, then nothing ever appeared": the response arrived, this guard
+      // dropped it silently, and the last ticker line just sat there looking stuck.
+      supersededNote(el);
+      return;
+    }
     state.overview = notebook.overview;
     renderChatOverview();
   } catch (err) {
-    if (!live()) return;
+    status.finish();
+    if (cancelled) return;
+    if (!live()) {
+      supersededNote(el);
+      return;
+    }
     el.textContent = "";
     const note = document.createElement("div");
     note.textContent = `(could not generate an overview: ${err.message})`;
     el.appendChild(note);
     el.appendChild(overviewStarter("\u21bb Try again", ""));
   }
+}
+
+// A generation whose result is no longer the current one (the user regenerated, or switched
+// notebooks and back). The old code returned silently, which is indistinguishable from a hang.
+function supersededNote(el) {
+  el.textContent = "";
+  const note = document.createElement("div");
+  note.className = "empty-note";
+  note.textContent = "That overview was superseded by a newer one.";
+  el.appendChild(note);
+  el.appendChild(overviewStarter("\u2728 Generate overview", ""));
 }
 
 function initChatPanel() {
@@ -1072,10 +1182,30 @@ function initChatPanel() {
     store.emit("chat:pending", { pending: true });
     input.value = "";
 
-    openTicker(state.notebookId, runId, (evt) => {
-      const el = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
-      if (el && el.classList.contains("is-pending")) el.textContent = evt.summary || "Thinking…";
+    // The same live surface the Studio actions use, mounted into the pending answer row. Chat had
+    // no way to stop a question either, and a question against a large corpus is not quick.
+    let cancelled = false;
+    const answerEl = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
+    const status = runStatus({
+      notebookId: askedNotebookId,
+      runIds: [runId],
+      label: "Thinking\u2026",
+      onCancel: () => {
+        cancelled = true;
+        store.emit("chat:pending", { pending: false });
+        const row = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
+        if (row) {
+          row.classList.remove("is-pending");
+          row.textContent = "(stopped)";
+        }
+      },
     });
+    if (answerEl) {
+      answerEl.textContent = "";
+      answerEl.appendChild(status.node);
+    }
+
+    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
 
     try {
       const result = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/ask`, {
@@ -1087,6 +1217,8 @@ function initChatPanel() {
       // pending row in place — the server is the source of truth for what actually got persisted.
       // Capture the id BEFORE awaiting: re-reading `state.notebookId` here would build
       // `/notebooks/null` if the user started a new notebook while the answer was in flight.
+      status.finish();
+      if (cancelled) return;
       if (generation !== notebookGeneration) return;
       const notebook = await api(`/notebooks/${encodeURIComponent(askedNotebookId)}`);
       if (generation !== notebookGeneration) return;
@@ -1097,6 +1229,8 @@ function initChatPanel() {
       state.turns.forEach((turn) => history.appendChild(renderTurn(turn)));
       void result; // already folded into notebook.turns above
     } catch (err) {
+      status.finish();
+      if (cancelled) return;
       pendingTurn.pending = false;
       pendingTurn.answer = `(error) ${err.message}`;
       pendingTurn.citations = [];
@@ -1163,6 +1297,23 @@ function renderGuideContent(kind, data, runId) {
   return container;
 }
 
+//: What each Studio tab is FOR. Shown as the tab's own hover title and as the hint beside its
+//: generate button, so the panel explains itself without a permanent paragraph of prose taking up
+//: rail space — the pattern `toolscout`/`cve-reverser` already use for their own controls.
+const GUIDE_LABELS = {
+  summary: "summary",
+  faq: "FAQ",
+  timeline: "timeline",
+  insight: "key insight",
+};
+
+const GUIDE_HINTS = {
+  summary: "A few paragraphs covering what all your sources say, with citations you can check.",
+  faq: "The questions your sources actually answer, each with its answer and a citation.",
+  timeline: "Dated events pulled out of your sources and put in order.",
+  insight: "The single most important takeaway, in one sentence.",
+};
+
 function initStudioPanel() {
   const tabs = document.querySelectorAll("#guide-tabs .tab");
   const body = document.getElementById("guide-body");
@@ -1198,33 +1349,71 @@ function initStudioPanel() {
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
     body.classList.add("is-pending");
-    body.textContent = "Generating…";
-    openTicker(state.notebookId, runId, (evt) => {
-      if (body.classList.contains("is-pending")) body.textContent = evt.summary || "Generating…";
+    body.innerHTML = "";
+    let cancelled = false;
+    const status = runStatus({
+      notebookId: state.notebookId,
+      runIds: [runId],
+      label: `Generating the ${GUIDE_LABELS[kind] || kind}\u2026`,
+      onCancel: () => {
+        cancelled = true;
+        body.classList.remove("is-pending");
+        showKind(kind); // straight back to the offer, nothing half-written left behind
+      },
     });
+    body.appendChild(status.node);
+    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/guide/${kind}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: token }),
       });
+      status.finish();
+      if (cancelled) return;
       if (generation !== notebookGeneration) return;  // switched away — never cache into the new one
       cache.set(kind, { result: data, runId });
       body.classList.remove("is-pending");
       renderCached(kind, cache.get(kind));
     } catch (err) {
+      status.finish();
+      if (cancelled) return;
       body.classList.remove("is-pending");
       body.textContent = `(error) ${err.message}`;
     }
   }
 
+  // Selecting a tab SHOWS it; it never starts a run. Switching tabs used to fire a real RLM call
+  // immediately, so browsing the four kinds to see what they were cost four model runs and a user
+  // could not tell which click had committed them to one. The offer is explicit now, matching the
+  // chat overview's own "✨ Generate" affordance.
   function showKind(kind) {
     setActiveKind(kind);
     if (cache.has(kind)) {
       renderCached(kind, cache.get(kind));
       return;
     }
-    fetchKind(kind);
+    body.innerHTML = "";
+    if (!state.notebookId || !state.sources.length) {
+      const note = document.createElement("p");
+      note.className = "empty-note";
+      note.textContent = "Add a source first, then generate this.";
+      body.appendChild(note);
+      return;
+    }
+    const offer = document.createElement("div");
+    offer.className = "chat-starter";
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "btn btn-primary";
+    btn.textContent = `\u2728 Generate ${GUIDE_LABELS[kind] || kind}`;
+    btn.addEventListener("click", () => fetchKind(kind));
+    offer.appendChild(btn);
+    const hint = document.createElement("p");
+    hint.className = "empty-note";
+    hint.textContent = GUIDE_HINTS[kind] || "";
+    offer.appendChild(hint);
+    body.appendChild(offer);
   }
 
   tabs.forEach((tab) => {
@@ -1241,19 +1430,20 @@ function initStudioPanel() {
   }
 
   // Opening a notebook does NOT auto-fetch a Guide kind — that would burn a model call just from
-  // opening a notebook, contradicting the "fetched only on first activation or explicit
-  // regenerate" rule above. It only resets to a neutral state; the first real fetch happens when
-  // the user actually clicks a tab (including re-clicking the already-active default one).
+  // opening a notebook. Neither does SELECTING a tab any more (see `showKind`); every run is an
+  // explicit button press.
   store.on("notebook:switched", () => {
     invalidateCache();
-    setActiveKind("summary");
-    body.innerHTML = "";
-    const note = document.createElement("p");
-    note.className = "empty-note";
-    note.textContent = "Pick a tab above to generate it.";
-    body.appendChild(note);
+    showKind("summary");
   });
-  store.on("sources:changed", invalidateCache);
+  // A source changing invalidates the cache AND re-renders, so the panel goes back to offering a
+  // fresh generation rather than silently holding a result computed from a corpus that has moved.
+  store.on("sources:changed", () => {
+    invalidateCache();
+    showKind(activeKind);
+  });
+
+  showKind("summary");
 }
 
 // --- Studio panel: podcast player ------------------------------------------------------------
@@ -1455,19 +1645,29 @@ function initPodcastPlayer() {
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
     body.classList.add("is-pending");
-    body.textContent =
-    "Generating script and synthesizing audio — a few minutes on a cloud voice, and around 15 with the local provider…";
-    openTicker(state.notebookId, runId, (evt) => {
-      if (body.classList.contains("is-pending")) {
-        body.textContent = evt.summary || "Generating script and synthesizing audio…";
-      }
+    body.innerHTML = "";
+    let cancelled = false;
+    const status = runStatus({
+      notebookId: state.notebookId,
+      runIds: [runId],
+      label: "Writing the script\u2026",
+      onCancel: () => {
+        cancelled = true;
+        body.classList.remove("is-pending");
+        clearPlayer();
+        generateBtn.disabled = false;
+      },
     });
+    body.appendChild(status.node);
+    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ run_id: token }),
       });
+      status.finish();
+      if (cancelled) return;
       if (generation !== notebookGeneration) return;  // switched away — the old episode is not theirs
       body.classList.remove("is-pending");
       body.innerHTML = "";
@@ -1494,6 +1694,8 @@ function initPodcastPlayer() {
         offsets: data.offsets,
       });
     } catch (err) {
+      status.finish();
+      if (cancelled) return;
       body.classList.remove("is-pending");
       body.innerHTML = "";
       body.textContent = `(error) ${err.message}`;
@@ -1534,6 +1736,9 @@ function renderNoteItem(note) {
   promoteBtn.type = "button";
   promoteBtn.className = "btn note-promote";
   promoteBtn.textContent = "→ Promote to source";
+  promoteBtn.title =
+    "Turn this note into a real source. Only then can a later question cite it — a note on its own "
+    + "is just text, with no citations of its own.";
   promoteBtn.addEventListener("click", async () => {
     promoteBtn.disabled = true;
     try {

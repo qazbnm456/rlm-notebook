@@ -1285,6 +1285,27 @@ questions with verifiable citations, and get a distilled research artifact out.
   configured provider, and the CLI corrects its default extension only when the user did not choose
   the path themselves.
 
+- **A UX pass over the whole product surface, from a user's list of seven.** Batch one of three.
+
+  **"Pressed generate, it said Finished, then nothing appeared."** Reproduced as a design fault
+  rather than a crash: the response arrives, a staleness guard drops it silently, and the last
+  ticker line sits there looking stuck. What trips that guard is pressing the button again — which
+  is the natural move when a minute-long run shows no progress and offers no way out. So the three
+  are one fix: every long action now shows a pulsing dot, the live action and a ticking timer, a
+  superseded generation says so instead of returning silently, and there is a Stop button.
+
+  **Stop cancels by run id.** `/overview` fires two runs and `_ACTIVE_RUNS` holds one slot per
+  notebook, so the existing notebook-scoped cancel would leave the second one burning a model call
+  to completion. The new run-scoped endpoint kills exactly what was asked for — verified live:
+  both halves killed mid-run, exit -9, zero orphan workers.
+
+  **Selecting a Studio tab no longer runs anything.** It used to fire a real RLM call on click, so
+  browsing the four kinds to see what they were cost four model runs. Each tab now says what it is
+  (on hover) and offers a button.
+
+  Also: "Audio Overview" is "Podcast"; Studio, Podcast and Notes each carry one sentence saying what
+  they are for; and `+ Save as note` explains that promoting a note is what makes it citable.
+
 - **Fix `no run '…-summary' found` on the first overview of a new notebook.** Reported from real
   use and reproduced on the first attempt.
 

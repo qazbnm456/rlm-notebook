@@ -1578,4 +1578,41 @@ them exist because an earlier design discussion mentioned them.
     the remaining four handlers by walking up to each `_resolve_language` call's enclosing block
     (indentation, not a fixed column — `/title` sits one level deeper, inside a `try:`).
 
+47. **Every long-running action shows that it is running and offers a way to STOP it, and no
+    action starts without an explicit press.** All four surfaces — chat, the chat overview, each
+    Guide kind, the podcast — mount the same `runStatus` component (pulsing dot, live action,
+    ticking elapsed, Stop), the shape `nuclei-forge/studio`'s `.live-status` already uses.
+
+    **Stop cancels by RUN ID, not by notebook.** `POST /notebooks/{id}/runs/{run_id}/cancel` exists
+    because `/overview` fires TWO runs and invariant 23's `_ACTIVE_RUNS` holds one slot per
+    NOTEBOOK: the notebook-scoped `/cancel` reaches only whichever registered last, so the user asks
+    to stop and the other run keeps burning a model call to completion. `_RUN_PROCESSES` is already
+    run-id-keyed and already holds the process, so cancelling precisely is a lookup, not a new
+    registry — and it removes invariant 23's limitation (b) for this path. It `killpg`s the whole
+    group for the same reason `runner.Run.cancel` does (invariant 22), and reports an
+    announced-but-unspawned id honestly rather than as a 404 reading "already finished". Verified
+    live: both halves of an overview killed mid-run, exit -9, zero orphan workers.
+
+    **Selecting a Studio tab no longer starts a run.** It used to fire a real RLM call on click, so
+    browsing the four kinds to see what they were cost four model runs and a user could not tell
+    which click had committed them. Each tab now shows what it is and offers a button. A user
+    reported the panel as disorienting; this is that, not a style preference.
+
+    **A superseded generation SAYS SO.** `generateOverview`'s staleness guard used to `return`
+    silently, which is indistinguishable from a hang — and it is the only path that produces the
+    exact symptom a user reported ("pressed generate, it said Finished, then nothing ever
+    appeared"): the response arrives, the guard drops it, and the last ticker line sits there. The
+    absence of any progress or Stop affordance is what made pressing the button again the natural
+    move, which is what trips that guard. The three fixes are one fix.
+
+    **Panels say what they are for.** "Audio Overview" is "Podcast" (users did not know what it
+    was), and Studio/Podcast/Notes each carry ONE visible sentence, with per-control detail in
+    `title=` hovers rather than more permanent prose — the treatment `toolscout`/`cve-reverser`
+    already use. Notes says what a note is *for*, since neither the section nor the `+ Save as note`
+    button explained that promotion is what makes a note citable.
+
+    `tests/test_web_assets.py` pins all of it as source-tree assertions, since this project still
+    has no JS test runner (invariant 29): no tab-click path to `fetchKind`, four `runStatus` mounts,
+    cancellation by run id, both overview halves cancelled, and every panel carrying its sentence.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

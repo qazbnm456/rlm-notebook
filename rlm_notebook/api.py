@@ -65,6 +65,7 @@ import contextlib
 import json
 import logging
 import os
+import signal
 import tempfile
 import uuid
 from contextlib import asynccontextmanager
@@ -1447,6 +1448,38 @@ async def cancel(notebook_id: str) -> dict:
         raise HTTPException(404, f"no in-flight run for notebook {notebook_id!r}")
     run.cancel()
     return {"cancelled": run.run_id}
+
+
+@app.post("/notebooks/{notebook_id}/runs/{run_id}/cancel")
+async def cancel_run(notebook_id: str, run_id: str) -> dict:
+    """Cancel ONE run by id, rather than "whatever this notebook is doing" (`/cancel`, above).
+
+    `/overview` fires TWO runs concurrently and invariant 23's `_ACTIVE_RUNS` holds one slot per
+    NOTEBOOK, so the notebook-scoped cancel reaches only whichever registered last: the user asks to
+    stop, one run dies, the other keeps burning a model call to completion. That is not a clean
+    stop, and "keep the environment tidy" is the whole point of offering the button.
+
+    `_RUN_PROCESSES` is already keyed by run id and already holds the process (invariant 29 built it
+    for the trace stream's termination logic), so cancelling precisely is a lookup, not a new
+    registry. A caller cancels every run id it started.
+
+    An id still at the `None` placeholder is RESERVED but not yet spawned (`_announced`), so there
+    is nothing to signal; reporting that honestly beats a 404 that reads as "already finished".
+    """
+    if not run_id.startswith(f"{slug(notebook_id)}-"):
+        raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
+    if run_id not in _RUN_PROCESSES:
+        raise HTTPException(404, f"no in-flight run {run_id!r}")
+    process = _RUN_PROCESSES[run_id]
+    if process is None:
+        return {"cancelled": None, "run_id": run_id, "detail": "not spawned yet"}
+    # The WHOLE process group, exactly as `runner.Run.cancel` does and for the same reason
+    # (invariant 22): a stuck Deno grandchild must not survive as an orphan.
+    try:
+        os.killpg(process.pid, signal.SIGKILL)
+    except (ProcessLookupError, PermissionError):
+        pass  # already gone on its own — success, not a failure to report
+    return {"cancelled": run_id, "run_id": run_id}
 
 
 def _translate_trace_event(event: dict) -> dict:

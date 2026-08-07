@@ -16,6 +16,7 @@ import base64
 import json
 import os
 import time
+import types
 from typing import ClassVar
 
 import pytest
@@ -1297,6 +1298,32 @@ def test_overview_announces_its_runs_before_the_language_call(client, monkeypatc
 
     assert posted.status_code == 200, posted.text
     assert "not_found" not in streamed, streamed[:300]
+
+
+def test_cancel_run_targets_one_run_id_not_the_whole_notebook(client, monkeypatch):
+    """`/overview` fires TWO runs and invariant 23's `_ACTIVE_RUNS` holds one slot per NOTEBOOK, so
+    the notebook-scoped cancel reaches only whichever registered last — the user asks to stop and
+    the other run keeps burning a model call. This one kills exactly the id asked for."""
+    killed: list = []
+    monkeypatch.setattr(api.os, "killpg", lambda pid, sig: killed.append(pid))
+
+    api._RUN_PROCESSES["mynb-a"] = types.SimpleNamespace(pid=4242)
+    api._RUN_PROCESSES["mynb-b"] = None  # announced, not spawned yet
+    try:
+        assert client.post("/notebooks/mynb/runs/mynb-a/cancel").json()["cancelled"] == "mynb-a"
+        assert killed == [4242]
+
+        # Reserved-but-not-spawned is reported honestly, not as a 404 reading "already finished".
+        body = client.post("/notebooks/mynb/runs/mynb-b/cancel").json()
+        assert body["cancelled"] is None and "not spawned" in body["detail"]
+        assert killed == [4242]
+
+        # A run belonging to another notebook is refused, same guard `stream_run` applies.
+        assert client.post("/notebooks/other/runs/mynb-a/cancel").status_code == 404
+        assert client.post("/notebooks/mynb/runs/mynb-nope/cancel").status_code == 404
+    finally:
+        api._RUN_PROCESSES.pop("mynb-a", None)
+        api._RUN_PROCESSES.pop("mynb-b", None)
 
 
 def test_every_run_taking_handler_announces_before_resolving_the_language():

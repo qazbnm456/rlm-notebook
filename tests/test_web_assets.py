@@ -181,3 +181,54 @@ def test_no_event_is_subscribed_twice_inside_one_init_function():
             if events.count(event) > 1:
                 offenders.append(f"{event} subscribed {events.count(event)}x in one function")
     assert not offenders, "\n".join(offenders)
+
+
+def test_no_studio_tab_click_starts_a_run_by_itself():
+    """Selecting a Guide tab used to fire a real RLM call immediately, so browsing the four kinds
+    to see what they were cost four model runs and a user could not tell which click had committed
+    them. A user reported the panel as disorienting; every run is an explicit button press now.
+
+    A source-tree assertion because there is no JS test runner here (invariant 29): `showKind` must
+    not call `fetchKind`, and the tab click handler must go through `showKind`.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    start = js.index("  function showKind(kind) {")
+    end = js.index("\n  tabs.forEach(", start)
+    body = js[start:end]
+    # `fetchKind` may appear ONLY as a click handler inside `showKind` — that is the explicit button
+    # press. Any other occurrence means selecting the tab itself starts a run again.
+    occurrences = [line.strip() for line in body.splitlines() if "fetchKind(" in line]
+    assert occurrences == ['btn.addEventListener("click", () => fetchKind(kind));'], occurrences
+    assert 'tab.addEventListener("click", () => showKind(tab.dataset.guideKind));' in js
+
+
+def test_every_long_running_action_offers_a_way_to_stop_it():
+    """A user asked for this after watching a generation with no progress and no way out: chat,
+    the chat overview, each Guide kind and the podcast all mount the shared `runStatus`, which is
+    what carries the pulsing dot, the elapsed timer and the Stop button.
+
+    Also pins that Stop cancels by RUN ID rather than by notebook: `/overview` fires two runs and
+    `_ACTIVE_RUNS` holds one slot per notebook, so a notebook-scoped cancel would leave the second
+    run burning a model call to completion.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    # Minus one for the definition itself: chat, the chat overview, a Guide kind, the podcast.
+    assert js.count("runStatus({") - js.count("function runStatus({") == 4
+    assert "/cancel" in js and "runs/${encodeURIComponent(runId)}/cancel" in js
+    # The overview cancels BOTH of its runs.
+    assert "runIds: [`${base}-summary`, `${base}-faq`]" in js
+
+
+def test_the_studio_panels_say_what_they_are_for():
+    """Users could not tell what Studio, Podcast or Notes were. Each carries one visible sentence,
+    and the per-control detail lives in `title=` hovers rather than more permanent prose — the
+    treatment `toolscout`/`cve-reverser` use for their own controls."""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    assert html.count('class="panel-sub"') >= 3
+    assert "Audio Overview" not in html, "renamed to Podcast — users did not know what it was"
+    assert ">Podcast<" in html
+    for kind in ("summary", "faq", "timeline", "insight"):
+        marker = f'data-guide-kind="{kind}"'
+        tab = html[html.index(marker) : html.index(">", html.index(marker))]
+        assert "title=" in tab or "title=" in html[html.index(marker) - 200 : html.index(marker)], kind
+

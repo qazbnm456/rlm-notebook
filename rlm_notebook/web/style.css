@@ -1074,3 +1074,86 @@ input:focus {
     border-radius: 0;
   }
 }
+
+/* --- Run status: a live "this is working" surface, shared by the overview, the Guide tabs and the
+   podcast. It exists because of a real report: a generation takes a minute or more, the only
+   feedback was one line of text that ended on "finished" and then sat there, so the natural move is
+   to press the button again — which strands the first generation behind a staleness guard and looks
+   like nothing happened at all. Same shape `nuclei-forge/studio`'s `.live-status` uses. --- */
+
+.run-status {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.88rem;
+}
+
+.run-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: run-pulse 1.2s ease-in-out infinite;
+}
+
+/* The animation is the whole signal, so a reduced-motion reader needs the dot to still READ as
+   active rather than as a finished one — hence a steady accent rather than nothing. */
+@media (prefers-reduced-motion: reduce) {
+  .run-dot { animation: none; }
+}
+
+@keyframes run-pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.3; transform: scale(0.8); }
+}
+
+.run-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-dim);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-elapsed {
+  flex: none;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.8rem;
+  color: var(--text-faint);
+}
+
+.run-stop {
+  flex: none;
+  padding: 0.25em 0.6em;
+  font-size: 0.78rem;
+}
+
+.run-status.is-done .run-dot {
+  animation: none;
+  background: var(--text-faint);
+}
+
+.run-status[hidden] { display: none; }
+
+/* A short line under a panel head, saying what the panel is FOR. Users could not tell what Studio,
+   Podcast or Notes were; hover titles carry the per-control detail, this carries the one sentence
+   that has to be visible without hovering anything. */
+.panel-sub {
+  margin: -0.15rem 0 0.7rem;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  color: var(--text-faint);
+}
+
+.panel-sub b {
+  color: var(--text-dim);
+  font-weight: 600;
+}
+

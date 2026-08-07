@@ -79,21 +79,29 @@
 
     <section class="col col-studio" id="col-studio">
       <div class="panel-head">Studio</div>
+      <p class="panel-sub">Things made FROM your sources. Nothing here runs until you ask it to.</p>
 
+      <!-- Every tab explains itself on hover rather than spending rail space on a paragraph — the
+           same `title=` treatment `toolscout`/`cve-reverser` use for their own controls. -->
       <div class="guide-tabs" id="guide-tabs">
-        <button type="button" class="tab is-active" data-guide-kind="summary">Summary</button>
-        <button type="button" class="tab" data-guide-kind="faq">FAQ</button>
-        <button type="button" class="tab" data-guide-kind="timeline">Timeline</button>
-        <button type="button" class="tab" data-guide-kind="insight">Insight</button>
+        <button type="button" class="tab is-active" data-guide-kind="summary"
+                title="A few paragraphs covering what all your sources say, with citations you can check.">Summary</button>
+        <button type="button" class="tab" data-guide-kind="faq"
+                title="The questions your sources actually answer, each with its answer and a citation.">FAQ</button>
+        <button type="button" class="tab" data-guide-kind="timeline"
+                title="Dated events pulled out of your sources and put in order.">Timeline</button>
+        <button type="button" class="tab" data-guide-kind="insight"
+                title="The single most important takeaway, in one sentence.">Insight</button>
       </div>
-      <button type="button" class="btn guide-regenerate" id="guide-regenerate">↻ Regenerate</button>
-      <div class="guide-body" id="guide-body">
-        <p class="empty-note">Open a notebook with sources, then pick a tab to generate it.</p>
-      </div>
+      <button type="button" class="btn guide-regenerate" id="guide-regenerate"
+              title="Run this one again from your current sources.">↻ Regenerate</button>
+      <div class="guide-body" id="guide-body"></div>
 
       <div class="podcast-section">
-        <div class="panel-head">Audio Overview</div>
-        <button type="button" class="btn btn-primary btn-block" id="podcast-generate">
+        <div class="panel-head">Podcast</div>
+        <p class="panel-sub">Two hosts discuss your sources, as an episode you can play or download.</p>
+        <button type="button" class="btn btn-primary btn-block" id="podcast-generate"
+                title="Writes a two-host script grounded in your sources, then speaks it. The slowest thing here.">
           Generate podcast
         </button>
         <div class="podcast-body" id="podcast-body"></div>
@@ -101,6 +109,10 @@
 
       <div class="notes-section">
         <div class="panel-head">Notes</div>
+        <p class="panel-sub">
+          Your own scratchpad. Save an answer from Chat with <b>+ Save as note</b>, then
+          <b>promote</b> a note to turn it into a source later questions can cite.
+        </p>
         <form id="add-note-form" class="add-note">
           <textarea id="note-text" rows="3" placeholder="Write a note…"></textarea>
           <button type="submit" class="btn btn-primary btn-block">Add note</button>
