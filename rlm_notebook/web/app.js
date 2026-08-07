@@ -34,6 +34,13 @@ const state = {
   title: null,
   overview: null,
   podcast: null,
+  //: The Studio guide artifacts, keyed by kind, as `{result, runId}`. On `state` rather than in a
+  //: closure inside `initStudioPanel` because the References view has to collect citations from
+  //: them: an independent review found every citation in a summary/FAQ/timeline/insight — and in
+  //: the podcast transcript — was clickable and led to a References list that structurally could
+  //: not contain it. It only LOOKED like it worked when the same `source_id|locator` happened to
+  //: be cited in chat too, which for text/web sources (all locator `"whole"`) is most of the time.
+  guides: {},
   sources: [],
   turns: [],
   notes: [],
@@ -65,7 +72,17 @@ function updateToggleGlyph() {
   const current =
     document.documentElement.getAttribute("data-theme") ||
     (window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light");
-  toggle.textContent = current === "dark" ? "☾" : "☀";
+  // U+FE0E forces TEXT presentation. Without it macOS draws these from the colour-emoji font,
+  // which ignores `color` entirely (so the hover tint did nothing) and renders at its own
+  // scale (so the glyph looked small however large `font-size` was). That is the whole
+  // explanation for "the icon is still too small and the hover has no effect".
+  // GEOMETRIC glyphs (U+25D0/U+25D1), not `☀`/`☾`. Those live in the Miscellaneous Symbols block
+  // and macOS draws them from the colour-emoji font, which ignores `color` outright and sizes them
+  // itself — the reason two rounds of "the icon is small and the hover does nothing" were about the
+  // font, not the CSS. U+FE0E asks for text presentation, but a glyph that was never emoji in the
+  // first place is one less thing depending on the platform honouring it. Same family
+  // `bugcademy/studio` uses (`◐`).
+  toggle.textContent = current === "dark" ? "\u25d1" : "\u25d0";
 }
 
 // --- API helpers --------------------------------------------------------------------------------
@@ -101,6 +118,10 @@ async function api(path, options) {
 //: Chat/Guide/Podcast rather than three separate caches.
 const tickerLogs = new Map();
 
+//: Kinds that end a stream. Written down once so the ticker, the tests and any later consumer
+//: share one answer — adding a terminal kind and missing a call site leaves a stream open forever.
+const TERMINAL_KINDS = new Set(["done", "failed", "not_found"]);
+
 function openTicker(notebookId, runId, onEvent) {
   const events = [];
   tickerLogs.set(runId, events);
@@ -123,7 +144,11 @@ function openTicker(notebookId, runId, onEvent) {
       }
       events.push(event);
       onEvent(event);
-      if (event.kind === "done" || event.kind === "not_found") {
+      // EVERY terminal kind, not just the happy one. `failed` was added when the trace mapping
+      // grew a failure headline, and a check that only knew `done` would have left the stream open
+      // forever on exactly the runs a user most wants to see end. Caught by a test asserting the
+      // old vocabulary, which is the whole reason to pin an event vocabulary in the first place.
+      if (TERMINAL_KINDS.has(event.kind)) {
         source.close();
         resolve(events);
       }
@@ -146,7 +171,80 @@ function openTicker(notebookId, runId, onEvent) {
 //
 // `runIds` is a LIST because `/overview` fires two runs; cancelling per run id rather than per
 // notebook is what makes Stop actually stop everything (see `cancel_run`'s docstring).
+// The server's `summary` is an English convenience; `kind` is the stable thing and `detail` is the
+// one specific that differs every run. Translating the KIND and keeping the detail verbatim is what
+// makes the status line readable in the interface language without inventing a translation for a
+// tool name or a model id.
+//: The event headlines, in the interface language. The server sends `primary` in English and
+//: `detail`/`meta` as the run's own specifics — a headline is a fixed vocabulary worth translating,
+//: a piece of the model's reasoning or a tool's name is not.
+const TRACE_HEADLINES = {
+  Starting: () => t("trace.start", "Starting"),
+  Step: () => t("trace.stepBare", "Step"),
+  Tool: () => t("trace.tool", "Tool"),
+  "Sub-model": () => t("trace.escalation", "Sub-model"),
+  Finalising: () => t("trace.final", "Finalising"),
+  Result: () => t("trace.result", "Result"),
+  Finished: () => t("trace.done", "Finished"),
+  Failed: () => t("trace.failed", "Failed"),
+};
+
+function traceHeadline(event) {
+  const primary = event.primary || "";
+  // `Step 3` -> the `Step` headline plus its number, so the count survives translation.
+  // Interpolated, not concatenated: a translation that puts the number in the middle ("第 3 步")
+  // cannot be produced by gluing a number onto a translated prefix, and the zh-Hant table had
+  // duly rendered "第 3" with the counter missing.
+  const numbered = primary.match(/^Step (\d+)$/);
+  if (numbered) return t("trace.step", `Step ${numbered[1]}`, { n: numbered[1] });
+  const known = TRACE_HEADLINES[primary];
+  return known ? known() : primary;
+}
+
+// One line, the shape `cve-reverser`/`diff-sentry`'s feeds use: a translated headline, the run's own
+// specific, and a compact fact. It used to be a fixed sentence per event type with the payload
+// thrown away, which is why ours said so much less than theirs.
+function traceLabel(event) {
+  if (!event) return "";
+  if (event.kind === "not_found") return t("trace.notFound", "No live progress for this run");
+  // A kind with no headline at all (an event type this build has no name for): keep whatever is on
+  // screen rather than overwriting a meaningful line with an internal event name — which is how
+  // `run_start` once reached a user's screen as the literal string `run_start`.
+  if (event.kind === "other" && !event.primary) return "";
+  const parts = [traceHeadline(event)];
+  if (event.detail) parts.push(event.detail);
+  return parts.filter(Boolean).join(" \u00b7 ");
+}
+
+//: notebook id -> how many runs this TAB currently has in flight against it. Answers "which
+//: notebook is generating" in the picker, which is otherwise unknowable once you switch away.
+//:
+//: Client-side on purpose, and honest about its limit: it counts runs THIS tab started. A run
+//: started in another tab (or before a reload) is invisible here. The server's own registries are
+//: single-process, in-memory maps (invariant 23) with no endpoint to read them, and adding one is
+//: a bigger change than the question needs.
+const activeRuns = new Map();
+
+function noteRunStarted(notebookId) {
+  activeRuns.set(notebookId, (activeRuns.get(notebookId) || 0) + 1);
+  store.emit("runs:changed", { activeRuns });
+}
+
+function noteRunFinished(notebookId) {
+  const left = (activeRuns.get(notebookId) || 1) - 1;
+  if (left > 0) activeRuns.set(notebookId, left);
+  else activeRuns.delete(notebookId);
+  store.emit("runs:changed", { activeRuns });
+}
+
+//: How long a single step may go without news before the wait itself becomes the message. Long
+//: enough that an ordinary step never trips it, short enough to answer "is it stuck" before someone
+//: has to ask. A model's FIRST response on the Claude-subscription path was measured at four
+//: minutes, which is the case this exists for.
+const WAITING_AFTER_SECONDS = 20;
+
 function runStatus({ notebookId, runIds, label, onCancel }) {
+  noteRunStarted(notebookId);
   const node = document.createElement("div");
   node.className = "run-status";
 
@@ -170,10 +268,140 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
   stop.textContent = t("run.stop", "\u23f9 Stop");
   node.appendChild(stop);
 
+  // An expandable LOG of every step, under the counters. "Starting up…" sitting alone for a minute
+   // was reported as uninformative — a single current-activity line cannot say which stage is slow,
+   // only which one is now. The log answers "where is it stuck": each step keeps its own elapsed
+   // stamp, so a long gap is visible rather than inferred. Collapsed by default, because the whole
+   // point of the one-line summary is that most of the time nobody needs the rest.
+  const log = document.createElement("div");
+  log.className = "run-log";
+  log.hidden = true;
+
+  const logToggle = document.createElement("button");
+  logToggle.type = "button";
+  logToggle.className = "run-log-toggle";
+  logToggle.hidden = true;
+  logToggle.addEventListener("click", () => {
+    log.hidden = !log.hidden;
+    logToggle.classList.toggle("is-open", !log.hidden);
+  });
+
+  function appendLog(event) {
+    const headline = traceHeadline(event);
+    if (!headline) return;
+    const line = document.createElement("div");
+    line.className = `run-log-line kind-${event.kind || "other"}`;
+
+    const at = document.createElement("span");
+    at.className = "run-log-at";
+    at.textContent = formatTimecode((Date.now() - started) / 1000);
+    line.appendChild(at);
+
+    const what = document.createElement("span");
+    what.className = "run-log-what";
+    const primary = document.createElement("b");
+    primary.textContent = headline;
+    what.appendChild(primary);
+    if (event.meta) {
+      // Inside `what`, immediately after the label. It used to be a third grid column pinned to the
+      // right edge, which on a wide panel left a hand's width of empty box between "啟動" and
+      // "GenerateSummary" and read as a broken layout rather than as one log line.
+      const meta = document.createElement("span");
+      meta.className = "run-log-meta";
+      meta.textContent = event.meta;
+      what.appendChild(meta);
+    }
+    if (event.detail) {
+      // The model's own words. This is the part that makes the log worth opening — and the part
+      // the previous version discarded entirely.
+      //
+      // Named `reasoningText`, not `detail`: the hidden-toggle tripwire matches variable names
+      // across the whole file, and a `detail` here collides with the reference panel's own
+      // `detail.hidden = …`. It fails loudly, which is the safe direction — so the fix is the name.
+      const reasoningText = document.createElement("span");
+      reasoningText.className = "run-log-detail";
+      reasoningText.textContent = event.detail;
+      what.appendChild(reasoningText);
+    }
+    line.appendChild(what);
+    log.appendChild(line);
+    log.scrollTop = log.scrollHeight;
+    logToggle.hidden = false;
+    logToggle.textContent = t("run.logToggle", `${log.children.length} steps`, {
+      n: log.children.length,
+    });
+  }
+
+  // A typed COUNT per kind of work, not a scrolling log. `nuclei-forge/studio` settled this shape
+  // and its own comment says why the framing matters: a raw count climbing forever reads as
+  // runaway, while a small set of named counters reads as progress. Three kinds is all our trace
+  // has (`_translate_trace_event`), and three is about the ceiling before a status line becomes
+  // noise — the thing the user asked to avoid.
+  const counts = { tool: 0, escalation: 0 };
+  const meter = document.createElement("span");
+  meter.className = "run-meter";
+  meter.hidden = true;
+  node.appendChild(meter);
+
+  // No `thinking` cell: the log toggle right below already says "N steps", and two counters one
+  // line apart saying the same number reads as a bug. These are the kinds a step count does NOT
+  // cover.
+  const COUNT_LABELS = {
+    tool: () => t("run.count.tool", "tools"),
+    escalation: () => t("run.count.escalation", "sub-model"),
+  };
+
+  function renderMeter() {
+    meter.textContent = "";
+    let any = false;
+    Object.entries(counts).forEach(([kind, n]) => {
+      if (!n) return;  // a kind that has not happened is not information, it is clutter
+      any = true;
+      const cell = document.createElement("span");
+      cell.className = "run-count";
+      const num = document.createElement("b");
+      num.textContent = String(n);
+      cell.appendChild(num);
+      cell.appendChild(document.createTextNode(" " + COUNT_LABELS[kind]()));
+      meter.appendChild(cell);
+    });
+    meter.hidden = !any;
+  }
+
   const started = Date.now();
-  const timer = setInterval(() => {
+  node.appendChild(logToggle);
+  node.appendChild(log);
+
+  // "Is it stuck?" — a user had to ask, and the honest answer was no: the run finished fine, but
+  // the model's FIRST response took four minutes and the trace has nothing to emit until a step
+  // completes, so the panel looked identical to a hang for four minutes.
+  //
+  // The interface has to answer that question itself, and the only fact it has is how long the
+  // current step has been running. Below the threshold this says nothing (a step taking six
+  // seconds is not news); above it, the wait becomes the message.
+  let lastEventAt = started;
+  let currentPhrase = label;
+  let stepsSeen = 0;
+
+  function paint() {
     elapsed.textContent = formatTimecode((Date.now() - started) / 1000);
-  }, 1000);
+    const waiting = (Date.now() - lastEventAt) / 1000;
+    if (waiting < WAITING_AFTER_SECONDS) {
+      text.textContent = currentPhrase;
+      node.classList.remove("is-waiting");
+      return;
+    }
+    node.classList.add("is-waiting");
+    // BEFORE the first step, "waiting" says nothing a reader did not already know — that stage IS
+    // waiting. What they cannot see is WHAT it is waiting for, and that the first model response
+    // is the slow one. After a step has landed, the elapsed time is the information: it is the
+    // difference between a slow step and a stuck one.
+    text.textContent = stepsSeen
+      ? `${currentPhrase} \u00b7 ${t("run.waiting", `waiting ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) })}`
+      : t("run.awaitingModel", `waiting for the model's first response \u00b7 ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) });
+  }
+
+  const timer = setInterval(paint, 1000);
 
   let stopped = false;
   function finish() {
@@ -181,6 +409,7 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
     stopped = true;
     clearInterval(timer);
     node.classList.add("is-done");
+    noteRunFinished(notebookId);
   }
 
   stop.addEventListener("click", async () => {
@@ -202,8 +431,28 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 
   return {
     node,
+    // The whole event, not just its text: the KIND is what the counters are made of, and the
+    // summary alone threw it away.
+    onEvent(event) {
+      if (stopped || !event) return;
+      if (counts[event.kind] !== undefined) {
+        counts[event.kind] += 1;
+        renderMeter();
+      }
+      if (event.kind === "thinking") stepsSeen += 1;
+      const phrase = traceLabel(event);
+      if (phrase) {
+        currentPhrase = phrase;
+        lastEventAt = Date.now();
+        paint();
+        appendLog(event);
+      }
+    },
     setSummary(summary) {
-      if (!stopped && summary) text.textContent = summary;
+      if (stopped || !summary) return;
+      currentPhrase = summary;
+      lastEventAt = Date.now();
+      paint();
     },
     finish,
   };
@@ -286,14 +535,78 @@ async function showCitationTurn(runId, citation, detailArea) {
     note.className = "citation-detail-note";
     note.textContent = t("cite.traceHead", "Where the model read this source (not proof the surrounding prose is faithful):");
     detailArea.appendChild(note);
-    const pre = document.createElement("pre");
-    pre.className = "citation-detail-payload trace-face";
-    pre.textContent = JSON.stringify(data.payload, null, 2);
-    detailArea.appendChild(pre);
+    detailArea.appendChild(renderTraceStep(data.payload));
   } catch (err) {
     if (detailArea._requestToken !== token) return;
-    detailArea.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
+    detailArea.textContent = "";
+    const note = document.createElement("div");
+    note.className = "citation-detail-note";
+    // A 404 here is the ORDINARY outcome, not a fault: the lookup is a marker search through one
+    // run's trace (invariant 29), and a marker the model only ever handled inside a truncated
+    // sub-call field, or a trace already collected by retention, simply is not findable. Showing
+    // `404: marker for source 's3' locator 'whole' not found in this trace` was reported, fairly,
+    // as unintelligible — it reads as a broken feature rather than as "no record of this".
+    note.textContent = /\b404\b/.test(String(err.message))
+      ? t(
+          "cite.traceMissing",
+          "No step in this run's record shows the model reading that exact passage. The record only covers what it echoed while working, and old records are cleared after a while."
+        )
+      : t("err.generic", `(error) ${err.message}`, { message: err.message });
+    detailArea.appendChild(note);
   }
+}
+
+// A trace step, in the same visual language as the source viewer: reasoning is prose, code is a
+// code block, output is the source text it read. It used to be `JSON.stringify(payload, null, 2)`
+// in a `<pre>` — a wall containing an entire article, which a user called unreadable, correctly.
+function renderTraceStep(payload) {
+  const wrap = document.createElement("div");
+  wrap.className = "trace-step";
+  const data = payload || {};
+
+  if (data.reasoning || data.final_reasoning) {
+    const prose = document.createElement("p");
+    prose.className = "trace-reasoning";
+    prose.textContent = data.reasoning || data.final_reasoning;
+    wrap.appendChild(prose);
+  }
+
+  if (data.code) {
+    wrap.appendChild(traceBlock(t("trace.code", "Code it ran"), data.code, "trace-code", false));
+  }
+
+  // COLLAPSED: the output is whatever the model printed, which for a read step is a whole source.
+  // That is the part that made the old panel a wall.
+  if (data.output) {
+    const text = typeof data.output === "string" ? data.output : JSON.stringify(data.output, null, 2);
+    wrap.appendChild(traceBlock(t("trace.output", "What came back"), text, "trace-output", true));
+  }
+
+  // Anything this renderer has no shape for, rather than dropping it silently.
+  const known = new Set(["reasoning", "final_reasoning", "code", "output", "turn"]);
+  const rest = Object.fromEntries(Object.entries(data).filter(([k]) => !known.has(k)));
+  if (Object.keys(rest).length) {
+    wrap.appendChild(
+      traceBlock(t("trace.other", "Other fields"), JSON.stringify(rest, null, 2), "trace-code", true)
+    );
+  }
+  return wrap;
+}
+
+function traceBlock(label, text, className, collapsed) {
+  const section = document.createElement("details");
+  section.className = "trace-block";
+  section.open = !collapsed;
+
+  const summary = document.createElement("summary");
+  summary.textContent = `${label} \u00b7 ${text.length.toLocaleString()}`;
+  section.appendChild(summary);
+
+  const pre = document.createElement("pre");
+  pre.className = `${className} trace-face`;
+  pre.textContent = text;
+  section.appendChild(pre);
+  return section;
 }
 
 // --- Source viewer modal ------------------------------------------------------------------------
@@ -340,6 +653,80 @@ function renderTextWithOptionalHighlight(text, quote) {
   return container;
 }
 
+// A source's ORIGIN is a machine string: a URL, or `pasted:<first words>#<hash>` for pasted text.
+// Showing it raw as the modal's title produced the thing a user called too rough — a header reading
+// `text · pasted:Voyager 1 launched on September 5, 1977. Voyager 2 launched #b2ad719a`.
+function sourceDisplayName(source) {
+  const origin = source.origin || "";
+  if (origin.startsWith("pasted:")) {
+    // Everything between the marker and the content hash IS the readable snippet `ingest_pasted_
+    // text` deliberately puts there (invariant 30 — a bare hash was found to be a real regression).
+    const snippet = origin.slice("pasted:".length).replace(/#[0-9a-f]+$/, "").trim();
+    return snippet || t("source.pasted", "Pasted text");
+  }
+  try {
+    const url = new URL(origin);
+    // The host is what identifies a page at a glance; the path is detail, and it belongs in the
+    // metadata rows below rather than in the title.
+    return url.hostname.replace(/^www\./, "");
+  } catch {
+    return origin;
+  }
+}
+
+// The metadata block above the text: what this source IS, where it came from, and how big it is.
+// Every value goes in through `textContent` — an origin can carry attacker-supplied text from a
+// page that was fetched (invariants 6 and 29).
+function renderSourceMeta(source) {
+  const meta = document.createElement("dl");
+  meta.className = "source-meta";
+
+  const rows = [];
+  rows.push([t("source.kind", "Kind"), String(source.kind || "").toUpperCase()]);
+
+  const origin = source.origin || "";
+  if (/^https?:\/\//.test(origin)) {
+    rows.push([t("source.url", "Address"), origin, origin]);
+  } else if (origin.startsWith("pasted:")) {
+    rows.push([t("source.origin", "Origin"), t("source.pastedIn", "Pasted into this notebook")]);
+  } else {
+    rows.push([t("source.origin", "Origin"), origin]);
+  }
+
+  const chars = (source.blocks || []).reduce((n, b) => n + (b.text ? b.text.length : 0), 0);
+  rows.push([
+    t("source.size", "Size"),
+    t("source.sizeValue", `${source.blocks.length} blocks · ${chars.toLocaleString()} characters`, {
+      blocks: source.blocks.length,
+      chars: chars.toLocaleString(),
+    }),
+  ]);
+
+  if (source.flags && source.flags.length) {
+    rows.push([t("source.flags", "Flagged"), source.flags.join("; ")]);
+  }
+
+  rows.forEach(([term, value, href]) => {
+    const dt = document.createElement("dt");
+    dt.textContent = term;
+    meta.appendChild(dt);
+    const dd = document.createElement("dd");
+    if (href) {
+      const link = document.createElement("a");
+      link.href = href;
+      link.target = "_blank";
+      link.rel = "noopener noreferrer";
+      link.textContent = value;
+      dd.appendChild(link);
+    } else {
+      dd.textContent = value;
+    }
+    meta.appendChild(dd);
+  });
+
+  return meta;
+}
+
 async function showSourceViewer(sourceId, locator, quote) {
   if (sourceViewerAbort) sourceViewerAbort.abort();
   const controller = new AbortController();
@@ -358,8 +745,9 @@ async function showSourceViewer(sourceId, locator, quote) {
       { signal: controller.signal }
     );
     if (controller.signal.aborted) return;
-    title.textContent = `${source.kind} · ${source.origin}`;
+    title.textContent = sourceDisplayName(source);
     body.innerHTML = "";
+    body.appendChild(renderSourceMeta(source));
     let targetSection = null;
     source.blocks.forEach((block) => {
       const section = document.createElement("div");
@@ -393,19 +781,171 @@ function initSourceViewer() {
 
 // --- Notebook switcher ---------------------------------------------------------------------------
 
+// Notebooks are located by TITLE. The id never appears — it is an internal handle (invariant 37),
+// and putting it in front of the name (with `N sources, M turns` beside it) was the whole problem:
+// a user could not tell which notebook was which without reading machine metadata.
 async function refreshNotebookList() {
-  const data = await api("/notebooks");
-  const list = document.getElementById("notebook-list");
-  list.innerHTML = "";
+  const menu = document.getElementById("notebook-menu");
+  let data;
+  try {
+    data = await api("/notebooks");
+  } catch {
+    return; // the picker keeps whatever it last showed; opening it will retry
+  }
+  menu.innerHTML = "";
+
   data.notebooks.forEach((nb) => {
-    const option = document.createElement("option");
-    option.value = nb.id;
-    option.label = `${nb.id} (${nb.source_count} sources, ${nb.turn_count} turns)`;
-    list.appendChild(option);
+    menu.appendChild(renderNotebookRow(nb));
   });
+
+  const create = document.createElement("button");
+  create.type = "button";
+  create.className = "notebook-row notebook-row-new";
+  create.textContent = t("app.newNotebookRow", "\uff0b New notebook");
+  create.addEventListener("click", () => {
+    closeNotebookMenu();
+    resetToNewNotebook();
+  });
+  menu.appendChild(create);
+
   if (data.unreadable.length) {
     console.warn("unreadable notebook files (flagged, not hidden):", data.unreadable);
   }
+}
+
+// Coarse on purpose: the row needs "which of these is recent", not a timestamp. Anything older
+// than a week falls back to a real date, because "37 days ago" is not something anyone can place.
+function relativeTime(epochSeconds) {
+  const seconds = Math.max(0, Date.now() / 1000 - epochSeconds);
+  if (seconds < 90) return t("time.justNow", "just now");
+  const minutes = Math.round(seconds / 60);
+  if (minutes < 60) return t("time.minutes", `${minutes}m ago`, { n: minutes });
+  const hours = Math.round(minutes / 60);
+  if (hours < 24) return t("time.hours", `${hours}h ago`, { n: hours });
+  const days = Math.round(hours / 24);
+  if (days <= 7) return t("time.days", `${days}d ago`, { n: days });
+  return new Date(epochSeconds * 1000).toLocaleDateString(uiLang());
+}
+
+function renderNotebookRow(nb) {
+  const row = document.createElement("div");
+  row.className = "notebook-row";
+  if (nb.id === state.notebookId) row.classList.add("is-current");
+  if (activeRuns.has(nb.id)) row.classList.add("is-running");
+
+  const open = document.createElement("button");
+  open.type = "button";
+  open.className = "notebook-row-open";
+  open.setAttribute("role", "option");
+
+  if (activeRuns.has(nb.id)) {
+    const dot = document.createElement("span");
+    dot.className = "run-dot notebook-row-dot";
+    dot.dataset.tip = t("app.generating", "Generating something in this notebook");
+    open.appendChild(dot);
+  }
+
+  const title = document.createElement("span");
+  title.className = "notebook-row-title";
+  // textContent, never innerHTML: a title is model-authored text derived from source content a
+  // prompt-injected source could influence (invariants 6 and 29).
+  //
+  // `derived_title` is the server's own fallback (from the notebook's origins, no model call), so a
+  // notebook someone has only put sources into reads as its subject rather than as "Untitled" —
+  // titling is lazy now, so that is the common case, not a rare one.
+  title.textContent = nb.title || nb.derived_title || t("app.untitled", "Untitled notebook");
+  open.appendChild(title);
+
+  const meta = document.createElement("span");
+  meta.className = "notebook-row-meta";
+  const parts = [
+    t("app.rowMeta", `${nb.source_count} sources · ${nb.turn_count} turns`, {
+      sources: nb.source_count,
+      turns: nb.turn_count,
+    }),
+  ];
+  // Model-authored titles are NOT unique — a user hit three notebooks with near-identical generated
+  // names. With the id no longer shown anywhere, "which did I touch last" is the only thing left to
+  // tell them apart, so it goes on the row rather than being something to work out.
+  if (nb.updated_at) parts.push(relativeTime(nb.updated_at));
+  meta.textContent = parts.join(" \u00b7 ");
+  open.appendChild(meta);
+
+  open.addEventListener("click", () => {
+    closeNotebookMenu();
+    openNotebook(nb.id);
+  });
+  row.appendChild(open);
+
+  const rename = document.createElement("button");
+  rename.type = "button";
+  rename.className = "notebook-row-rename";
+  rename.textContent = "\u270e\ufe0e";
+  rename.dataset.tip = t("app.rename", "Rename");
+  rename.addEventListener("click", (event) => {
+    event.stopPropagation();
+    startRename(row, nb);
+  });
+  row.appendChild(rename);
+
+  return row;
+}
+
+// Rename in place. A PUT, never the generate endpoint: setting a title is an instant write that
+// always succeeds, generating one is a model run that can fail and be superseded.
+function startRename(row, nb) {
+  row.innerHTML = "";
+  const input = document.createElement("input");
+  input.className = "notebook-rename-input";
+  input.value = nb.title || "";
+  input.maxLength = 120;
+  row.appendChild(input);
+
+  async function commit() {
+    const value = input.value.trim();
+    if (!value || value === nb.title) {
+      refreshNotebookList();
+      return;
+    }
+    try {
+      const updated = await api(`/notebooks/${encodeURIComponent(nb.id)}/title`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: value }),
+      });
+      if (nb.id === state.notebookId) {
+        state.title = updated.title;
+        store.emit("notebook:titled", { title: state.title, notebookId: nb.id });
+      }
+    } catch (err) {
+      alert(t("err.rename", `Could not rename: ${err.message}`, { message: err.message }));
+    }
+    refreshNotebookList();
+  }
+
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") {
+      event.preventDefault();
+      commit();
+    }
+    if (event.key === "Escape") {
+      // Detach the blur handler FIRST. Escape used to call the async refresh with `commit` still
+      // listening on a focused input, so any focus change while that request was in flight sent the
+      // typed value as a real rename — a cancel that could commit.
+      input.removeEventListener("blur", commit);
+      refreshNotebookList();
+    }
+  });
+  input.addEventListener("blur", commit);
+  input.focus();
+  input.select();
+}
+
+function closeNotebookMenu() {
+  const menu = document.getElementById("notebook-menu");
+  const button = document.getElementById("notebook-current");
+  menu.hidden = true;
+  button.setAttribute("aria-expanded", "false");
 }
 
 async function openNotebook(notebookId) {
@@ -422,6 +962,7 @@ async function openNotebook(notebookId) {
   state.notebookId = notebook.id;
   state.notebookSlug = notebook.slug || notebook.id;
   state.title = notebook.title || null;
+  state.derivedTitle = notebook.derived_title || null;
   state.overview = notebook.overview || null;
   state.podcast = notebook.podcast || null;
   state.sources = notebook.sources;
@@ -449,6 +990,14 @@ async function openNotebook(notebookId) {
 //
 // Silent on failure by design — the endpoint already falls back to a deterministic title, and a
 // missing title is a cosmetic loss, never worth an alert over a source that was added fine.
+// Title on DEMAND. Called by the actions that already run a model, never by adding a source.
+// Fire-and-forget on purpose: a title must never delay or fail the thing the user actually asked
+// for (the same "never lose what already succeeded" rule invariants 19 and 37 encode).
+function ensureTitle() {
+  if (!state.notebookId || state.title || !state.sources.length) return;
+  void suggestTitle(state.notebookId, notebookGeneration);
+}
+
 async function suggestTitle(notebookId, generation) {
   try {
     const notebook = await api(`/notebooks/${encodeURIComponent(notebookId)}/title`, {
@@ -487,6 +1036,7 @@ function settingRows() {
   return [
     {
       key: "output_language",
+      choicesKey: "output_languages",
       label: t("settings.outputLanguage", "Output language"),
       placeholder: t("settings.outputLanguagePlaceholder", "e.g. Traditional Chinese"),
       help: t(
@@ -498,12 +1048,14 @@ function settingRows() {
     // so "empty" means its two shipped clips, not "follow the language" (invariant 43).
     {
       key: "tts_voice_host_a",
+      choicesKey: "voices",
       label: t("settings.voiceA", "Podcast voice — host A"),
       placeholder: "e.g. zh-TW-YunJheNeural or host-a",
       help: voiceHelp,
     },
     {
       key: "tts_voice_host_b",
+      choicesKey: "voices",
       label: t("settings.voiceB", "Podcast voice — host B"),
       placeholder: "e.g. zh-TW-HsiaoChenNeural or host-b",
       help: voiceHelp,
@@ -547,6 +1099,11 @@ function renderUiLanguageRow(body) {
   body.appendChild(wrap);
 }
 
+//: What the server says each setting may be set to, for the provider actually configured. Empty
+//: until `initSettings` fetches it; a row with no choices falls back to a free-text input, so the
+//: page still works if this request fails.
+let settingsChoices = {};
+
 function renderSettings(state_) {
   const body = document.getElementById("settings-body");
   body.textContent = "";
@@ -557,7 +1114,11 @@ function renderSettings(state_) {
     // listing already uses for an unparseable file).
     const warn = document.createElement("div");
     warn.className = "setting-source";
-    warn.textContent = `Settings file could not be read (${state_.error}); showing defaults.`;
+    warn.textContent = t(
+      "settings.readError",
+      `Settings file could not be read (${state_.error}); showing defaults.`,
+      { error: state_.error },
+    );
     body.appendChild(warn);
   }
 
@@ -574,12 +1135,39 @@ function renderSettings(state_) {
     label.htmlFor = `setting-${row.key}`;
     wrap.appendChild(label);
 
-    const input = document.createElement("input");
+    // A SELECT when the server told us what the valid values are, a text box otherwise. Free text
+    // here was a way to typo an env-var value into a setting that then fails at synthesis time —
+    // and `config._VOICE_PATTERN` has to refuse a bad one anyway, so offering the choices is both
+    // safer and less work for the person. The options come from `GET /settings/choices` rather than
+    // a list in this file, because the answer is provider-specific and a second copy would drift.
+    const choices = settingsChoices[row.choicesKey] || [];
+    const current = entry.source === "default" ? "" : entry.value || "";
+    let input;
+    if (choices.length) {
+      input = document.createElement("select");
+      const blank = document.createElement("option");
+      blank.value = "";
+      blank.textContent = t("settings.useDefault", "Use the default");
+      input.appendChild(blank);
+      // A value already stored that is NOT in the list (an env var, or a voice from another
+      // provider left behind by a switch) still has to be selectable, or opening the page and
+      // pressing Save would silently clear it.
+      const options = choices.includes(current) || !current ? choices : [current, ...choices];
+      options.forEach((value) => {
+        const option = document.createElement("option");
+        option.value = value;
+        option.textContent = value;
+        option.selected = value === current;
+        input.appendChild(option);
+      });
+    } else {
+      input = document.createElement("input");
+      input.type = "text";
+      input.placeholder = row.placeholder;
+      // textContent/value, never innerHTML — these are server-echoed, caller-writable strings.
+      input.value = current;
+    }
     input.id = `setting-${row.key}`;
-    input.type = "text";
-    input.placeholder = row.placeholder;
-    // textContent/value, never innerHTML — these are server-echoed, caller-writable strings.
-    input.value = entry.source === "default" ? "" : entry.value || "";
     input.disabled = entry.source === "env";
     wrap.appendChild(input);
     inputs.set(row.key, input);
@@ -588,7 +1176,7 @@ function renderSettings(state_) {
     note.className = "setting-source";
     note.textContent =
       entry.source === "env"
-        ? `Pinned by ${entry.env_var} — unset it to edit here.`
+        ? t("settings.pinnedBy", `Pinned by ${entry.env_var} — unset it to edit here.`, { env: entry.env_var })
         : row.help;
     wrap.appendChild(note);
 
@@ -631,6 +1219,9 @@ function initSettings() {
     overlay.hidden = false;
     document.getElementById("settings-body").textContent = t("cite.loading", "Loading…");
     try {
+      // Fetched alongside the settings themselves, and tolerated failing: a row with no choices
+      // falls back to free text, so a page that cannot reach this still works.
+      settingsChoices = await api("/settings/choices").catch(() => ({}));
       renderSettings(await api("/settings"));
     } catch (err) {
       document.getElementById("settings-body").textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
@@ -649,32 +1240,53 @@ function initSettings() {
 
 function initNotebookTitle() {
   const el = document.getElementById("notebook-title");
+  const button = document.getElementById("notebook-current");
+  // The header says whether the notebook you are LOOKING at is busy; the picker says which of the
+  // others are. Between them "where is that generation I started" has an answer.
+  const runDot = document.getElementById("notebook-run-dot");
+  store.on("runs:changed", () => {
+    runDot.hidden = !activeRuns.has(state.notebookId);
+    const menu = document.getElementById("notebook-menu");
+    if (!menu.hidden) refreshNotebookList();
+  });
   store.on("notebook:titled", ({ title, notebookId }) => {
     // textContent, never innerHTML — a title is model-authored text derived from source content
     // a prompt-injected source could influence (CLAUDE.md invariants 6 and 29).
-    el.textContent = title || (notebookId ? "Untitled notebook" : "");
-    el.hidden = !notebookId;
+    // The SAME fallback the picker row uses. They disagreed — the header said "Untitled notebook"
+    // while the row showed the server's derived label for the same notebook, which reads as two
+    // different notebooks.
+    el.textContent = notebookId
+      ? title || state.derivedTitle || t("app.untitled", "Untitled notebook")
+      : t("app.noNotebook", "No notebook yet");
   });
 }
 
 function initNotebookSwitch() {
-  const input = document.getElementById("notebook-input");
-  const openBtn = document.getElementById("notebook-open");
-  openBtn.addEventListener("click", () => openNotebook(input.value));
-  input.addEventListener("keydown", (event) => {
-    if (event.key === "Enter") {
-      event.preventDefault();
-      openNotebook(input.value);
-    }
+  const button = document.getElementById("notebook-current");
+  const menu = document.getElementById("notebook-menu");
+
+  button.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const opening = menu.hidden;
+    menu.hidden = !opening;
+    button.setAttribute("aria-expanded", String(opening));
+    if (opening) refreshNotebookList(); // always fresh: titles change, notebooks appear
   });
+
+  // Click-away and Escape both close it. Without these the panel stays open over the workspace and
+  // the only way out is clicking the button again, which reads as broken.
+  document.addEventListener("click", (event) => {
+    if (!menu.hidden && !menu.contains(event.target)) closeNotebookMenu();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !menu.hidden) closeNotebookMenu();
+  });
+
   document.getElementById("new-notebook").addEventListener("click", () => {
-    input.value = "";
-    input.focus();
+    closeNotebookMenu();
     resetToNewNotebook();
   });
-  store.on("notebook:switched", ({ notebookId }) => {
-    input.value = notebookId;
-  });
+
   refreshNotebookList();
 }
 
@@ -697,6 +1309,7 @@ function resetToNewNotebook() {
   state.notebookId = null;
   state.notebookSlug = null;
   state.title = null;
+  state.derivedTitle = null;
   state.overview = null;
   state.podcast = null;
   state.sources = [];
@@ -714,6 +1327,17 @@ function resetToNewNotebook() {
 // ingested URL/path and, in principle, `source.flags` could one day carry excerpted source text
 // (today's injection_scan.py flags don't, but nothing enforces that staying true), so nothing here
 // assumes any of it is safe to treat as markup.
+// A URL, shortened to what identifies it at a glance once the title is carrying the meaning.
+function prettyOrigin(origin) {
+  try {
+    const url = new URL(origin);
+    const path = url.pathname === "/" ? "" : url.pathname;
+    return url.hostname.replace(/^www\./, "") + path;
+  } catch {
+    return origin;
+  }
+}
+
 function renderSourceItem(source) {
   const li = document.createElement("li");
   li.className = "source-item";
@@ -724,17 +1348,77 @@ function renderSourceItem(source) {
   kind.textContent = source.kind;
   li.appendChild(kind);
 
+  // A PREVIEW CARD when the page told us what it is: its own title, a line of its own description,
+  // and its site name. Falls back to the bare origin, which is all a pasted-text or file source
+  // has. Every value goes in through `textContent` — a page controls its own `<meta>` tags, so this
+  // is attacker-influenceable display text (invariants 6 and 29), and it is never citable: the
+  // corpus is built from `blocks` alone. Deliberately NO image: rendering `og:image` would make the
+  // reader's browser fetch a URL the page author chose, handing that third party an IP and a
+  // request to log, for a thumbnail.
+  const preview = source.preview || {};
+  if (preview.title) {
+    const heading = document.createElement("div");
+    heading.className = "src-title";
+    heading.textContent = preview.title;
+    li.appendChild(heading);
+  }
+
   const origin = document.createElement("div");
   origin.className = "src-origin";
-  origin.textContent = source.origin;
+  origin.textContent = preview.title ? prettyOrigin(source.origin) : source.origin;
   li.appendChild(origin);
+
+  if (preview.description) {
+    const description = document.createElement("div");
+    description.className = "src-description";
+    description.textContent = preview.description;
+    li.appendChild(description);
+  }
 
   if (source.flags && source.flags.length) {
     const flags = document.createElement("div");
     flags.className = "src-flags";
-    flags.textContent = `⚠ ${source.flags.join(", ")}`;
+    // The flag is advisory and gates nothing (invariant 6), so it says what was seen and — via the
+    // tooltip — what that means. It used to print the raw regex, which a user reasonably asked
+    // about; a warning nobody can act on teaches people to ignore the ones that matter.
+    flags.textContent = `\u26a0 ${source.flags.join(", ")}`;
+    flags.dataset.tip = t(
+      "sources.flagHelp",
+      "Found in this source's own text, not in your question. It is not blocked and answers still cite it — this is a heads-up that the source contains something shaped like an instruction to a model."
+    );
     li.appendChild(flags);
   }
+
+  const remove = document.createElement("button");
+  remove.type = "button";
+  remove.className = "src-remove";
+  remove.textContent = "\u2715\ufe0e";
+  remove.dataset.tip = t("sources.remove", "Remove this source");
+  remove.addEventListener("click", async (event) => {
+    // The row itself opens the source viewer; without this the remove click would do both.
+    event.stopPropagation();
+    if (!confirm(t("sources.removeConfirm", `Remove "${source.origin}" from this notebook?`, { origin: source.origin }))) {
+      return;
+    }
+    remove.disabled = true;
+    try {
+      const notebook = await api(
+        `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(source.id)}`,
+        { method: "DELETE" }
+      );
+      state.sources = notebook.sources;
+      state.overview = notebook.overview || null;
+      state.podcast = notebook.podcast || null;
+      // `sources:changed` is what marks the overview and podcast stale and re-offers the Guide
+      // tabs — removing a source moves the corpus exactly as adding one does.
+      store.emit("sources:changed", { sources: state.sources });
+      renderChatOverview();
+    } catch (err) {
+      remove.disabled = false;
+      alert(t("err.removeSource", `Could not remove source: ${err.message}`, { message: err.message }));
+    }
+  });
+  li.appendChild(remove);
 
   return li;
 }
@@ -743,7 +1427,7 @@ function initSourcesPanel() {
   const tabs = document.querySelectorAll("#source-kind-tabs .tab");
   tabs.forEach((tab) => {
     tab.addEventListener("click", () => {
-      tabs.forEach((t) => t.classList.remove("is-active"));
+      tabs.forEach((tab) => tab.classList.remove("is-active"));
       tab.classList.add("is-active");
       document.querySelectorAll(".tab-body").forEach((body) => {
         body.hidden = body.dataset.kindBody !== tab.dataset.kind;
@@ -772,6 +1456,13 @@ function initSourcesPanel() {
 
     const submitBtn = form.querySelector("button[type=submit]");
     submitBtn.disabled = true;
+    // Ingestion is a network fetch, a parse, and possibly OCR — seconds to tens of seconds, with
+    // nothing on screen saying so. Disabling one button is not feedback: the panel simply stopped
+    // responding, which a user described as feeling stuck. `is-busy` spins the button and dims the
+    // form, so the pause reads as work rather than as a hang.
+    form.classList.add("is-busy");
+    const submitLabel = submitBtn.textContent;
+    submitBtn.textContent = t("sources.adding", "Adding\u2026");
     try {
       let notebook;
       if (activeKind === "url") {
@@ -810,12 +1501,19 @@ function initSourcesPanel() {
       }
       state.sources = notebook.sources;
       state.title = notebook.title || state.title;
+      state.derivedTitle = notebook.derived_title || state.derivedTitle;
       store.emit("sources:changed", { sources: state.sources });
       store.emit("notebook:titled", { title: state.title, notebookId: state.notebookId });
-      if (isFirstSource) void suggestTitle(state.notebookId, notebookGeneration);
+      // Titling used to fire HERE, on the first source. That spent a real model call the moment
+      // someone added a source, before they had asked for anything — a user called it too
+      // aggressive and they were right. It now runs lazily, from `ensureTitle()`, which the
+      // generate actions call: by then the user has already committed to a model run, so the
+      // title costs nothing they were not already paying.
     } catch (err) {
       alert(t("err.addSource", `Could not add source: ${err.message}`, { message: err.message }));
     } finally {
+      form.classList.remove("is-busy");
+      submitBtn.textContent = submitLabel;
       submitBtn.disabled = false;
     }
   });
@@ -855,25 +1553,39 @@ function initSourcesPanel() {
 // use. The line is what the user is looking at when they click: things rendered IN the chat thread
 // (an answer, the overview) are theirs to curate; a Studio tab's artifact and a podcast transcript
 // are not part of that thread.
+// A BOOKMARK in the answer's top-right corner, not a labelled button under the text. A full-width
+// "+ Save as note" bar under every answer competed with the answer for attention and pushed the
+// next turn down; a bookmark is the gesture people already know for "keep this", and it lives where
+// they expect to find it. The label survives as the tooltip, so what it does is still one hover
+// away — and it still says the part nobody could guess (promotion is what makes a note citable).
 function saveAsNoteButton(text) {
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn save-as-note";
-  btn.textContent = t("chat.saveAsNote", "+ Save as note");
-  btn.title =
-    "Keep a copy in Notes (Studio, right). A note can later be PROMOTED into a source, which is "
-    + "what makes it citable by a later question.";
-  btn.addEventListener("click", async () => {
+  btn.className = "save-as-note";
+  btn.setAttribute("aria-label", t("chat.saveAsNote", "Save as note"));
+  btn.textContent = "\u2606";  // U+2606 WHITE STAR — geometric, never emoji (see the theme toggle)
+  btn.dataset.tip = t(
+    "chat.saveAsNoteHelp",
+    "Keep a copy in Notes (Studio, right). A note can later be PROMOTED into a source, which is what makes it citable by a later question."
+  );
+  btn.addEventListener("click", async (event) => {
+    event.stopPropagation();
     btn.disabled = true;
-    const original = btn.textContent;
     try {
       await addNote(text);
-      btn.textContent = t("chat.saved", "\u2713 Saved");
+      btn.classList.add("is-saved");
+      btn.textContent = "\u2605";  // filled
+      btn.dataset.tip = t("chat.saved", "Saved to Notes");
     } finally {
       setTimeout(() => {
-        btn.textContent = original;
+        btn.classList.remove("is-saved");
+        btn.textContent = "\u2606";
         btn.disabled = false;
-      }, 1500);
+        btn.dataset.tip = t(
+          "chat.saveAsNoteHelp",
+          "Keep a copy in Notes (Studio, right). A note can later be PROMOTED into a source, which is what makes it citable by a later question."
+        );
+      }, 1800);
     }
   });
   return btn;
@@ -882,21 +1594,33 @@ function saveAsNoteButton(text) {
 function renderAnswerWithCitations(text, citations, runId) {
   const container = document.createElement("div");
 
+  // One number per distinct source span, shared by the inline strokes and the reference list, so
+  // "this sentence" and "reference 2" are visibly the same thing.
+  const numbers = new Map();
+  citations.forEach((citation) => {
+    const key = `${citation.source_id}\u0000${citation.locator}`;
+    if (!numbers.has(key)) numbers.set(key, numbers.size + 1);
+  });
+  const referenceNumberFor = (citation) =>
+    numbers.get(`${citation.source_id}\u0000${citation.locator}`) || 0;
+
   // Locate each citation's quote as a literal substring of the RAW answer text (never
   // pre-escaped — a DOM text node needs no escaping, only innerHTML does). The model may
   // paraphrase around a quote rather than reproducing it verbatim; when a quote can't be located,
   // the citation still surfaces in the citation list below, just not inline.
   const matches = [];
   citations.forEach((citation) => {
-    if (!citation.quote) return;
-    const at = text.indexOf(citation.quote);
-    if (at !== -1) matches.push({ start: at, end: at + citation.quote.length, citation });
+    // `answer_span` FIRST: the model's own words, in the reader's language, already confirmed
+    // server-side to occur in this exact text (`citations.locate_answer_spans`). `quote` is the
+    // fallback for turns saved before that field existed — it only ever matched when the answer and
+    // the source shared a language, which stopped being the common case at invariant 39, and that
+    // is why the strokes vanished.
+    const needle = citation.answer_span || citation.quote;
+    if (!needle) return;
+    const at = text.indexOf(needle);
+    if (at !== -1) matches.push({ start: at, end: at + needle.length, citation });
   });
   matches.sort((a, b) => a.start - b.start);
-
-  const detailArea = document.createElement("div");
-  detailArea.className = "citation-detail";
-  detailArea.hidden = true;
 
   let cursor = 0;
   matches.forEach((match) => {
@@ -906,11 +1630,25 @@ function renderAnswerWithCitations(text, citations, runId) {
     }
     const span = document.createElement("span");
     span.className = match.citation.verified ? "citation" : "citation is-unverified";
+    // A number, so a stroke can be matched to its entry in the reference list below — and so the
+    // page reads as annotated prose rather than as a block of highlighter. Set as a CSS counter
+    // rather than injected text, which keeps the answer's own words exactly as the model wrote
+    // them (a copy-paste must not pick up UI furniture).
+    span.dataset.reference = String(referenceNumberFor(match.citation));
+    // The coordinate this stroke points at, so `focusReference` can light up every stroke sharing
+    // it. `.citation.is-focused` has been in the stylesheet promising that since the References
+    // view landed, with nothing ever setting it — found by an independent review.
+    span.dataset.refKey = referenceKey(match.citation);
     span.title = `${match.citation.source_id} · ${match.citation.locator}`;
     span.textContent = text.slice(match.start, match.end);
     if (runId) {
       span.classList.add("citation-clickable");
-      span.addEventListener("click", () => showCitationTurn(runId, match.citation, detailArea));
+      // The inline stroke, when a quote CAN be located (same-language answers). Its detail panel
+      // is created here so it belongs to this span rather than to a shared slot.
+      // Opens the References view and takes the reader to that entry, rather than expanding a
+      // panel inside the paragraph they are reading — which pushed the rest of the answer down and
+      // made a crowded column worse.
+      span.addEventListener("click", () => focusReference(match.citation));
     }
     container.appendChild(span);
     cursor = match.end;
@@ -920,39 +1658,41 @@ function renderAnswerWithCitations(text, citations, runId) {
   }
 
   if (citations.length) {
-    const list = document.createElement("div");
-    list.className = "citation-list";
-    citations.forEach((citation) => {
-      const row = document.createElement("div");
-      row.className = "citation-row";
-      row.addEventListener("click", () =>
-        showSourceViewer(citation.source_id, citation.locator, citation.quote)
-      );
-
-      const label = document.createElement("div");
-      label.className = "citation-row-label";
-      const mark = citation.verified ? "✓" : "⚠ unverified";
-      label.textContent = `${mark} ${citation.source_id} · ${citation.locator}`;
-      row.appendChild(label);
-
-      if (runId) {
-        const trace = document.createElement("button");
-        trace.type = "button";
-        trace.className = "citation-row-trace";
-        trace.textContent = t("cite.trace", "⌁ trace");
-        trace.addEventListener("click", (event) => {
-          event.stopPropagation();
-          showCitationTurn(runId, citation, detailArea);
-        });
-        row.appendChild(trace);
-      }
-
-      list.appendChild(row);
-    });
-    container.appendChild(list);
+    container.appendChild(renderReferenceLink(citations));
   }
-  if (runId) container.appendChild(detailArea);
   return container;
+}
+
+// One line under an answer, not a second copy of the reference list. The list itself lives in the
+// References view now, where it is shared across every turn instead of repeating per answer.
+function renderReferenceLink(citations) {
+  const keys = new Set(citations.map(referenceKey));
+  const link = document.createElement("button");
+  link.type = "button";
+  link.className = "reference-link";
+  link.textContent = t("cite.references", `${keys.size} references`, { n: keys.size });
+  link.addEventListener("click", () => focusReference(citations[0]));
+  return link;
+}
+
+// A REFERENCE LIST, the way a paper carries one. It replaced a row of `✓ s3 · whole` repeated once
+// per citation — four identical lines carrying no information, because a text or web source has a
+// single block whose locator is literally "whole" — with one entry per DISTINCT source span,
+// numbered, named, and showing the quoted evidence, which is the thing a reader actually wants to
+// check.
+//
+// **The inline highlighter stroke (blueprint §2) cannot be drawn in cross-language mode, and this
+// is the honest fallback rather than a workaround.** That stroke is located by finding the
+// citation's `quote` as a substring of the answer. Since invariant 39 the answer follows the
+// READER's language while the quote stays verbatim in the SOURCE's, so the two never share a
+// substring and no span can be located. Restoring it needs the model to mark which part of its own
+// answer each citation supports — a schema and instruction change, not something this renderer can
+// recover.
+// The readable name for a source, shared by the reference list and the viewer modal.
+function sourceLabel(source) {
+  const preview = source.preview || {};
+  if (preview.title) return preview.title;
+  return sourceDisplayName(source);
 }
 
 function renderTurn(turn) {
@@ -1113,6 +1853,7 @@ async function generateOverview() {
   // The server appends `-summary`/`-faq` to the run id it derives, so both targets are predictable:
   // the ticker follows the summary, and Stop cancels BOTH (a notebook-scoped cancel would leave the
   // FAQ run burning a model call to completion).
+  ensureTitle();
   const runToken = crypto.randomUUID();
   const base = `${state.notebookSlug || notebookId}-${runToken}`;
   let cancelled = false;
@@ -1129,7 +1870,7 @@ async function generateOverview() {
   el.appendChild(status.node);
 
   void openTicker(notebookId, `${base}-summary`, (event) => {
-    if (live()) status.setSummary(event.summary);
+    if (live()) status.onEvent(event);
   });
 
   try {
@@ -1148,6 +1889,7 @@ async function generateOverview() {
       return;
     }
     state.overview = notebook.overview;
+    refreshReferenceView();
     renderChatOverview();
   } catch (err) {
     status.finish();
@@ -1181,6 +1923,28 @@ function initChatPanel() {
   const form = document.getElementById("ask-form");
   const input = document.getElementById("ask-input");
   const submitBtn = document.getElementById("ask-submit");
+
+  // Enter sends, Shift+Enter breaks a line. The convention every chat composer uses, and the reason
+  // the hint row exists at all: without it this is a rule you can only find by accident.
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" || event.shiftKey) return;
+    // Never steal Enter mid-composition: an IME is still assembling a character, and submitting
+    // there would send a half-typed word. `isComposing` is exactly what that flag is for, and this
+    // matters far more here than in an English-only UI.
+    if (event.isComposing || event.keyCode === 229) return;
+    event.preventDefault();
+    form.requestSubmit();
+  });
+
+  // The box grows with the question and stops at the CSS ceiling, then scrolls. Driven from the
+  // real scrollHeight rather than a line count, so it is right for wrapped text too.
+  const autoGrow = () => {
+    input.style.height = "auto";
+    input.style.height = `${input.scrollHeight}px`;
+    form.classList.toggle("has-text", input.value.trim().length > 0);
+  };
+  input.addEventListener("input", autoGrow);
+  autoGrow();
 
   store.on("notebook:switched", () => {
     overviewToken += 1; // a notebook switch strands any generation still in flight
@@ -1228,10 +1992,13 @@ function initChatPanel() {
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
 
+    ensureTitle();
     const pendingTurn = { question, pending: true, run_id: runId };
     store.emit("chat:turnAdded", { turn: pendingTurn });
     store.emit("chat:pending", { pending: true });
     input.value = "";
+    input.style.height = "auto";
+    form.classList.remove("has-text");
 
     // The same live surface the Studio actions use, mounted into the pending answer row. Chat had
     // no way to stop a question either, and a question against a large corpus is not quick.
@@ -1256,7 +2023,7 @@ function initChatPanel() {
       answerEl.appendChild(status.node);
     }
 
-    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
+    openTicker(state.notebookId, runId, (evt) => status.onEvent(evt));
 
     try {
       const result = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/ask`, {
@@ -1274,6 +2041,7 @@ function initChatPanel() {
       const notebook = await api(`/notebooks/${encodeURIComponent(askedNotebookId)}`);
       if (generation !== notebookGeneration) return;
       state.turns = notebook.turns;
+      refreshReferenceView();
       history.innerHTML = "";
       history.appendChild(empty);
       empty.hidden = state.turns.length > 0;
@@ -1380,7 +2148,18 @@ function initStudioPanel() {
   // Cache VALUE widened to {result, runId} — storing the result alone (an earlier draft's shape)
   // would lose the run id the moment a user switches tabs and back, breaking citation-turn lookup
   // for a tab already left (found during this phase's own pre-implementation audit).
-  const cache = new Map();
+  // Keyed by kind, VALUE `{result, runId}` — storing the result alone would lose the run id the
+  // moment a user switches tabs and back, breaking citation-turn lookup for a tab already left.
+  const cache = {
+    has: (kind) => kind in state.guides,
+    get: (kind) => state.guides[kind],
+    set: (kind, value) => {
+      state.guides[kind] = value;
+    },
+    clear: () => {
+      state.guides = {};
+    },
+  };
   let activeKind = "summary";
 
   function setActiveKind(kind) {
@@ -1400,10 +2179,11 @@ function initStudioPanel() {
       body.classList.remove("is-pending");
       const note = document.createElement("p");
       note.className = "empty-note";
-      note.textContent = "Open a notebook with sources, then pick a tab to generate it.";
+      note.textContent = t("studio.noNotebook", "Open a notebook with sources, then pick a tab to generate it.");
       body.appendChild(note);
       return;
     }
+    ensureTitle();
     const generation = notebookGeneration;
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
@@ -1421,7 +2201,7 @@ function initStudioPanel() {
       },
     });
     body.appendChild(status.node);
-    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
+    openTicker(state.notebookId, runId, (evt) => status.onEvent(evt));
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/guide/${kind}`, {
         method: "POST",
@@ -1432,6 +2212,7 @@ function initStudioPanel() {
       if (cancelled) return;
       if (generation !== notebookGeneration) return;  // switched away — never cache into the new one
       cache.set(kind, { result: data, runId });
+      refreshReferenceView();
       body.classList.remove("is-pending");
       renderCached(kind, cache.get(kind));
     } catch (err) {
@@ -1537,11 +2318,12 @@ function renderPodcastUtterance(utterance, runId, { start = null, onSeek = null 
     div.classList.add("is-seekable");
     div.addEventListener("click", (event) => {
       // The line itself seeks, but never when the click was meant for something inside it — a
-      // citation span opens its source viewer, the timecode has its own handler, and
-      // `.citation-detail` is the expanded trace payload `renderAnswerWithCitations` appends as a
-      // SIBLING of the citation list inside this same utterance (an independent review found
-      // clicking into that JSON, or drag-selecting a marker out of it to copy, jumped the player).
-      if (event.target.closest(".citation, .citation-row, .citation-detail, .podcast-timecode")) {
+      // citation span opens its reference, the timecode has its own handler, and
+      // `.reference-link` is the "N references" button `renderAnswerWithCitations` appends as a
+      // SIBLING inside this same utterance. That one was MISSING while two dead classes from the
+      // replaced citation-list markup were still listed — found by an independent review, and it
+      // meant clicking "2 references" both jumped the player and switched the panel away.
+      if (event.target.closest(".citation, .reference-link, .podcast-timecode")) {
         return;
       }
       // `click` also fires on the mouseup that ends a drag-selection, so selecting transcript prose
@@ -1615,7 +2397,7 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
     Array.isArray(offsets) &&
     offsets.length === utterances.length &&
     offsets.every((v, i) => Number.isFinite(v) && v >= 0 && (i === 0 || v > offsets[i - 1]));
-  const seek = (t) => {
+  const seek = (seconds) => {
     player.currentTime = t;
     // The play promise rejects when the media cannot start (the persisted file was cleared and
     // `audio/file` 404s, or autoplay policy blocks it). Seeking still worked; swallow it rather
@@ -1702,6 +2484,7 @@ function initPodcastPlayer() {
       return;
     }
     generateBtn.disabled = true;
+    ensureTitle();
     const generation = notebookGeneration;
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
@@ -1720,7 +2503,7 @@ function initPodcastPlayer() {
       },
     });
     body.appendChild(status.node);
-    openTicker(state.notebookId, runId, (evt) => status.setSummary(evt.summary));
+    openTicker(state.notebookId, runId, (evt) => status.onEvent(evt));
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
@@ -1797,9 +2580,13 @@ function renderNoteItem(note) {
   promoteBtn.type = "button";
   promoteBtn.className = "btn note-promote";
   promoteBtn.textContent = t("notes.promote", "→ Promote to source");
-  promoteBtn.title =
+  // `data-tip`, not the native `title`: this project's own tooltip is instant and styled, and the
+  // native one's ~1s delay is what made hover help feel disconnected from the hover effect.
+  promoteBtn.dataset.tip = t(
+    "notes.promoteHelp",
     "Turn this note into a real source. Only then can a later question cite it — a note on its own "
-    + "is just text, with no citations of its own.";
+    + "is just text, with no citations of its own.",
+  );
   promoteBtn.addEventListener("click", async () => {
     promoteBtn.disabled = true;
     try {
@@ -1887,6 +2674,309 @@ function initNotesPanel() {
   });
 }
 
+// --- Studio rail: four views behind one switcher, collapsible ------------------------------------
+//
+// It used to be three sections stacked in one scrolling column, each with its own heading and body.
+// A notebook with a generated guide, an episode and a few notes became a column nobody could find
+// anything in — and there was nowhere to put a fourth thing. Views also give References a home.
+
+const STUDIO_VIEW_KEY = "rlmnb-studio-view";
+const STUDIO_COLLAPSED_KEY = "rlmnb-studio-collapsed";
+const STUDIO_WIDTH_KEY = "rlmnb-studio-width";
+
+//: The panel's size limits. Below `STUDIO_COLLAPSE_AT` a drag means "put it away" rather than "make
+//: it very narrow" — a 90px panel is useless, so snapping to the icon rail is what the gesture
+//: actually meant.
+const STUDIO_MIN_WIDTH = 240;
+const STUDIO_MAX_WIDTH = 720;
+const STUDIO_COLLAPSE_AT = 170;
+//: HYSTERESIS, and the ORDER is the whole point: a two-state toggle driven by one continuous value
+//: is stable only while the "open" threshold is at or above the "close" one. An earlier attempt put
+//: it BELOW (expand at 90, collapse at 170) to make re-opening from the rail cheap, which turned
+//: 90–170 into a band where every single pointermove flipped the state — the panel visibly
+//: shuddering between two widths. Expanding at exactly the minimum width is the value that both
+//: satisfies the ordering AND opens the panel with no jump at all: at the crossing the pointer and
+//: the panel are the same number. The dead band [170, 240) is then precisely the range the panel
+//: could not have honoured anyway, and `--studio-rail` below keeps it from feeling dead.
+const STUDIO_EXPAND_AT = STUDIO_MIN_WIDTH;
+//: 2.9rem, the collapsed track in `style.css`. Repeated here because JS has to clamp against it.
+const STUDIO_RAIL_WIDTH = 46;
+
+function initStudioRail() {
+  const col = document.getElementById("col-studio");
+  const tabs = [...document.querySelectorAll(".studio-view-tab")];
+  const bodies = [...document.querySelectorAll("[data-view-body]")];
+
+  function show(view) {
+    tabs.forEach((tab) => tab.classList.toggle("is-active", tab.dataset.view === view));
+    bodies.forEach((body) => {
+      body.hidden = body.dataset.viewBody !== view;
+    });
+    localStorage.setItem(STUDIO_VIEW_KEY, view);
+    // Expanding on selection: picking a view while collapsed can only mean "show me that".
+    setCollapsed(false);
+    if (view === "references") renderReferenceView();
+  }
+
+  // No separate collapse BUTTON any more: the grip resizes and collapses, and a second control for
+  // the same thing was eating the width the four labels needed — they were truncating to one
+  // character each.
+  function setCollapsed(value) {
+    // Only on an actual CHANGE: `pointermove` calls this on every event, and an unconditional
+    // synchronous `localStorage` write there is 60-120 writes a second during a drag.
+    if (col.classList.contains("is-collapsed") === value) return;
+    col.classList.toggle("is-collapsed", value);
+    localStorage.setItem(STUDIO_COLLAPSED_KEY, value ? "1" : "");
+  }
+
+  // APPLYING a width and REMEMBERING one are deliberately separate. Persisting on every pointermove
+  // is what made dragging the panel away overwrite the user's own width with the 240px clamp; the
+  // previous fix for that (skip `setWidth` below the minimum) then left the CSS variable holding a
+  // stale width, so re-opening snapped to the OLD size before catching up to the pointer — the
+  // "彈回前一次設置的寬度再快速閃現" half of the report. A drag now always follows the pointer and
+  // only commits when it ends.
+  let appliedWidth = STUDIO_MIN_WIDTH;
+
+  function applyWidth(px) {
+    appliedWidth = Math.min(STUDIO_MAX_WIDTH, Math.max(STUDIO_MIN_WIDTH, px));
+    document.documentElement.style.setProperty("--studio-width", `${appliedWidth}px`);
+    return appliedWidth;
+  }
+
+  function rememberWidth() {
+    localStorage.setItem(STUDIO_WIDTH_KEY, String(appliedWidth));
+  }
+
+  // Drag the edge to size the panel; drag it past the threshold to put it away. `setPointerCapture`
+  // is what keeps the drag alive when the cursor outruns the 6px handle, which it always does.
+  const handle = document.getElementById("studio-resize");
+  let dragging = false;
+  handle.addEventListener("pointerdown", (event) => {
+    dragging = true;
+    handle.setPointerCapture(event.pointerId);
+    document.body.classList.add("is-resizing");  // suppress the width transition and text selection
+    event.preventDefault();
+  });
+  handle.addEventListener("pointermove", (event) => {
+    if (!dragging) return;
+    // The panel is on the RIGHT, so its width grows as the pointer moves left.
+    const width = window.innerWidth - event.clientX;
+    const collapsed = col.classList.contains("is-collapsed");
+    if (width < (collapsed ? STUDIO_EXPAND_AT : STUDIO_COLLAPSE_AT)) {
+      setCollapsed(true);
+      // The panel cannot open below its minimum, but the HANDLE can still follow you: the rail
+      // stretches under the pointer through the dead band, so pulling always does something
+      // visible. Without it the ordering above costs ~194px of motionless drag before the panel
+      // opens, which is the "卡住" this replaced.
+      const rail = Math.min(STUDIO_MIN_WIDTH, Math.max(STUDIO_RAIL_WIDTH, width));
+      document.documentElement.style.setProperty("--studio-rail", `${rail}px`);
+      return;
+    }
+    setCollapsed(false);
+    document.documentElement.style.removeProperty("--studio-rail");
+    applyWidth(width);
+  });
+  const endDrag = (event) => {
+    if (!dragging) return;
+    dragging = false;
+    try {
+      handle.releasePointerCapture(event.pointerId);
+    } catch {
+      // the pointer was already gone; nothing to release
+    }
+    document.body.classList.remove("is-resizing");
+    // The stretch is a drag affordance, never a persisted size.
+    document.documentElement.style.removeProperty("--studio-rail");
+    // Only a drag that ended OPEN was the user choosing a width. One that ended collapsed passed
+    // through the clamp on its way out, and committing that would lose the size they had picked.
+    if (!col.classList.contains("is-collapsed")) rememberWidth();
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
+  // Double-click the grip toggles, the shortcut every resizable panel has.
+  handle.addEventListener("dblclick", () => setCollapsed(!col.classList.contains("is-collapsed")));
+  // Keyboard: the handle is focusable, so it has to be operable without a pointer.
+  handle.addEventListener("keydown", (event) => {
+    if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+      // Ignored while collapsed: the collapsed track reads `--studio-rail`, not `--studio-width`,
+      // so this used to walk the REMEMBERED width down to the 240 clamp with nothing moving on
+      // screen — and re-opening then landed at 240 instead of the size the user had chosen.
+      // `endDrag` already has the equivalent guard.
+      if (col.classList.contains("is-collapsed")) return;
+      // No drag to end, so a key press commits immediately.
+      applyWidth(appliedWidth + (event.key === "ArrowLeft" ? 24 : -24));
+      rememberWidth();
+    } else if (event.key === "Enter" || event.key === " ") {
+      setCollapsed(!col.classList.contains("is-collapsed"));
+    } else return;
+    event.preventDefault();
+  });
+
+  tabs.forEach((tab) => tab.addEventListener("click", () => show(tab.dataset.view)));
+
+  applyWidth(parseInt(localStorage.getItem(STUDIO_WIDTH_KEY) || "340", 10));
+  const stored = localStorage.getItem(STUDIO_VIEW_KEY);
+  show(tabs.some((tab) => tab.dataset.view === stored) ? stored : "studio");
+  // AFTER `show`, which expands on purpose — restoring a collapsed panel must win over that.
+  setCollapsed(localStorage.getItem(STUDIO_COLLAPSED_KEY) === "1");
+
+  // A reference is only interesting while it exists; both of these change what there is to show.
+  store.on("chat:turnAdded", () => renderReferenceView());
+  store.on("sources:changed", () => renderReferenceView());
+  window.addEventListener("ui-lang-changed", () => renderReferenceView());
+}
+
+function showStudioView(view) {
+  const tab = document.querySelector(`.studio-view-tab[data-view="${view}"]`);
+  if (tab) tab.click();
+}
+
+// Every passage cited ANYWHERE in this notebook, deduplicated and numbered — the thing a reader
+// wants when they are checking work rather than reading it. Collected from the turns and the
+// overview, which is everything the client holds that carries citations.
+function collectReferences() {
+  const byCoordinate = new Map();
+  const add = (citation) => {
+    const key = `${citation.source_id}\u0000${citation.locator}`;
+    const existing = byCoordinate.get(key);
+    if (!existing) {
+      byCoordinate.set(key, { ...citation, quotes: citation.quote ? [citation.quote] : [], uses: 1 });
+      return;
+    }
+    existing.uses += 1;
+    if (citation.quote && !existing.quotes.includes(citation.quote)) existing.quotes.push(citation.quote);
+    existing.verified = existing.verified && citation.verified;
+  };
+  (state.overview?.citations || []).forEach(add);
+  (state.turns || []).forEach((turn) => (turn.citations || []).forEach(add));
+  // Every OTHER surface that renders a clickable citation has to be here too, or clicking one
+  // opens a list that cannot contain it — see `state.guides`.
+  (state.podcast?.utterances || []).forEach((u) => (u.citations || []).forEach(add));
+  Object.values(state.guides || {}).forEach(({ result }) => {
+    if (!result) return;
+    (result.citations || []).forEach(add);                                   // summary / insight
+    (result.items || []).forEach((item) => (item.citations || []).forEach(add));       // faq
+    (result.events || []).forEach((event) => (event.citations || []).forEach(add));    // timeline
+  });
+  return [...byCoordinate.values()];
+}
+
+// The References view is built from a snapshot of `state`, so anything that ADDS a citation has to
+// ask for a rebuild. Cheap and idempotent; a no-op when the reader is looking at another view.
+function refreshReferenceView() {
+  const host = document.getElementById("reference-view");
+  if (host && !host.closest("[data-view-body]")?.hidden) renderReferenceView();
+}
+
+function referenceKey(citation) {
+  return `${citation.source_id}\u0000${citation.locator}`;
+}
+
+function renderReferenceView() {
+  const host = document.getElementById("reference-view");
+  const empty = document.getElementById("references-empty");
+  if (!host) return;
+  const references = collectReferences();
+  host.innerHTML = "";
+  empty.hidden = references.length > 0;
+
+  references.forEach((reference, index) => {
+    const item = document.createElement("div");
+    item.className = reference.verified ? "ref-card" : "ref-card is-unverified";
+    item.dataset.refKey = referenceKey(reference);
+
+    const head = document.createElement("button");
+    head.type = "button";
+    head.className = "ref-card-head";
+
+    const number = document.createElement("span");
+    number.className = "reference-number";
+    number.textContent = String(index + 1);
+    head.appendChild(number);
+
+    const name = document.createElement("span");
+    name.className = "ref-card-name";
+    const source = (state.sources || []).find((s) => s.id === reference.source_id);
+    name.textContent = source ? sourceLabel(source) : reference.source_id;
+    head.appendChild(name);
+
+    if (reference.locator && reference.locator !== "whole") {
+      const locator = document.createElement("span");
+      locator.className = "reference-locator";
+      locator.textContent = reference.locator;
+      head.appendChild(locator);
+    }
+
+    const uses = document.createElement("span");
+    uses.className = "ref-card-uses";
+    uses.textContent = t("references.uses", `${reference.uses}\u00d7`, { n: reference.uses });
+    head.appendChild(uses);
+
+    const passage = document.createElement("div");
+    passage.className = "ref-card-passage";
+    passage.hidden = true;
+
+    // The card opens INTO the original passage: click the reference, the source text slides out
+    // beneath it, with the quoted span highlighted. That is the whole loop the user asked for, and
+    // it stays inside this view rather than throwing a modal over the page.
+    head.addEventListener("click", async () => {
+      if (!passage.hidden) {
+        passage.hidden = true;
+        item.classList.remove("is-open");
+        return;
+      }
+      item.classList.add("is-open");
+      passage.hidden = false;
+      if (passage.dataset.loaded) return;
+      passage.textContent = t("cite.loading", "Loading…");
+      try {
+        const data = await api(
+          `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(reference.source_id)}`
+        );
+        passage.textContent = "";
+        passage.appendChild(renderSourceMeta(data));
+        (data.blocks || [])
+          .filter((block) => block.locator === reference.locator)
+          .forEach((block) => {
+            passage.appendChild(
+              renderTextWithOptionalHighlight(block.text, reference.quotes[0] || null)
+            );
+          });
+        passage.dataset.loaded = "1";
+      } catch (err) {
+        passage.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
+      }
+    });
+
+    item.appendChild(head);
+    reference.quotes.forEach((quote) => {
+      const blockquote = document.createElement("blockquote");
+      blockquote.className = "reference-quote";
+      blockquote.textContent = quote;
+      item.appendChild(blockquote);
+    });
+    item.appendChild(passage);
+    host.appendChild(item);
+  });
+}
+
+// Clicking a citation in the chat opens the References view and takes the reader to that entry,
+// rather than expanding a panel inside the answer they are reading.
+function focusReference(citation) {
+  showStudioView("references");
+  const key = referenceKey(citation);
+  const card = document.querySelector(`.ref-card[data-ref-key="${CSS.escape(key)}"]`);
+  if (!card) return;
+  document.querySelectorAll(".ref-card.is-focused, .citation.is-focused")
+    .forEach((el) => el.classList.remove("is-focused"));
+  card.classList.add("is-focused");
+  // ...and every stroke pointing at the SAME coordinate lights up with it. `.citation.is-focused`
+  // has always existed in the stylesheet promising exactly this; nothing ever set it.
+  document.querySelectorAll(`.citation[data-ref-key="${CSS.escape(key)}"]`)
+    .forEach((el) => el.classList.add("is-focused"));
+  card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+}
+
 // --- Boot -------------------------------------------------------------------------------------
 
 // Static markup FIRST, before any panel renders: every `init*` below writes copy of its own, and a
@@ -1918,3 +3008,4 @@ initStudioPanel();
 initPodcastPlayer();
 initSourceViewer();
 initNotesPanel();
+initStudioRail();

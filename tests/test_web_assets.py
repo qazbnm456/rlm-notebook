@@ -77,9 +77,20 @@ def test_every_hidden_toggled_class_still_honours_the_hidden_attribute():
     # Classes whose elements are hidden-toggled, from BOTH construction routes.
     toggled: set[str] = set()
 
-    # (a) createElement + className, then `<var>.hidden = …` on the same variable.
-    for var, class_expr in re.findall(r"(?:const|let)\s+(\w+)\s*=\s*document\.createElement\([^)]*\);?\s*\n\s*\1\.className\s*=\s*([^;\n]+)", js):
-        if re.search(rf"\b{re.escape(var)}\.hidden\s*=", js):
+    # KNOWN LIMITATION, stated rather than left to surprise someone: both routes match variable
+    # names across the WHOLE file, so two functions using the same local name (`list`, `body`) make
+    # this flag classes that are not actually hidden-toggled. That happened, and it fails LOUDLY —
+    # the safe direction for a tripwire — so the fix is to rename the local, not to loosen this.
+
+    # (a) createElement + className, then `<var>.hidden = …` on the same variable. The two
+    #     statements are matched INDEPENDENTLY: requiring `.className` on the line immediately after
+    #     `createElement` missed every element with anything in between, and an independent review
+    #     found `logToggle.type = "button";` doing exactly that — `.run-log-toggle` was invisible
+    #     here, a permanently-visible toggle waiting to be the `.ticker-detail` bug again.
+    for var in set(re.findall(r"(?:const|let)\s+(\w+)\s*=\s*document\.createElement\(", js)):
+        if not re.search(rf"\b{re.escape(var)}\.hidden\s*=", js):
+            continue
+        for class_expr in re.findall(rf"\b{re.escape(var)}\.className\s*=\s*([^;\n]+)", js):
             toggled |= set(re.findall(r"[\w-]+", class_expr.strip("\"'` ")))
 
     # (b) an id, inline OR via a stored reference, resolved to that element's classes in the markup.
@@ -102,10 +113,26 @@ def test_every_hidden_toggled_class_still_honours_the_hidden_attribute():
         if re.search(rf"\b{re.escape(var)}\.hidden\s*=", js):
             toggled.add(cls)
 
+    # (d) `querySelectorAll("[data-attr]")` — an ATTRIBUTE selector, which route (c)'s class-only
+    #     pattern cannot see. The four `.studio-view` panels are driven this way, so deleting
+    #     `.studio-view[hidden]` used to leave all four rendering stacked on top of each other with
+    #     this test still green.
+    for var, attr in re.findall(
+        r'(?:const|let)\s+(\w+)\s*=\s*\[?\.{0,3}\s*document\.querySelectorAll\("\[([\w-]+)\]"\)', js
+    ):
+        param = re.search(rf"\b{re.escape(var)}\.forEach\(\s*\(?(\w+)", js)
+        if param and re.search(rf"\b{re.escape(param.group(1))}\.hidden\s*=", js):
+            for tag in re.findall(rf'<[^>]*\b{re.escape(attr)}=[^>]*>', html):
+                attr_match = re.search(r'class="([^"]*)"', tag)
+                if attr_match:
+                    toggled |= set(attr_match.group(1).split())
+
     # A self-check on the EXTRACTION, one per route: if any route silently stops matching, this
     # fails loudly instead of the whole test passing vacuously — which is exactly how the first
     # version of this file reported "ok" for a class that was broken at the time.
-    for expected in ("modal-overlay", "ticker-detail", "empty-note", "tab-body"):
+    for expected in (
+        "modal-overlay", "ticker-detail", "empty-note", "tab-body", "run-log-toggle", "studio-view"
+    ):
         assert expected in toggled, (
             f"the extraction no longer sees .{expected}, which IS hidden-toggled in app.js — a "
             f"route has silently stopped matching (found: {sorted(toggled)})"
@@ -224,13 +251,24 @@ def test_the_studio_panels_say_what_they_are_for():
     and the per-control detail lives in `title=` hovers rather than more permanent prose — the
     treatment `toolscout`/`cve-reverser` use for their own controls."""
     html = (WEB / "index.html").read_text(encoding="utf-8")
-    assert html.count('class="panel-sub"') >= 3
+    # Checked PER VIEW, not counted. A count passes as long as the total holds, and an independent
+    # review found exactly that: the Studio view lost its sentence during the rail redesign while
+    # References gained one, so `>= 3` stayed true and the panel this invariant is mostly about had
+    # nothing at all.
+    for view in ("studio", "podcast", "references", "notes"):
+        marker = f'data-view-body="{view}"'
+        assert marker in html, view
+        body = html[html.index(marker) : html.index('data-view-body="', html.index(marker) + 1)] \
+            if html.count('data-view-body="') > 1 and view != "notes" else html[html.index(marker):]
+        assert 'class="panel-sub"' in body, f'the {view} view has no sentence saying what it is for'
     assert "Audio Overview" not in html, "renamed to Podcast — users did not know what it was"
     assert ">Podcast<" in html
     for kind in ("summary", "faq", "timeline", "insight"):
         marker = f'data-guide-kind="{kind}"'
         tab = html[html.index(marker) : html.index(">", html.index(marker))]
-        assert "title=" in tab or "title=" in html[html.index(marker) - 200 : html.index(marker)], kind
+        # `data-tip`, this project's own tooltip, not the native `title`: the native one waits about
+        # a second, which is what made the hover help feel disconnected from the hover effect.
+        assert "data-tip=" in tab, kind
 
 
 def _i18n_keys():
@@ -257,7 +295,7 @@ def test_every_translation_key_used_by_the_ui_exists_in_the_table():
     assert len(defined) > 60, len(defined)
 
     html = (WEB / "index.html").read_text(encoding="utf-8")
-    used = set(re.findall(r'data-i18n(?:-title|-placeholder|-html)?="([\w.]+)"', html))
+    used = set(re.findall(r'data-i18n(?:-title|-placeholder|-html|-tip)?="([\w.]+)"', html))
     js = (WEB / "app.js").read_text(encoding="utf-8")
     # `\b` matters: without it this also matches the tail of `createElement("div")`.
     used |= set(re.findall(r'\bt\(\s*"([\w.]+)"', js))
@@ -303,3 +341,157 @@ def test_the_interface_language_is_separate_from_the_output_language():
     # Simplified reader is worse than leaving it in English.
     assert "hant|tw|hk|mo" in raw
 
+
+def test_the_notebook_id_never_appears_in_the_picker():
+    """The id is an internal handle (invariant 37). It used to be the ONLY way to reach a notebook —
+    a bare text box plus a datalist of `id (N sources, M turns)` — which put the handle and machine
+    metadata in front of the name. Notebooks are located by title now."""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    assert "notebook-input" not in html and "notebook-input" not in js
+    assert "<datalist" not in html
+    assert 'id="notebook-current"' in html and 'id="notebook-menu"' in html
+    # The row is built from the TITLE; the id is only ever a value passed to openNotebook.
+    row = js[js.index("function renderNotebookRow(") : js.index("function startRename(")]
+    assert "nb.title" in row
+    # The id may be COMPARED (is this the current notebook?) and PASSED (openNotebook), but it must
+    # never be rendered: no assignment of it to any textContent.
+    shown = re.findall(r"\.textContent\s*=\s*([^;]+);", row)
+    assert shown, row
+    assert not [line for line in shown if "nb.id" in line], shown
+
+
+def test_titling_never_fires_from_adding_a_source():
+    """A user called it too aggressive: adding a source spent a real model call before they had
+    asked for anything. Titling is lazy now, from the actions that already run a model."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    start = js.index("const isFirstSource")
+    end = js.index("function initChatPanel", start)
+    # Boundaries checked, not assumed: an earlier version sliced to a marker defined EARLIER in the
+    # file, so the range was empty and the assertion passed vacuously. Mutation-testing found it.
+    assert end > start
+    add = js[start:end]
+    assert "suggestTitle(" not in add, add[-400:]
+    assert "function ensureTitle()" in js
+    # ...and it IS called from the paths that already committed the user to a run.
+    assert js.count("ensureTitle();") >= 4
+
+
+def test_the_run_status_counts_by_event_kind_rather_than_logging():
+    """A scrolling log is the noise the user asked to avoid; `nuclei-forge/studio` settled on typed
+    counters plus one current-activity line, and its own comment explains why the framing matters.
+    Pins that the ticker hands the whole EVENT over (the kind is what the counters are made of) and
+    that a kind with no occurrences renders nothing."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "status.onEvent(evt)" in js or "status.onEvent(event)" in js
+    assert "setSummary(evt.summary)" not in js, "the kind would be thrown away"
+    meter = js[js.index("function renderMeter()") : js.index("let stopped = false;")]
+    assert "if (!n) return;" in meter
+
+
+
+def _tooltip_host_classes() -> set[str]:
+    """Every CSS class that carries this project's own `data-tip` tooltip, from all three places one
+    can be attached: a static attribute in the markup, `dataset.tip` on a `createElement`'d node,
+    and a stylesheet rule that already targets `[data-tip]` on a named class."""
+    hosts: set[str] = set()
+
+    markup = (WEB / "index.html").read_text()
+    for tag in re.findall(r"<[a-zA-Z][^>]*>", markup):
+        if "data-tip" not in tag and "data-i18n-tip" not in tag:
+            continue
+        found = re.search(r'class="([^"]*)"', tag)
+        if found:
+            hosts.update(found.group(1).split())
+
+    script = (WEB / "app.js").read_text()
+    for var in set(re.findall(r"\b(\w+)\.dataset\.tip\s*=", script)):
+        for value in re.findall(rf'\b{var}\.className\s*=\s*"([^"]*)"', script):
+            hosts.update(value.split())
+
+    for selector, _ in _rules(_strip_css_comments((WEB / "style.css").read_text())):
+        if "[data-tip]" in selector:
+            for part in selector.split(","):
+                hosts.update(_class_tokens(part.split("[data-tip]")[0]))
+    return hosts
+
+
+def test_no_tooltip_host_clips_its_own_tooltip():
+    """A `data-tip` tooltip is an `::after` on its host, so ANY clipping `overflow` on that host
+    erases it outright — no console error, no layout shift, just an affordance that silently stops
+    existing.
+
+    This shipped twice in one slice. `.source-item { overflow: hidden }` (redundant: every child
+    already clamps itself) took out the source card's tip AND the tips on the ⚠ flags and ✕ remove
+    controls inside it; `.studio-view-tab { overflow: hidden }`, added to ellipsize a long tab
+    label, took out the four right-rail tabs' tips — which is the one place a tip is not optional,
+    since a collapsed rail shows nothing but icons. Reported as "以前有的 hover tooltip 效果都不見了".
+
+    Not covered, and stated rather than implied: an ANCESTOR's clipping overflow does the same
+    thing, and finding those needs a DOM this suite does not have. This checks the host itself,
+    which is where both real instances were.
+    """
+    hosts = _tooltip_host_classes()
+    assert {"studio-view-tab", "src-remove", "src-flags", "source-item"} <= hosts, (
+        f"harvest broke — known tooltip hosts went missing, so this test would pass vacuously: {hosts}"
+    )
+
+    offenders = []
+    for selector, body in _rules(_strip_css_comments((WEB / "style.css").read_text())):
+        clipping = [
+            declaration.strip()
+            for declaration in body.split(";")
+            if re.match(r"\s*overflow(-[xy])?\s*:\s*(hidden|clip|auto|scroll)", declaration)
+        ]
+        if not clipping:
+            continue
+        for part in selector.split(","):
+            # The LAST compound is the element the rule actually styles; a class appearing earlier
+            # is an ancestor or a state, and `.a .b { overflow: hidden }` says nothing about `.a`.
+            subject = re.split(r"::", part.strip().split()[-1])[0]
+            hit = _class_tokens(subject) & hosts
+            if hit:
+                offenders.append(f"{part.strip()} {{ {'; '.join(clipping)} }}  → clips {sorted(hit)}")
+
+    assert not offenders, "a tooltip host clips its own tooltip:\n  " + "\n  ".join(offenders)
+
+
+def test_the_studio_rail_thresholds_cannot_oscillate():
+    """A two-state toggle driven by one continuous value (the pointer's distance from the window
+    edge) is stable only while the OPEN threshold is at or above the CLOSE one. Put it below and
+    every pointermove inside the gap flips the state — the panel visibly shuddering between two
+    widths, which is what a user reported after exactly that change.
+
+    Pinned as a source-tree assertion rather than a unit test because this project has no JS test
+    runner (invariant 29), and pinned at all because the inverted version had a GOOD-SOUNDING
+    reason behind it: re-opening from a 46px rail is cheap when the bar is low. The dead band that
+    the correct ordering creates is covered by `--studio-rail` instead, not by breaking the
+    ordering.
+    """
+    src = (WEB / "app.js").read_text()
+    values: dict[str, int] = {}
+    for name, raw in re.findall(r"const (STUDIO_\w+) = ([A-Za-z0-9_]+);", src):
+        values[name] = int(raw) if raw.isdigit() else values[raw]
+
+    assert {"STUDIO_EXPAND_AT", "STUDIO_COLLAPSE_AT", "STUDIO_MIN_WIDTH"} <= values.keys(), (
+        f"the drag thresholds were renamed, so this test would pass vacuously: {sorted(values)}"
+    )
+    assert values["STUDIO_EXPAND_AT"] >= values["STUDIO_COLLAPSE_AT"], (
+        f"inverted hysteresis: expanding at {values['STUDIO_EXPAND_AT']}px while collapsing at "
+        f"{values['STUDIO_COLLAPSE_AT']}px makes every drag through that band flip the state on "
+        f"every pointer event."
+    )
+    # Opening below the minimum width means the panel jumps away from the pointer the instant it
+    # opens; opening AT the minimum means the two agree at the crossing.
+    assert values["STUDIO_EXPAND_AT"] == values["STUDIO_MIN_WIDTH"]
+
+    # ...and the CONSUMER has to pair each threshold with the right state. Checking the constants
+    # alone was hollow: an independent review swapped the two arms of this ternary — reproducing the
+    # exact reported shudder, since an open panel would then collapse below 240 while a collapsed
+    # one expands above 170 — and this test stayed green. There is no seam to observe the choice
+    # through (no JS test runner, invariant 29), so the assertion is on the expression itself.
+    assert "collapsed ? STUDIO_EXPAND_AT : STUDIO_COLLAPSE_AT" in src, (
+        "the drag handler no longer pairs the EXPAND threshold with the collapsed state; a swapped "
+        "pair reintroduces the oscillation the constants above only look like they prevent"
+    )

@@ -7,26 +7,28 @@
   <header class="header">
     <button type="button" id="new-notebook" class="wordmark" aria-label="Start a new notebook" data-i18n-title="app.newNotebook" title="Start a new notebook">rlm-notebook</button>
 
-    <div class="notebook-title" id="notebook-title" hidden></div>
-
-    <div class="notebook-switch">
-      <input
-        id="notebook-input"
-        class="notebook-input"
-        list="notebook-list"
-        placeholder="notebook id…"
-        data-i18n-placeholder="app.notebookIdPlaceholder"
-        autocomplete="off"
-      />
-      <datalist id="notebook-list"></datalist>
-      <button id="notebook-open" class="btn btn-primary" data-i18n="app.open">Open</button>
+    <!-- The notebook is reached by its TITLE. The id is an internal handle (invariant 37) and was
+         previously the only way in — a bare text box plus a datalist of `id (N sources, M turns)`,
+         which put the handle and some metadata nobody asked for in front of the name. -->
+    <div class="notebook-picker">
+      <button type="button" class="notebook-current" id="notebook-current"
+              aria-haspopup="listbox" aria-expanded="false"
+              data-tip="Switch notebook, rename, or start a new one"
+              data-i18n-tip="app.pickerTip">
+        <span class="notebook-current-title" id="notebook-title" data-i18n="app.noNotebook">No notebook yet</span>
+        <span class="notebook-run-dot" id="notebook-run-dot" aria-hidden="true" hidden></span>
+        <span class="notebook-caret" aria-hidden="true">▾</span>
+      </button>
+      <div class="notebook-menu" id="notebook-menu" hidden role="listbox"></div>
     </div>
 
     <div class="header-actions">
-    <button id="settings-open" class="header-btn" data-i18n-title="app.settings" title="Settings" aria-label="Settings">⚙</button>
+    <button id="settings-open" class="header-btn" aria-label="Settings"
+            data-i18n-tip="app.settings" data-tip="Settings">⚙︎</button>
 
-    <button id="theme-toggle" class="header-btn" data-i18n-title="app.theme" title="Toggle Paper / Study theme" aria-label="Toggle theme">
-      ☀
+    <button id="theme-toggle" class="header-btn" aria-label="Toggle theme"
+            data-i18n-tip="app.theme" data-tip="Toggle Paper / Study theme">
+      ◐
     </button>
     </div>
   </header>
@@ -72,42 +74,91 @@
         <p class="empty-note" id="chat-empty" data-i18n="chat.empty">Ask a question once you've added a source.</p>
       </div>
 
+      <!-- The whole box is the field. The textarea has no chrome of its own; the surrounding form
+           carries the border and the focus ring, and the hint sits on its OWN row underneath, so
+           the Enter affordance can never overlap what someone is typing. Same structure Claude.ai,
+           ChatGPT and Slack all use, for that reason. -->
       <form id="ask-form" class="ask-form">
-        <textarea id="ask-input" rows="2" placeholder="Ask a grounded question…" data-i18n-placeholder="chat.placeholder"></textarea>
-        <button type="submit" class="btn btn-primary" id="ask-submit" data-i18n="chat.ask">Ask</button>
+        <textarea id="ask-input" rows="1" placeholder="Ask a grounded question…" data-i18n-placeholder="chat.placeholder"></textarea>
+        <div class="ask-foot">
+          <span class="ask-hint">
+            <kbd class="keycap">⏎</kbd>
+            <span data-i18n="chat.enterHint">to send</span>
+            <span class="ask-hint-sep">·</span>
+            <kbd class="keycap">⇧⏎</kbd>
+            <span data-i18n="chat.newlineHint">for a new line</span>
+          </span>
+          <button type="submit" class="ask-send" id="ask-submit" aria-label="Ask">
+            <span aria-hidden="true">↑</span>
+          </button>
+        </div>
       </form>
     </section>
 
+    <!-- The right rail is FOUR views behind one switcher, and it collapses to a rail of icons.
+         It used to be three stacked sections in one scrolling column: Studio, then Podcast, then
+         Notes, each with its own heading and its own body, so a notebook with a generated guide and
+         an episode and a few notes was a column nobody could find anything in. Views also make room
+         for a fourth, References, which had nowhere to live before. -->
     <section class="col col-studio" id="col-studio">
-      <div class="panel-head" data-i18n="studio.head">Studio</div>
-      <p class="panel-sub" data-i18n="studio.sub">Things made FROM your sources. Nothing here runs until you ask it to.</p>
+      <!-- Grab-and-drag the edge to size this panel, exactly as `cloud.projectdiscovery.io` does:
+           the grip stays put when the panel is collapsed, so it can be dragged back out. A width the
+           reader chose beats one of two states somebody else picked for them. -->
+      <div class="studio-resize" id="studio-resize" role="separator" aria-orientation="vertical"
+           aria-label="Resize panel" tabindex="0"><span class="studio-grip" aria-hidden="true">⣿</span></div>
+      <div class="studio-bar">
+        <div class="studio-views" id="studio-views" role="tablist">
+          <button type="button" class="studio-view-tab is-active" data-view="studio" role="tab"
+                  data-i18n-tip="studio.sub" data-tip="Things made FROM your sources. Nothing here runs until you ask it to."><span class="tab-icon" aria-hidden="true">✦︎</span><span class="tab-label" data-i18n="studio.head">Studio</span></button>
+          <button type="button" class="studio-view-tab" data-view="podcast" role="tab"
+                  data-i18n-tip="podcast.sub" data-tip="Two hosts discuss your sources, as an episode you can play or download."><span class="tab-icon" aria-hidden="true">♪︎</span><span class="tab-label" data-i18n="podcast.head">Podcast</span></button>
+          <button type="button" class="studio-view-tab" data-view="references" role="tab"
+                  data-i18n-tip="references.sub" data-tip="Every passage cited anywhere in this notebook, in one place."><span class="tab-icon" aria-hidden="true">❞︎</span><span class="tab-label" data-i18n="references.head">References</span></button>
+          <button type="button" class="studio-view-tab" data-view="notes" role="tab"
+                  data-i18n-tip="notes.sub" data-tip="Your own scratchpad. A note can be promoted into a citable source."><span class="tab-icon" aria-hidden="true">✎︎</span><span class="tab-label" data-i18n="notes.head">Notes</span></button>
+        </div>
+      </div>
 
+      <div class="studio-view" data-view-body="studio">
+      <p class="panel-sub" data-i18n="studio.sub">Things made FROM your sources. Nothing here runs until you ask it to.</p>
       <!-- Every tab explains itself on hover rather than spending rail space on a paragraph — the
-           same `title=` treatment `toolscout`/`cve-reverser` use for their own controls. -->
+           same `data-tip` treatment `toolscout`/`cve-reverser` use for their own controls. -->
       <div class="guide-tabs" id="guide-tabs">
-        <button type="button" class="tab is-active" data-i18n="studio.tab.summary" data-i18n-title="studio.tip.summary" data-guide-kind="summary"
-                title="A few paragraphs covering what all your sources say, with citations you can check.">Summary</button>
-        <button type="button" class="tab" data-i18n="studio.tab.faq" data-i18n-title="studio.tip.faq" data-guide-kind="faq"
-                title="The questions your sources actually answer, each with its answer and a citation.">FAQ</button>
-        <button type="button" class="tab" data-i18n="studio.tab.timeline" data-i18n-title="studio.tip.timeline" data-guide-kind="timeline"
-                title="Dated events pulled out of your sources and put in order.">Timeline</button>
-        <button type="button" class="tab" data-i18n="studio.tab.insight" data-i18n-title="studio.tip.insight" data-guide-kind="insight"
-                title="The single most important takeaway, in one sentence.">Insight</button>
+        <button type="button" class="tab is-active" data-i18n="studio.tab.summary" data-i18n-tip="studio.tip.summary" data-guide-kind="summary"
+                data-tip="A few paragraphs covering what all your sources say, with citations you can check.">Summary</button>
+        <button type="button" class="tab" data-i18n="studio.tab.faq" data-i18n-tip="studio.tip.faq" data-guide-kind="faq"
+                data-tip="The questions your sources actually answer, each with its answer and a citation.">FAQ</button>
+        <button type="button" class="tab" data-i18n="studio.tab.timeline" data-i18n-tip="studio.tip.timeline" data-guide-kind="timeline"
+                data-tip="Dated events pulled out of your sources and put in order.">Timeline</button>
+        <button type="button" class="tab" data-i18n="studio.tab.insight" data-i18n-tip="studio.tip.insight" data-guide-kind="insight"
+                data-tip="The single most important takeaway, in one sentence.">Insight</button>
       </div>
       <button type="button" class="btn guide-regenerate" id="guide-regenerate"
-              data-i18n="studio.regenerate" data-i18n-title="studio.regenerateTip"
-              title="Run this one again from your current sources.">↻ Regenerate</button>
+              data-i18n="studio.regenerate" data-i18n-tip="studio.regenerateTip"
+              data-tip="Run this one again from your current sources.">↻ Regenerate</button>
       <div class="guide-body" id="guide-body"></div>
 
+      </div>
+
+      <div class="studio-view" data-view-body="podcast" hidden>
       <div class="podcast-section">
         <div class="panel-head" data-i18n="podcast.head">Podcast</div>
         <p class="panel-sub" data-i18n="podcast.sub">Two hosts discuss your sources, as an episode you can play or download.</p>
         <button type="button" class="btn btn-primary btn-block" id="podcast-generate"
-                data-i18n="podcast.generate" data-i18n-title="podcast.generateTip"
-                title="Writes a two-host script grounded in your sources, then speaks it. The slowest thing here.">Generate podcast</button>
+                data-i18n-tip="podcast.generateTip"
+                data-tip="Writes a two-host script grounded in your sources, then synthesizes it. This is the slowest operation here."
+                data-i18n="podcast.generate">Generate podcast</button>
         <div class="podcast-body" id="podcast-body"></div>
       </div>
+      </div>
 
+      <div class="studio-view" data-view-body="references" hidden>
+        <p class="panel-sub" data-i18n="references.sub">Every passage cited anywhere in this notebook, in one place.</p>
+        <div class="reference-view" id="reference-view"></div>
+        <p class="empty-note" id="references-empty" data-i18n="references.empty">Nothing cited yet. Ask a question or generate an overview.</p>
+      </div>
+
+      <div class="studio-view" data-view-body="notes" hidden>
       <div class="notes-section">
         <div class="panel-head" data-i18n="notes.head">Notes</div>
         <p class="panel-sub" data-i18n="notes.sub">Your own scratchpad. Save an answer from Chat with "+ Save as note", then promote a note to turn it into a source later questions can cite.</p>
@@ -117,6 +168,7 @@
         </form>
         <ul class="note-list" id="note-list"></ul>
         <p class="empty-note" id="notes-empty" data-i18n="notes.empty">No notes yet.</p>
+      </div>
       </div>
     </section>
   </main>
