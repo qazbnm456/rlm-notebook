@@ -292,6 +292,16 @@ def _cmd_audio(args) -> int:
         return 1
 
     language = _language_for(_notebook, _DEFAULT_ARTIFACT_LANGUAGE)
+    # BEFORE the (expensive) script run: a language this provider has no id for, or a voice it does
+    # not know, can never produce audio (invariant 19, extended from the provider NAME to its own
+    # inputs). `get_tts_provider` above already covers a typo'd RN_TTS_PROVIDER.
+    voice_map = tts_voice_map(config, language, provider)
+    try:
+        provider.validate(language, voice_map)
+    except TTSError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+
     script = GeneratePodcastScript().run(sources=blob, output_language=language)
 
     if not script.utterances:
@@ -306,14 +316,13 @@ def _cmd_audio(args) -> int:
             print()
 
         out_path = Path(args.out)
-        # `--out` defaults to `podcast.mp3`, but a provider may emit another format (kokoro writes
+        # `--out` defaults to `podcast.mp3`, but a provider may emit another format (the local provider writes
         # WAV). Correct the extension rather than writing WAV bytes into a file named `.mp3` —
         # unless the user named the path themselves, in which case their choice stands.
         if args.out == _DEFAULT_AUDIO_OUT and out_path.suffix != provider.suffix:
             out_path = out_path.with_suffix(provider.suffix)
-        voice_map = tts_voice_map(config, language, provider)
         try:
-            provider.synthesize(script, voice_map, out_path)
+            provider.synthesize(script, voice_map, out_path, language)
         except TTSError as exc:
             # The transcript above already printed successfully — a synthesis failure (network,
             # bad voice config, an --out path whose parent doesn't exist — see tts.py's own fix)

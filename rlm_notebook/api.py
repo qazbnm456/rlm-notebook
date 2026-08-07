@@ -1290,6 +1290,13 @@ async def audio(
 
     run_id = _derive_run_id(notebook_id, body.run_id)
     language = await _resolve_language(notebook, request, config, run_id)
+    # BEFORE the script run, not after: a language this provider has no id for, or a voice it does
+    # not know, can never produce audio, and finding that out afterwards wastes a real model call
+    # (invariant 19, extended from the provider NAME to the provider's own inputs).
+    try:
+        provider.validate(language, tts_voice_map(config, language, provider))
+    except TTSError as exc:
+        raise HTTPException(500, f"TTS provider misconfigured: {exc}") from exc
     result = await _run_isolated(
         notebook_id,
         _dotted(GeneratePodcastScript),
@@ -1324,7 +1331,9 @@ async def audio(
     os.close(fd)
     tmp_path = Path(tmp_name)
     try:
-        offsets = await asyncio.to_thread(provider.synthesize, script, voice_map, tmp_path)
+        offsets = await asyncio.to_thread(
+            provider.synthesize, script, voice_map, tmp_path, language
+        )
         audio_bytes = tmp_path.read_bytes()
     except TTSError as exc:
         raise HTTPException(
@@ -1378,7 +1387,7 @@ async def get_audio_file(notebook_id: str) -> FileResponse:
     if path is None:
         raise HTTPException(404, f"no generated audio for notebook {notebook_id!r}")
     # The media type follows the FILE, not the currently-configured provider: an episode generated
-    # by edge-tts must keep playing after someone switches RN_TTS_PROVIDER to kokoro.
+    # by edge-tts must keep playing after someone switches RN_TTS_PROVIDER to the local provider.
     media = "audio/wav" if path.suffix == ".wav" else "audio/mpeg"
     return FileResponse(path, media_type=media, filename=f"{slug(notebook_id)}{path.suffix}")
 

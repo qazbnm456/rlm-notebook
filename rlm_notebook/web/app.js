@@ -415,14 +415,16 @@ const _SETTING_ROWS = [
   {
     key: "tts_voice_host_a",
     label: "Podcast voice — host A",
-    placeholder: "e.g. zh-TW-YunJheNeural",
-    help: "Leave empty to follow the notebook's language.",
+    placeholder: "e.g. zh-TW-YunJheNeural or host-a",
+    // Provider-aware on purpose: with chatterbox `default_voices` returns null for EVERY language,
+    // so "empty" means its two shipped clips, not "follow the language" (invariant 43).
+    help: "Leave empty for the provider's default: edge-tts follows the notebook's language, chatterbox uses its shipped host-a / host-b voices.",
   },
   {
     key: "tts_voice_host_b",
     label: "Podcast voice — host B",
-    placeholder: "e.g. zh-TW-HsiaoChenNeural",
-    help: "Leave empty to follow the notebook's language.",
+    placeholder: "e.g. zh-TW-HsiaoChenNeural or host-b",
+    help: "Leave empty for the provider's default: edge-tts follows the notebook's language, chatterbox uses its shipped host-a / host-b voices.",
   },
 ];
 
@@ -1339,7 +1341,7 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
     .replace(/[^\w\u4e00-\u9fff-]+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 60);
-  // The extension follows the SERVED file, not a hardcoded guess: kokoro writes WAV and edge-tts
+  // The extension follows the SERVED file, not a hardcoded guess: chatterbox writes WAV and edge-tts
   // writes MP3, so naming the download `.mp3` unconditionally would mislabel half of them. An audit
   // found this listed among invariant 43's "handled" consequences when it was not.
   const ext = (suffix || "").replace(/^\./, "");
@@ -1453,7 +1455,8 @@ function initPodcastPlayer() {
     const token = crypto.randomUUID();
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
     body.classList.add("is-pending");
-    body.textContent = "Generating script and synthesizing audio — this can take a while…";
+    body.textContent =
+    "Generating script and synthesizing audio — a few minutes on a cloud voice, and around 15 with the local provider…";
     openTicker(state.notebookId, runId, (evt) => {
       if (body.classList.contains("is-pending")) {
         body.textContent = evt.summary || "Generating script and synthesizing audio…";

@@ -264,18 +264,23 @@ class _FakeTTSProvider:
     def default_voices(self, language):
         return None
 
+    def validate(self, language=None, voice_map=None):
+        # Tracks `tts.TTSProvider`: the pre-flight that stops a bad language or voice from wasting
+        # a real model run (invariant 19). A double that omits it would let a caller drop the call.
+        self.validated = (language, voice_map)
+
     def fallback_voices(self):
         # Tracks `tts.TTSProvider`: a double that does not implement the whole Protocol lets a real
         # gap hide (an independent audit found the LAST-RESORT cast had never moved onto the
-        # provider, so an unknown language on kokoro fell through to an edge-tts voice name).
+        # provider, so an unknown language on the local one fell through to an edge-tts name).
         return ("fake-voice-a", "fake-voice-b")
 
     def __init__(self, *, fail: bool = False) -> None:
         self._fail = fail
         self.calls: list = []
 
-    def synthesize(self, script, voice_map, out_path):
-        self.calls.append((script, voice_map, out_path))
+    def synthesize(self, script, voice_map, out_path, language=None):
+        self.calls.append((script, voice_map, out_path, language))
         if self._fail:
             from rlm_notebook.tts import TTSError
 
@@ -354,6 +359,32 @@ def test_cmd_audio_rejects_a_bad_tts_provider_before_running_the_expensive_model
     err = capsys.readouterr().err
     assert "cannot generate audio" in err
     assert "not-a-real-provider" in err
+
+
+def test_cmd_audio_passes_the_resolved_language_to_synthesize_and_validate(
+    monkeypatch, tmp_path, capsys
+):
+    """The CLI half of the same claim. An independent review mutation-proved it uncovered: passing
+    `None` from both call sites left the suite green, and a Chinese script synthesized with
+    `language_id="en"` is exactly what `_language_id`'s raise exists to prevent."""
+    _live_env(monkeypatch)
+    monkeypatch.setenv("RN_OUTPUT_LANGUAGE", "Traditional Chinese")
+    script = PodcastScript(utterances=[Utterance(speaker="host_a", text="hello", citations=[])])
+    monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(script))
+    provider = _FakeTTSProvider()
+    monkeypatch.setattr(cli, "get_tts_provider", lambda name: provider)
+    source = tmp_path / "a.txt"
+    source.write_text("hello", encoding="utf-8")
+
+    args = build_parser().parse_args(
+        ["audio", "--source", str(source), "--out", str(tmp_path / "ep.mp3")]
+    )
+    assert cli._cmd_audio(args) == 0
+
+    assert provider.calls[0][3] == "Traditional Chinese"
+    # ...and the same language reached the pre-flight, which is what makes invariant 19's ordering
+    # meaningful rather than decorative.
+    assert provider.validated[0] == "Traditional Chinese"
 
 
 def test_cmd_audio_passes_the_configured_provider_name_to_get_tts_provider(monkeypatch, tmp_path):

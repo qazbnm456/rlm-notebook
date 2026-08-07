@@ -84,13 +84,30 @@ api = [
 # needs the Claude Code CLI installed and logged in — a runtime prerequisite pip cannot express.
 subscription = ["claude-agent-sdk>=0.1.60"]
 
-# A fully LOCAL TTS provider (`RN_TTS_PROVIDER=kokoro`): no network, no API key, and none of the
-# undocumented-endpoint grey area `edge-tts` operates in. Deliberately an EXTRA, not a core
-# dependency: this pulls 87 packages including torch, transformers and spacy (measured), and model
-# weights download on first use — invariant 15's "works out of the box" rests on the DEFAULT
-# provider needing neither a key nor a download. Apache-2.0, ~82M parameters, and verified to
-# synthesize Mandarin on CPU (Apple Silicon) before it was added; see CLAUDE.md invariant 43.
-kokoro = ["kokoro>=0.9", "misaki[zh]>=0.9", "soundfile>=0.12", "numpy>=1.26"]
+# A fully LOCAL TTS provider (`RN_TTS_PROVIDER=chatterbox`): no network, no API key, and none of
+# the undocumented-endpoint grey area `edge-tts` operates in. Deliberately an EXTRA, not a core
+# dependency: it pulls ~109 packages including torch and transformers (measured, ~1GB installed),
+# and model weights download on first use — invariant 15's "works out of the box" rests on the
+# DEFAULT provider needing neither a key nor a download. MIT for BOTH code and weights, and every
+# claim below was measured on Apple Silicon before it was added; see CLAUDE.md invariant 43.
+#
+# The two extra pins are not preferences, they are what makes it install and import at all:
+#   * numba>=0.61 — without it the resolver backtracks to numba 0.53.1 (via librosa's numba
+#     dependency) whose llvmlite supports Python <3.10 only, and the install FAILS outright on the
+#     3.13 this project targets. Verified: with the pin it installs and imports on 3.13.
+#   * setuptools<82 — `perth` (chatterbox's watermarker) and librosa both import `pkg_resources`,
+#     which setuptools REMOVED in exactly 82.0.0 (bisected, not assumed). Worse, perth catches the
+#     ImportError and sets its watermarker to None, so the failure surfaces as an uninformative
+#     `TypeError: 'NoneType' object is not callable` several seconds into model loading.
+#     Disclosed cost: this pin constrains the whole environment of anyone installing
+#     `rlm-notebook[chatterbox]`, not just this package. It is upstream's to remove, not ours.
+chatterbox = [
+    "chatterbox-tts>=0.1.7",
+    "numba>=0.61",
+    "setuptools<82",
+    "soundfile>=0.12",
+    "numpy>=1.26",
+]
 
 [dependency-groups]
 dev = [

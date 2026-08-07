@@ -96,7 +96,7 @@ def notebook_path(notebook_id: str, *, base_dir: str | Path = DEFAULT_NOTEBOOKS_
 
 #: Every audio format a provider may write. A reader has to find whichever one is actually there,
 #: because the provider that produced it may not be the one currently configured — `edge-tts` writes
-#: `.mp3` and `kokoro` writes `.wav`, and switching `RN_TTS_PROVIDER` must not make an
+#: `.mp3` and the local provider writes `.wav`, and switching `RN_TTS_PROVIDER` must not make an
 #: already-generated episode unreachable.
 AUDIO_SUFFIXES = (".mp3", ".wav")
 

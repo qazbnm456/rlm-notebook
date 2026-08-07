@@ -23,9 +23,9 @@ uv pip install -e ../rlm-harness
   `test_api.py`/`tests/test_runner.py` need the `api` extra installed to be collected at all (CI's
   `uv sync --extra api` covers this — see `pyproject.toml`); without it they're silently absent
   from the run, not failing, so a bare local `uv sync` can look greener than CI actually is. **The
-  same trap runs the OTHER way for `kokoro`**, which CI does NOT sync: a local venv with that extra
-  installed is greener than CI. Nothing in the suite may `importorskip` a kokoro-only package —
-  `tests/test_tts.py` fakes `kokoro` AND `soundfile` through `sys.modules` for exactly this reason,
+  same trap runs the OTHER way for `chatterbox`**, which CI does NOT sync: a local venv with that
+  extra installed is greener than CI. Nothing in the suite may `importorskip` a package that ships
+  only in it — `tests/test_tts.py` fakes `chatterbox.mtl_tts` AND `soundfile` through `sys.modules`,
   after an audit blocked both and watched a test SKIP while its docstring claimed it ran without
   them. Verify with a meta-path blocker, not by trusting the docstring.
 - A LIVE run additionally needs real model credentials and a Deno sandbox (`brew install deno`).
@@ -1295,43 +1295,133 @@ them exist because an earlier design discussion mentioned them.
     every notebook open, and the generate path cache-busts the (stable) URL, or "Regenerate" would
     look like it did nothing because the browser still had the previous episode.
 
-43. **A `TTSProvider` owns its OUTPUT FORMAT and its own language→voice map; neither is the
-    caller's.** `tts.KokoroProvider` (`RN_TTS_PROVIDER=kokoro`, the `kokoro` extra) is a fully local
-    second provider: no network, no API key, and none of the undocumented-endpoint grey area
+43. **A `TTSProvider` owns its OUTPUT FORMAT, its own cast, and — since it may be cross-lingual —
+    is handed the LANGUAGE as a separate input. None of the three is the caller's.**
+    `tts.ChatterboxProvider` (`RN_TTS_PROVIDER=chatterbox`, the `chatterbox` extra) is the fully
+    local provider: no network, no API key, and none of the undocumented-endpoint grey area
     `edge-tts` operates in with its hardcoded client token.
 
-    **A voice NAME is provider-specific** — edge-tts wants `zh-TW-YunJheNeural`, Kokoro wants
-    `zf_xiaobei` — so `default_voices` moved onto the protocol. Keeping one shared map would have
-    leaked one provider's names into the other's request. **The format moved for the same reason**:
-    Kokoro emits 24kHz WAV, and forcing it through an MP3 encoder would drag in the `ffmpeg`/`pydub`
-    dependency invariant 17 deliberately refused for a purely cosmetic gain. A browser plays WAV
-    natively, so nothing downstream needed one.
+    **A voice NAME is provider-specific** — edge-tts wants `zh-TW-YunJheNeural`, chatterbox wants
+    one of its shipped reference-clip names — so `default_voices`/`fallback_voices` live on the
+    protocol. Keeping one shared map would leak one provider's names into the other's request.
+    **The format is on the provider for the same reason**: chatterbox emits 24kHz WAV, and forcing
+    it through an MP3 encoder would drag in the `ffmpeg`/`pydub` dependency invariant 17 refused for
+    a purely cosmetic gain. A browser plays WAV natively.
 
-    Consequences that had to be handled rather than assumed: `notebook.find_audio` looks for
-    WHICHEVER format is present, because the provider that generated an episode may not be the one
-    currently configured, and switching `RN_TTS_PROVIDER` must not make an existing episode
-    unreachable; `clear_audio` removes every format before a regenerate, or the previous `.mp3`
-    would sit beside the new `.wav` and be served instead; and `GET .../audio/file` derives its
+    **`synthesize` takes `language` because a CROSS-LINGUAL provider's voice and language are
+    independent axes.** Chatterbox maps it to a `language_id`; `EdgeTTSProvider` ignores it, because
+    an edge-tts voice id already carries its locale. The same fact makes `ChatterboxProvider.
+    default_voices` return `None` for EVERY language — there is no per-language cast, one pair of
+    cloned voices speaks all of them — which routes the default to `fallback_voices` exactly as
+    invariant 40's precedence ladder intends. An unknown language RAISES rather than falling back to
+    `"en"`: synthesizing Korean with an English language id produces confident nonsense, and failing
+    before any audio is written beats a wrong-language episode nobody asked for.
+
+    Consequences handled rather than assumed: `notebook.find_audio` looks for WHICHEVER format is
+    present, because the provider that generated an episode may not be the one currently configured;
+    `clear_audio` removes every format before a regenerate; and `GET .../audio/file` derives its
     media type from the FILE, never from the configured provider.
 
-    **Two recommendations were wrong before this one, both from unverified sources — the pattern
-    invariant 7 exists to punish.** NeuTTS was proposed and rejected: English/Spanish/German/French
-    only, no CJK, which is the language the whole output-language work exists for (and two of its
-    three models carry a bespoke licence). Qwen3-TTS was then recommended from a blog summary
-    claiming CPU inference; the repository documents `device_map="cuda:0"` and never mentions CPU,
-    so it would not run on the Apple Silicon machine this project is developed on. Kokoro was
-    chosen only after being INSTALLED AND RUN: Apache-2.0, ~82M parameters, 17.4s one-time pipeline
-    load then 4.4s for 8.9s of Mandarin audio on CPU. Every voice id in `_KOKORO_VOICES` came from
-    a working synthesis, the same discipline invariant 40 already requires of the edge-tts map.
+    **Chatterbox REPLACED Kokoro, and the reason is the language matrix, not audio quality.** The
+    user's actual audience is English first, Chinese (both scripts) second, Japanese and Korean
+    third, with foreign words mixed into all of them. Measured against that:
 
-    **An EXTRA, never a core dependency.** `kokoro` + `misaki[zh]` pulls 87 packages including
-    torch, transformers and spacy (measured with `--dry-run`, not estimated), plus weights on first
-    use. Invariant 15's "works out of the box" rests on the DEFAULT provider needing neither a key
-    nor a download; `edge-tts` stays the default for exactly that reason.
+    - **Kokoro** passes Latin text through its Chinese G2P UNCONVERTED (its "phonemes" for `NASA`
+      are the literal string `NASA`, and `Voyager i→` — this is the mechanism behind the mangled
+      audio a user reported), has NO Korean at all, and its own model card grades every Chinese
+      voice D on 10–100 minutes of data.
+    - **MeloTTS** was measured as the replacement first and REJECTED after a user-listened A/B had
+      already favoured it — the language matrix is what disqualified it. Its Japanese module DELETES
+      embedded Latin (`NASA` vanishes during normalization); its Korean needs `python-mecab-ko`,
+      which DESTRUCTIVELY overwrites the `MeCab` module its Japanese needs and leaves the
+      environment broken even after uninstalling, so Japanese and Korean cannot coexist at all; its
+      English needs an NLTK resource its installer never fetches; and `transformers==4.27.4` would
+      roll this project's ML stack back two years.
+    - **Licence-blocked**, all confirmed from the LICENSE file or model card rather than a summary:
+      Fish Speech/OpenAudio (Research License), Higgs Audio v3 (Research and Non-Commercial),
+      IndexTTS-2 (bespoke bilibili licence with revenue thresholds and prohibited fields), F5-TTS
+      (code MIT but weights CC-BY-NC).
+    - **CosyVoice 3** (Apache-2.0, 9 languages including ja/ko) is zero-shot ONLY: every synthesis
+      needs a reference clip, and only the superseded 300M-SFT has preset speakers.
+    - **VibeVoice** (MIT, purpose-built for multi-speaker long-form) is English and Chinese only by
+      its own model card, and embeds an AUDIBLE AI disclaimer in every output.
 
-    Verified end to end through the real product: `RN_TTS_PROVIDER=kokoro` generated a 14-turn
-    Chinese episode with no network TTS call at all, wrote `notebooks/audio/<slug>.wav` (2m53s,
-    24kHz), removed the previous `.mp3`, and served it as `audio/wav` with range support.
+    **Three costs, measured on Apple Silicon and none of them hidden.** (1) RTF ~4.5 against Kokoro's
+    ~0.2. Measured end to end through the real product, not extrapolated: a 3.4-minute episode took
+    **16.1 minutes** of wall clock — 67s of script generation and 15.0 minutes of synthesis — where
+    Kokoro took about forty seconds. An earlier draft of this paragraph guessed "about ten minutes"
+    and the live run corrected it. Invariant 29's "only the script half is cancellable" now covers a
+    far longer window, and that is the sharper cost: fifteen minutes of unstoppable synthesis.
+    (2) Output LENGTH is unstable: the identical Traditional Chinese sentence returned 34.80s,
+    5.48s and 11.68s across three runs against an expected ~7s, and the long take held 25.1s of
+    actual speech, i.e. the decoder looping rather than trailing silence. `_generate_one` re-rolls
+    against `expected_seconds` for exactly this, keeping the SHORTEST take if it never converges
+    rather than raising — losing a paid-for episode is worse than a clipped line (invariants 19 and
+    37). `expected_seconds` is CALIBRATED against four real measured utterances and pinned by a
+    test; a moderate 1.7× overshoot is explicitly NOT caught, because tightening the factor that far
+    would start rejecting correct takes. (3) It ships ONE built-in voice — see below.
+
+    **Verified end to end through the real product before any of this was believed.**
+    `RN_TTS_PROVIDER=chatterbox` generated a 16-turn Traditional-Chinese episode from English
+    sources: 16 offsets for 16 utterances, strictly increasing, every one landing on its own line's
+    audio; `NASA` rendered `美國航空暨太空總署` with ZERO Latin runs anywhere in the script; the two
+    hosts measurably distinct (median F0 126.3 Hz against 201.3 Hz, tracking the two reference clips'
+    own 125/197 Hz); persisted as `.wav` and served as `audio/wav` with range support. The runaway
+    guard did NOT fire — 16 decode loops for 16 utterances, worst ratio 1.62 against a ceiling of
+    2.0 — which is evidence the ceiling is not set so tight that it burns re-rolls on correct takes,
+    and is NOT evidence the instability is gone: it was reproduced three times out of three earlier.
+
+    **Two hosts need two reference clips, and where they come from is a disclosed chain, not a
+    detail.** Chatterbox's checkpoint carries a single `conds.pt`; naming both hosts that voice
+    turns a two-host episode into a monologue in two halves. `rlm_notebook/voices/{host_a,host_b}.wav`
+    are ten-second clips SYNTHESIZED by Kokoro (Apache-2.0) — no person was recorded, because
+    cloning a real human's voice raises a consent question a recording's licence does not answer.
+    The disclosure that belongs with them: Kokoro's own model card says its training data includes
+    "synthetic audio generated by closed TTS models from large providers", so the provenance chain
+    is three hops. Written down rather than left to be discovered, for the same reason invariant 7
+    exists. `rlm_notebook/voices/README.md` carries the full statement and the escape hatch
+    (`RN_TTS_VOICE_HOST_A`/`_B` accept an absolute path to your own clip). Ten seconds because
+    `DEC_COND_LEN` is `10 * 24000`; past that only the speaker encoder reads the file. They live
+    under `rlm_notebook/` for the same packaging reason the web assets do (invariant 29).
+
+    **The built-in voice must be captured BEFORE the prep loop**, because it exists only as
+    `model.conds` and the first `prepare_conditionals` overwrites it. An independent review
+    reproduced the consequence: a MIXED map (one host `built-in`, the other a clip — a configuration
+    both `.env.example` and `voices/README.md` document) left the built-in speaker with nothing to
+    assign, so it inherited whichever clip was prepared last and BOTH hosts came out in one voice.
+    Silently, after fifteen minutes of synthesis, producing exactly the monologue-in-two-halves the
+    shipped clips exist to prevent. Every speaker now gets a real conditioning object and the
+    assignment is unconditional; a test covers all three mixes.
+
+    **`validate(language, voice_map)` runs BEFORE the script generation, not inside `synthesize`.**
+    Invariant 19's discipline one level deeper than the provider NAME: the same review found both
+    of chatterbox's own checks living after the RLM run, so a language it has no id for (Thai and
+    Vietnamese are in edge-tts's map but not in `_CHATTERBOX_LANGUAGES`) burned a whole model call
+    on every attempt and could never succeed. `EdgeTTSProvider.validate` is an explicit no-op. A
+    source-tree test pins the ORDERING at both call sites, because neither has a seam to observe it
+    through.
+
+    **A PATH is reachable from the ENVIRONMENT only, never the settings file.** `_VOICE_PATTERN`
+    accepts edge-tts ids and short lowercase names and excludes `.` and `/`, so a path arriving
+    through the unauthenticated settings page — a brand-new arbitrary-file-read surface — cannot
+    happen. That is invariant 26's reasoning applied to a second input channel.
+
+    **Three earlier recommendations were wrong, all from unverified sources — the pattern invariant
+    7 exists to punish.** NeuTTS (no CJK at all, plus a bespoke licence on two of three models);
+    Qwen3-TTS (recommended from a blog summary claiming CPU inference, while the repository
+    documents `device_map="cuda:0"` and never mentions CPU); and MeloTTS, which was recommended
+    AND user-approved before its Japanese/Korean failures were measured. Nothing here is adopted
+    now until it has been installed and run.
+
+    **An EXTRA, never a core dependency**, and its two odd pins are load-bearing rather than
+    preferences: `numba>=0.61`, without which the resolver backtracks to a `llvmlite` that supports
+    Python <3.10 and the install FAILS outright on the 3.13 this project targets; and
+    `setuptools<82`, because `perth` (chatterbox's watermarker) and `librosa` both import
+    `pkg_resources`, which setuptools removed in exactly 82.0.0 (bisected, not assumed) — and
+    `perth` swallows that ImportError and sets its watermarker to `None`, so the failure surfaces
+    as an uninformative `TypeError: 'NoneType' object is not callable` seconds into model loading.
+    The watermark itself is imperceptible (unlike VibeVoice's audible disclaimer) and is kept: a
+    provenance marker on synthetic speech is a feature, not something to strip.
 
 44. **The podcast transcript behaves like subtitles, and the timing comes from the PROVIDER rather
     than from measuring the audio.** `TTSProvider.synthesize` returns each utterance's start offset
@@ -1368,13 +1458,14 @@ them exist because an earlier design discussion mentioned them.
     **Kokoro needs none of that: it holds raw samples, so the offsets come from a PURE FUNCTION,
     `tts.sequence_offsets`.** The gap between utterances is charged to the line BEFORE it, so an
     offset is where its own line's audio starts. Extracting the bookkeeping out of
-    `KokoroProvider.synthesize` is what lets CI check that claim at all — with no `kokoro` extra, no
+    `ChatterboxProvider.synthesize` is what lets CI check that claim at all — with no extra, no
     model download and no audio — after an independent review found the invariant rested on one
     hand-verification. Both offset tests use THREE DIFFERENT durations on purpose: with equal ones a
     running-total bug and a correct implementation produce the same list, and the review demonstrated
     exactly that by hoisting edge-tts's `end_ticks` out of its loop and watching every test pass.
     Precise wording, since the earlier "lands on the speech rather than the silence" overclaimed:
-    an offset lands at the start of that line's own AUDIO. Measured on a real episode, kokoro then
+    an offset lands at the start of that line's own AUDIO. Measured on a real episode, the local
+    provider then
     emits about 0.394s of its own leading silence before the words — identical on the FIRST line,
     which has no gap before it, which is how it was attributed to the provider rather than to us.
 

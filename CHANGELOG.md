@@ -1285,6 +1285,70 @@ questions with verifiable citations, and get a distilled research artifact out.
   configured provider, and the CLI corrects its default extension only when the user did not choose
   the path themselves.
 
+- **Twenty-fifth slice: the local TTS provider is Chatterbox now, not Kokoro — and the reason is the
+  language matrix, not audio quality.**
+
+  The user's audience is English first, Chinese (both scripts) second, Japanese and Korean third,
+  with foreign words mixed into all of them. Nothing about that was true of the local provider:
+  Kokoro's Chinese G2P passes Latin straight through (its "phonemes" for `NASA` are the literal
+  string `NASA` — that is the mechanism behind the mangled audio a user reported), it has no Korean
+  at all, and its own model card grades every Chinese voice D.
+
+  **MeloTTS was measured as the replacement first, approved after a listening test, and then
+  rejected on the matrix.** Its Japanese module DELETES embedded Latin; its Korean needs a package
+  that destructively overwrites the one its Japanese needs, so the two cannot coexist in a single
+  environment at all; its English needs an NLTK resource its own installer never fetches. Recording
+  that here because the listening test had already picked it — the requirement is what disqualified
+  it, not the sound.
+
+  Everything else was checked against its LICENSE file or model card rather than a summary: Fish
+  Speech, Higgs Audio v3, IndexTTS-2 and F5-TTS are all licence-blocked; CosyVoice 3 is zero-shot
+  only (every synthesis needs a reference clip); VibeVoice is English and Chinese only and embeds an
+  audible AI disclaimer in every output.
+
+  **Chatterbox is MIT for both code and weights, covers all four languages, and handles a foreign
+  word inside a sentence for free** — it has no G2P stage to fail at, which is the structural reason
+  the G2P-based engines all break the same way.
+
+  **Three costs, measured rather than assumed, and none of them hidden.** It runs at RTF ~4.5
+  against Kokoro's ~0.2 — a 3.4-minute episode took 16.1 minutes end to end through the real
+  product, 15 of them synthesis, where Kokoro took about forty seconds. Its output LENGTH is
+  unstable — the same Traditional Chinese sentence came back at 34.80s / 5.48s / 11.68s against an
+  expected ~7s, and the long take was the decoder looping, not trailing silence — so
+  `ChatterboxProvider._generate_one` re-rolls against a character-count estimate that is calibrated
+  against four real measured utterances and pinned by a test. And it ships exactly ONE built-in
+  voice, so two distinguishable hosts need reference clips.
+
+  **Those two clips are synthesized, not recorded**, so no person's voice is being cloned — and the
+  provenance chain behind them is disclosed in `rlm_notebook/voices/README.md` rather than left to
+  be discovered, because it is three hops long and this project has paid once already for taking a
+  licence chain on trust.
+
+  Also: `TTSProvider.synthesize` now takes the resolved `language`, because a cross-lingual
+  provider's voice and language are independent axes; a path to a custom reference clip is reachable
+  from the environment but deliberately NOT from the unauthenticated settings page; and the extra
+  carries two odd-looking pins (`numba>=0.61`, `setuptools<82`) that are what make it install and
+  import at all on Python 3.13.
+
+  **Verified live end to end**: a 16-turn Traditional-Chinese episode from English sources, 16
+  offsets each landing on its own line's audio, `NASA` rendered `美國航空暨太空總署` with zero Latin
+  runs, the two hosts measurably distinct (median F0 126 Hz against 201 Hz), served as `audio/wav`
+  with range support. The runaway guard did not fire — which shows the ceiling is not set so tight
+  that it burns re-rolls on correct takes, and is NOT evidence the instability is gone.
+
+  **An independent review then found two blockers**, both silent failures. CI would have gone red:
+  the new provider test faked `soundfile` and `chatterbox.mtl_tts` but not `torch`, whose only root
+  in the dependency graph is `chatterbox-tts` — verified fixed by running the whole suite under a
+  meta-path blocker that makes the extra genuinely unimportable. And mixing `built-in` with a
+  reference clip collapsed BOTH hosts into one voice, because the built-in conditioning exists only
+  as `model.conds` and the first `prepare_conditionals` overwrote it.
+
+  From the same review: `validate()` moved ahead of the script run (a language chatterbox has no id
+  for used to burn a whole model call before failing); the language pass-through had zero coverage
+  at either call site; the lazy-import test was a vacuous disjunction that a module-scope
+  `import torch` still satisfied; the settings page's voice help was edge-tts-only; and the
+  provenance file pointed at a regeneration command that shipped nowhere. Every fix mutation-tested.
+
 - **A code-vs-docs consistency audit across the whole repo, and the eleven fixes it produced.**
   Run as the closing step of the slice above, over all 45 invariants rather than just the diff. It
   found doc claims in both directions — things the docs promised that the code did not do, and

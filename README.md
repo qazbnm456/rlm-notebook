@@ -97,9 +97,17 @@ uv run rlm-notebook audio --notebook mynb
 
 The transcript prints first (with citations, same as `ask`/`guide`) regardless of whether audio
 synthesis succeeds — a TTS failure doesn't lose the script. The default TTS provider (`edge-tts`)
-needs no API key and writes MP3; `RN_TTS_PROVIDER=kokoro` (`uv sync --extra kokoro`) is fully local,
-no network at all, and writes WAV — each provider owns its own format and its own language→voice
-map. Set `RN_TTS_VOICE_HOST_A`/`_B` in `.env` to override the cast (see `.env.example`).
+needs no API key and writes MP3; `RN_TTS_PROVIDER=chatterbox` (`uv sync --extra chatterbox`) is
+fully local, no network at all, multilingual, and writes WAV — each provider owns its own format and
+its own cast. Set `RN_TTS_VOICE_HOST_A`/`_B` in `.env` to override the cast (see `.env.example`).
+
+The local provider is **much slower** — measured on Apple Silicon, a 3.4-minute episode took 16
+minutes end to end (15 of them synthesis) against edge-tts's network round trip — and its two hosts
+come from two
+ten-second reference clips shipped in `rlm_notebook/voices/`, because Chatterbox has exactly one
+built-in voice. Those clips were synthesized rather than recorded from a person; where they came
+from, and the one part of that chain worth knowing about, is written up in
+`rlm_notebook/voices/README.md`.
 
 **Everything the model writes follows the READER's language, not the documents'.** Set
 `RN_OUTPUT_LANGUAGE` (a hard override, applying to chat as well as artifacts), or leave it unset and

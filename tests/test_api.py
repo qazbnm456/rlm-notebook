@@ -665,10 +665,15 @@ class _FakeTTSProvider:
     def default_voices(self, language):
         return None
 
+    def validate(self, language=None, voice_map=None):
+        # Tracks `tts.TTSProvider`: the pre-flight that stops a bad language or voice from wasting
+        # a real model run (invariant 19). A double that omits it would let a caller drop the call.
+        self.validated = (language, voice_map)
+
     def fallback_voices(self):
         # Tracks `tts.TTSProvider`: a double that does not implement the whole Protocol lets a real
         # gap hide (an independent audit found the LAST-RESORT cast had never moved onto the
-        # provider, so an unknown language on kokoro fell through to an edge-tts voice name).
+        # provider, so an unknown language on the local one fell through to an edge-tts name).
         return ("fake-voice-a", "fake-voice-b")
 
 
@@ -688,8 +693,8 @@ class _FakeTTSProvider:
         self.offsets = offsets
         self.calls: list[tuple] = []
 
-    def synthesize(self, script, voice_map, out_path):
-        self.calls.append((script, voice_map, out_path))
+    def synthesize(self, script, voice_map, out_path, language=None):
+        self.calls.append((script, voice_map, out_path, language))
         if self.boom:
             raise api.TTSError(self.boom)
         out_path.write_bytes(self.payload)
@@ -792,6 +797,28 @@ def test_audio_carries_offsets_through_response_persistence_and_reopen(client, m
     assert podcast["offsets"] == [0.0, 5.25, 7.5]
     # Parallel to `utterances`, never a field on one — a consumer pairs them by index.
     assert len(podcast["offsets"]) == len(podcast["utterances"])
+
+
+def test_audio_passes_the_resolved_language_to_synthesize(client, monkeypatch):
+    """`TTSProvider.synthesize` takes the resolved language because a CROSS-LINGUAL provider's voice
+    and language are independent axes — chatterbox maps it to a `language_id`. An independent review
+    mutation-proved this had zero coverage: passing `None` from BOTH call sites left the whole suite
+    green, and the consequence is a Chinese script synthesized with `language_id="en"`, i.e. the
+    confident nonsense `_language_id`'s raise exists to prevent."""
+    _live_env(monkeypatch)  # pins RN_OUTPUT_LANGUAGE=English
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        _podcast_script_result([{"speaker": "host_a", "text": "hi", "citations": []}]),
+    )
+    provider = _FakeTTSProvider()
+    _fake_tts_provider(monkeypatch, provider)
+
+    assert client.post("/notebooks/mynb/audio").status_code == 200
+    assert provider.calls[0][3] == "English"
+    # ...and the same language reached the pre-flight, which is what makes invariant 19's ordering
+    # meaningful rather than decorative.
+    assert provider.validated[0] == "English"
 
 
 def test_audio_returns_null_audio_when_script_has_no_utterances(client, monkeypatch):
@@ -1769,7 +1796,10 @@ def test_the_podcast_persists_and_is_served_as_a_file(client, monkeypatch, tmp_p
         def fallback_voices(self):
             return ("fake-voice-a", "fake-voice-b")
 
-        def synthesize(self, script, voice_map, out_path):
+        def validate(self, language=None, voice_map=None):
+            return None
+
+        def synthesize(self, script, voice_map, out_path, language=None):
             out_path.write_bytes(b"ID3fake-mp3-bytes")
 
     monkeypatch.setattr(api, "get_tts_provider", lambda name: _FakeProvider())
@@ -1806,7 +1836,10 @@ def test_adding_a_source_marks_the_podcast_stale(client, monkeypatch):
         def fallback_voices(self):
             return ("fake-voice-a", "fake-voice-b")
 
-        def synthesize(self, script, voice_map, out_path):
+        def validate(self, language=None, voice_map=None):
+            return None
+
+        def synthesize(self, script, voice_map, out_path, language=None):
             out_path.write_bytes(b"x")
 
     monkeypatch.setattr(api, "get_tts_provider", lambda name: _FakeProvider())

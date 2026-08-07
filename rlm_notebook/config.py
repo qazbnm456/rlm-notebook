@@ -317,8 +317,8 @@ def tts_voice_map(config: NotebookConfig, language: str | None, provider=None) -
         # key is how a user goes back to "follow the language" — the settings page renders an empty
         # input as exactly that, and says so.
         # The provider's own cast sits BELOW the language default and ABOVE `configured`: an
-        # independent audit found an unknown language on kokoro falling straight through to
-        # `configured`'s shipped `en-US-GuyNeural`, an edge-tts name handed to `KPipeline` — a
+        # independent audit found an unknown language on the local provider falling through to
+        # `configured`'s shipped `en-US-GuyNeural`, an edge-tts name handed to a local model — a
         # synthesis failure after a real model call. `configured` still wins when a provider has no
         # opinion, and an explicitly-set env var still beats everything (checked first).
         return (
@@ -366,13 +366,21 @@ _LANGUAGE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z ()\-]{0,39}$")
 #: interpolates it into `<voice name='...'>` SSML with no escaping. An independent audit demonstrated
 #: a crafted value composing extra markup into that request. Bounded here rather than trusted.
 #:
-#: TWO alternatives, one per provider's naming scheme — `zh-TW-YunJheNeural` (edge-tts) and
-#: `zf_xiaobei` (kokoro). A single edge-tts-shaped pattern rejected EVERY kokoro voice id, so the
+#: TWO alternatives, one per provider's naming scheme — `zh-TW-YunJheNeural` (edge-tts) and the
+#: short lowercase names `chatterbox` uses for its shipped reference clips (`host-a`, `host-b`,
+#: `built-in`). A single edge-tts-shaped pattern rejected every local-provider voice, so the
 #: settings page could not name a voice for the provider a user had actually configured (found by an
 #: independent audit, alongside the last-resort cast it shares a cause with). Both alternatives stay
-#: strict character classes with no quote, angle bracket or space reachable, which is the property
-#: that closes the SSML hole — widening the SHAPES accepted is not widening the CHARACTERS.
-_VOICE_PATTERN = re.compile(r"^(?:[a-z]{2,}-[A-Z]{2,}-[A-Za-z]+Neural|[a-z]{2}_[a-z]+)$")
+#: strict character classes with no quote, angle bracket, slash, dot or space reachable, which is
+#: the property that closes the SSML hole — widening the SHAPES accepted is not widening the
+#: CHARACTERS.
+#:
+#: **A PATH is deliberately unreachable here.** `chatterbox` can take an absolute path to a custom
+#: reference clip, but only from the ENVIRONMENT: a path arriving through the unauthenticated
+#: settings file would be a brand-new arbitrary-file-read surface, which is precisely what
+#: invariant 26 spent a slice closing on the ingestion side. `.` and `/` are outside both classes,
+#: so this pattern is what enforces that.
+_VOICE_PATTERN = re.compile(r"^(?:[a-z]{2,}-[A-Z]{2,}-[A-Za-z]+Neural|[a-z][a-z0-9-]{1,30})$")
 
 _SETTING_PATTERNS = {
     "output_language": _LANGUAGE_PATTERN,

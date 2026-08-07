@@ -153,7 +153,8 @@ cached Guide result is stale the instant the corpus it was computed from changes
 `faq` renders one `.guide-item` block per Q/A pair; `timeline` renders one `.guide-item` per
 `{when, description}` event. Below: a `Generate podcast` button — `POST .../audio` runs a real RLM
 script-generation loop THEN a TTS call in series (a NETWORK call for edge-tts, fully local for
-kokoro — invariant 43), so this is the single slowest
+chatterbox — invariant 43, measured at 16 MINUTES for a 3.4-minute episode), so this is by far
+the single slowest
 action in the product, with its own pending copy saying so — producing an `<audio controls>`
 element (playing from `GET .../audio/file`, so a persisted episode replays without re-synthesis and a
 multi-MB episode doesn't sit fully

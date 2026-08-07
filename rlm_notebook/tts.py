@@ -7,8 +7,9 @@ free service needing no API key) so the tool works with no paid credentials out 
 mirroring the OCR default (CLAUDE.md invariant 7): a capability this project's core value
 proposition depends on must not be pluggable-but-unusable by default.
 
-Two providers ship. `EdgeTTSProvider` is the default and concatenates raw MP3 streams; `kokoro`
-(invariant 43, the `kokoro` extra) is fully local and emits WAV. A provider therefore owns its own
+Two providers ship. `EdgeTTSProvider` is the default and concatenates raw MP3 streams;
+`ChatterboxProvider` (invariant 43, the `chatterbox` extra) is fully local, multilingual and emits
+WAV. A provider therefore owns its own
 OUTPUT FORMAT and its own language→voice map — a voice name is provider-specific, and forcing a
 WAV-emitting model through an MP3 encoder would need the `ffmpeg`/`pydub` dependency invariant 17
 deliberately refused.
@@ -17,6 +18,7 @@ deliberately refused.
 from __future__ import annotations
 
 import asyncio
+import importlib
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -39,11 +41,11 @@ class TTSProvider(Protocol):
     would drag in the `ffmpeg`/`pydub` dependency invariant 17 deliberately avoided.
 
     `default_voices` belongs here too, because a voice NAME is provider-specific: edge-tts wants
-    `zh-TW-YunJheNeural` and Kokoro wants `zf_xiaobei`. Keeping the language→voice map on the
-    provider is what stops one provider's names leaking into another's request — and so does
-    `fallback_voices`, the LAST resort when no language matches. An independent audit found the map
-    had moved onto the provider while the last resort had not, so an unknown language on kokoro
-    still fell through to an edge-tts name.
+    `zh-TW-YunJheNeural` and Chatterbox wants one of its shipped reference-clip names. Keeping the
+    cast on the provider is what stops one provider's names leaking into another's request — and so
+    does `fallback_voices`, the LAST resort when no language matches. An independent audit found the
+    map had moved onto the provider while the last resort had not, so an unknown language on the
+    local provider still fell through to an edge-tts name.
     """
 
     #: File extension and MIME type of what `synthesize` writes.
@@ -62,10 +64,34 @@ class TTSProvider(Protocol):
         language does not silently overrule a configured voice."""
         ...
 
+    def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
+        """Refuse a language or a voice this provider cannot serve, BEFORE anything expensive runs.
+
+        Invariant 19's discipline, applied one level deeper: resolving the PROVIDER early already
+        stops a typo'd `RN_TTS_PROVIDER` from wasting a model call, but an independent review found
+        both of `ChatterboxProvider`'s own checks — an unmapped language, an unknown voice name —
+        happening inside `synthesize`, i.e. after the full script-generation run. On a language the
+        provider has no id for, every `/audio` request burned a whole RLM run and could never
+        succeed. Callers invoke this where they already resolve the provider.
+
+        A no-op is a valid implementation: `EdgeTTSProvider` has nothing to check that
+        `get_tts_provider` and the voice ids themselves do not already cover.
+        """
+        ...
+
     def synthesize(
-        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+        self,
+        script: PodcastScript,
+        voice_map: dict[str, str],
+        out_path: Path,
+        language: str | None = None,
     ) -> list[float]:
         """Write the audio and return each utterance's START OFFSET in seconds.
+
+        `language` is the resolved output language (invariant 39). A CROSS-LINGUAL provider needs
+        it as a separate input, because its voice and its language are independent —
+        `ChatterboxProvider` maps it to a `language_id`. A per-language-cast provider like
+        `EdgeTTSProvider` ignores it: its voice names already carry the locale.
 
         The offsets are what let the transcript behave like subtitles — highlight the line being
         spoken, click a line to seek to it. Every provider here already synthesizes utterance by
@@ -121,9 +147,20 @@ class EdgeTTSProvider:
     def fallback_voices(self) -> tuple[str, str]:
         return ("en-US-GuyNeural", "en-US-JennyNeural")
 
+    def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
+        # Nothing to pre-flight: a bad voice id is caught by the service itself, and there is no
+        # language input to map — an edge-tts voice name already carries its locale.
+        return
+
     def synthesize(
-        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+        self,
+        script: PodcastScript,
+        voice_map: dict[str, str],
+        out_path: Path,
+        language: str | None = None,
     ) -> list[float]:
+        # `language` is unused here on purpose: an edge-tts voice name already carries its locale
+        # (`zh-TW-YunJheNeural`), so the cast IS the language. See the Protocol's docstring.
         if not script.utterances:
             raise TTSError("script has no utterances to synthesize")
         try:
@@ -201,11 +238,11 @@ def sequence_offsets(lengths: Sequence[int], gap: int, sample_rate: int) -> list
 
     **The gap belongs to the line BEFORE it**, so an offset is where its own line's audio starts and
     a click lands on that line rather than in the preceding pause. Its own leading silence is the
-    provider's business: kokoro emits about 0.39s of it per utterance, measured on a real episode,
+    provider's business: the local provider emits about 0.39s of it per utterance, measured live,
     which is why "lands on the speech" is really "lands at the start of this line's audio".
 
-    A pure function rather than bookkeeping inlined in `KokoroProvider.synthesize` so CI can check
-    invariant 44's gap-before-offset claim without the `kokoro` extra, a model download, or any
+    A pure function rather than bookkeeping inlined in `ChatterboxProvider.synthesize` so CI can check
+    invariant 44's gap-before-offset claim without the local-TTS extra, a model download, or any
     audio — an independent review found the claim rested on a hand-verification and nothing else.
     """
     offsets: list[float] = []
@@ -283,145 +320,319 @@ def default_voices_for(language: str | None) -> tuple[str, str] | None:
         return _LANGUAGE_VOICES[key]
     return _LANGUAGE_VOICES.get(key.split("-")[0])
 
-
-#: Kokoro's own voice names, which look nothing like edge-tts's — `zf_xiaobei`, not
-#: `zh-TW-HsiaoChenNeural`. Keeping the map on the provider is exactly why `default_voices` moved
-#: onto the protocol: one provider's names must never leak into another's request.
-#:
-#: The leading letter is Kokoro's own convention (language then gender: `zf` = Chinese female,
-#: `am` = American male), and `KPipeline` additionally needs a one-character `lang_code`, so both
-#: are stored. Every id here was taken from a working local synthesis, not from documentation.
-_KOKORO_VOICES: dict[str, tuple[str, str, str]] = {
-    # language key -> (lang_code, host_a voice, host_b voice)
-    "chinese": ("z", "zm_yunjian", "zf_xiaobei"),
-    "mandarin": ("z", "zm_yunjian", "zf_xiaobei"),
-    "traditional chinese": ("z", "zm_yunjian", "zf_xiaobei"),
-    "simplified chinese": ("z", "zm_yunjian", "zf_xiaobei"),
-    "zh": ("z", "zm_yunjian", "zf_xiaobei"),
-    "english": ("a", "am_adam", "af_heart"),
-    "en": ("a", "am_adam", "af_heart"),
-    "japanese": ("j", "jm_kumo", "jf_alpha"),
-    "ja": ("j", "jm_kumo", "jf_alpha"),
-    "spanish": ("e", "em_alex", "ef_dora"),
-    "french": ("f", "ff_siwis", "ff_siwis"),
-    "italian": ("i", "im_nicola", "if_sara"),
-    "brazilian portuguese": ("p", "pm_alex", "pf_dora"),
-    "portuguese": ("p", "pm_alex", "pf_dora"),
-    "hindi": ("h", "hm_omega", "hf_alpha"),
+#: Chatterbox is CROSS-LINGUAL: the voice and the language are separate inputs, so unlike edge-tts
+#: there is no per-language cast to pick — the same two hosts speak every language. What it needs
+#: instead is a `language_id`, which this maps our own language NAMES onto (`config.output_language`
+#: yields things like "Traditional Chinese", never a BCP-47 tag). An unknown language raises rather
+#: than guessing: synthesizing Korean with `language_id="en"` produces confident nonsense, and a
+#: loud failure before the audio is written beats a wrong-language episode nobody asked for.
+_CHATTERBOX_LANGUAGES: dict[str, str] = {
+    "english": "en",
+    "en": "en",
+    "chinese": "zh",
+    "mandarin": "zh",
+    "traditional chinese": "zh",
+    "simplified chinese": "zh",
+    "zh": "zh",
+    "zh-tw": "zh",
+    "zh-cn": "zh",
+    "japanese": "ja",
+    "ja": "ja",
+    "korean": "ko",
+    "ko": "ko",
+    "german": "de",
+    "de": "de",
+    "french": "fr",
+    "fr": "fr",
+    "spanish": "es",
+    "es": "es",
+    "italian": "it",
+    "it": "it",
+    "portuguese": "pt",
+    "brazilian portuguese": "pt",
+    "pt": "pt",
+    "russian": "ru",
+    "ru": "ru",
+    "hindi": "hi",
+    "hi": "hi",
+    "arabic": "ar",
+    "ar": "ar",
+    "dutch": "nl",
+    "polish": "pl",
+    "turkish": "tr",
+    "greek": "el",
+    "hebrew": "he",
+    "danish": "da",
+    "finnish": "fi",
+    "norwegian": "no",
+    "swedish": "sv",
+    "malay": "ms",
+    "swahili": "sw",
 }
 
+#: The two shipped reference clips, resolved to real paths at call time. A voice NAME rather than a
+#: path is what reaches `config` and the settings page, deliberately: a path arriving through the
+#: unauthenticated settings file (invariant 25/41) would be a brand-new arbitrary-file-read surface,
+#: which invariant 26 spent a whole slice closing on the ingestion side. An operator can still point
+#: at their own clip, but only through the ENVIRONMENT, never through the settings file.
+_VOICE_DIR = Path(__file__).parent / "voices"
+_SHIPPED_VOICES: dict[str, str] = {"host-a": "host_a.wav", "host-b": "host_b.wav"}
 
-class KokoroProvider:
-    """A fully LOCAL provider: no network, no API key, no third-party terms of service.
+#: Chatterbox's own single built-in voice. Usable, but it is ONE voice — naming both hosts this
+#: turns a two-host episode into a monologue in two halves.
+BUILTIN_VOICE = "built-in"
 
-    Exists because `edge-tts`, the default, reaches an undocumented Microsoft consumer endpoint with
-    a hardcoded client token — it works and needs no credentials (invariant 15), but it is network-
-    dependent and operates in the same grey area every Edge-Read-Aloud client does. This is the
-    offline answer.
 
-    **Chosen after two wrong recommendations, and only once it had been RUN on the target machine.**
-    NeuTTS has no CJK at all, which is the language the whole output-language work exists for.
-    Qwen3-TTS was recommended from a blog summary claiming CPU inference; the repository documents
-    `device_map="cuda:0"` and never mentions CPU, so it would not run on the Apple Silicon machine
-    this project is developed on. Kokoro was verified by installing it and synthesizing Mandarin
-    before a line of this class was written: 17.4s one-time pipeline load, then 4.4s for 8.9s of
-    audio on CPU.
+def shipped_voice_path(name: str) -> Path | None:
+    """Resolve a voice NAME to a shipped reference clip, or `None` for the built-in voice.
 
-    **Writes WAV, not MP3, and that is why `suffix`/`media_type` live on the provider.** Kokoro
-    emits raw 24kHz samples; converting to MP3 would need the `ffmpeg`/`pydub` dependency invariant
-    17 deliberately refused for a purely cosmetic gain. A browser plays WAV natively, so nothing
-    downstream needs an encoder.
+    An absolute path is passed through unchanged (the environment-only override above); anything
+    else that is not a known name raises, because a typo silently falling back to the built-in voice
+    would give both hosts the same voice and nothing would say why.
+    """
+    if name == BUILTIN_VOICE:
+        return None
+    if name in _SHIPPED_VOICES:
+        return _VOICE_DIR / _SHIPPED_VOICES[name]
+    candidate = Path(name)
+    if candidate.is_absolute() and candidate.is_file():
+        return candidate
+    raise TTSError(
+        f"unknown chatterbox voice {name!r}; shipped voices: {sorted(_SHIPPED_VOICES)} "
+        f"or {BUILTIN_VOICE!r}, or an absolute path to a reference .wav"
+    )
 
-    Optional dependency (`uv sync --extra kokoro`), imported lazily so a default install never pays
-    for torch — 87 packages, measured, not estimated. Weights download on first use.
+
+#: Roughly how many characters of each script a speaker gets through per second. Only used to bound
+#: a runaway (below), never to report timing — the real offsets come from the samples.
+#:
+#: CALIBRATED against real Chatterbox output, not guessed: four measured utterances (Traditional
+#: Chinese with and without embedded Latin, English, Japanese) land within a few percent of these
+#: rates, and `tests/test_tts.py` pins them so a later edit cannot quietly detune the guard. The
+#: first draft used 15 for Latin, which under-estimated a real English line by a third and would
+#: have made the runaway ceiling tighter than a correct take.
+_CHARS_PER_SECOND_CJK = 5.1
+_CHARS_PER_SECOND_LATIN = 10.0
+
+
+def _is_cjk(ch: str) -> bool:
+    """Whether `ch` should be counted at the CJK rate.
+
+    Covers Hiragana/Katakana/Bopomofo/CJK Ext-A/Unified (U+3040-9FFF), Hangul syllables and Jamo,
+    AND the CJK punctuation and fullwidth forms an independent audit found silently excluded —
+    `。、「」，！？` are ubiquitous in exactly these languages and were being counted at the Latin
+    rate. Widening improved the estimate against all four calibration utterances rather than
+    degrading it, which is why it was taken rather than merely disclosed.
+    """
+    code = ord(ch)
+    return (
+        0x3040 <= code <= 0x9FFF  # kana, Bopomofo, CJK Ext-A, CJK Unified
+        or 0xAC00 <= code <= 0xD7AF  # Hangul syllables
+        or 0x1100 <= code <= 0x11FF  # Hangul Jamo
+        or 0x3000 <= code <= 0x303F  # CJK punctuation
+        or 0xFF00 <= code <= 0xFFEF  # fullwidth forms
+    )
+
+
+def expected_seconds(text: str) -> float:
+    """A rough spoken duration for `text`, used ONLY as the ceiling a runaway is measured against.
+
+    Deliberately crude and deliberately generous: CJK characters carry far more time each than Latin
+    ones, so the two are counted separately, and the result is a floor of one second so a very short
+    line cannot produce a near-zero ceiling.
+    """
+    cjk = sum(1 for ch in text if _is_cjk(ch))
+    other = len(text) - cjk
+    return max(1.0, cjk / _CHARS_PER_SECOND_CJK + other / _CHARS_PER_SECOND_LATIN)
+
+
+class ChatterboxProvider:
+    """`RN_TTS_PROVIDER=chatterbox` — a fully local, multilingual provider (the `chatterbox` extra).
+
+    **Replaces `KokoroProvider`, and the reason is the language matrix, not audio quality.** Kokoro's
+    Chinese G2P passes Latin text through UNCONVERTED (its "phonemes" for `NASA` are the literal
+    string `NASA`), it has no Korean at all, and its own model card grades every Chinese voice D on
+    10-100 minutes of data. MeloTTS was measured as the replacement first and rejected: its Japanese
+    module DELETES embedded Latin, its Korean needs `python-mecab-ko` which destructively overwrites
+    the `MeCab` module its Japanese needs, and its `transformers==4.27.4` pin would roll this
+    project's ML stack back two years. Chatterbox is the only local engine measured here that covers
+    English, Chinese (both scripts), Japanese and Korean AND handles a foreign word inside a
+    sentence — which it gets for free by having no G2P stage to fail at.
+
+    **Three costs, all measured on Apple Silicon rather than assumed, and none of them hidden:**
+
+    1. It is ~20x slower than Kokoro (RTF ~4.5 against ~0.2). Measured end to end through the real
+       product: a 3.4-minute episode took 16.1 minutes of wall clock, 15.0 of them synthesis, where
+       Kokoro took about forty seconds. `/audio` was already the slowest action in the product, and
+       only its script half is cancellable (invariant 29).
+    2. Its output LENGTH is unstable. The identical Traditional Chinese sentence produced 34.80s,
+       5.48s and 11.68s across three runs, against an expected ~7s; the 34.8s take held 25.1s of
+       actual speech, i.e. the autoregressive decoder looping, not trailing silence. `_generate_one`
+       below retries against `expected_seconds`, which is the whole reason that function exists.
+    3. It ships ONE built-in voice, so two distinguishable hosts need reference clips. See
+       `rlm_notebook/voices/README.md` for where the two shipped clips come from and why.
     """
 
     suffix = ".wav"
     media_type = "audio/wav"
 
-    #: Kokoro's native sample rate.
-    _SAMPLE_RATE = 24_000
-
-    #: A short silence between utterances. `EdgeTTSProvider` can't do this without re-encoding
-    #: (invariant 17), but here we hold raw samples, so it is free — and back-to-back turns with no
-    #: gap at all is a large part of why a concatenated two-host script sounds unnatural.
+    #: A short silence between utterances, same as Kokoro had it: free here because we hold raw
+    #: samples, and back-to-back turns with no gap sound unnatural in a two-host script.
     _GAP_SECONDS = 0.35
 
+    #: A take longer than this multiple of `expected_seconds` is treated as a runaway and retried.
+    #: Set from the measured failure: the reproduced loop was 5x its expected length, so 2x catches
+    #: it with room to spare while leaving natural variation alone. **Stated limitation**: a
+    #: MODERATE overshoot is not caught — one of the three reproduction runs came back 1.7x
+    #: expected, which is a padded reading rather than a loop, and tightening the factor far enough
+    #: to catch it would start rejecting correct takes at the cost of a whole slow regeneration.
+    _RUNAWAY_FACTOR = 2.0
+
+    #: How many times to re-roll a runaway before giving up and keeping the SHORTEST take.
+    #: **The undisclosed cost, stated**: three attempts is up to 3x the synthesis time on the ONE
+    #: phase invariant 29 says is uncancellable — a 15-minute episode could become 45. Only a
+    #: runaway pays it (a good first take costs exactly one generation, pinned by a test), and the
+    #: measured live episode needed 16 loops for 16 utterances, i.e. none.
+    _MAX_ATTEMPTS = 3
+
     def default_voices(self, language: str | None) -> tuple[str, str] | None:
-        entry = self._entry(language)
-        return (entry[1], entry[2]) if entry else None
+        # No per-language cast exists: one pair of cloned voices speaks every language, which is the
+        # point of a cross-lingual model. Returning `None` lets an explicitly configured voice stand
+        # (invariant 40) and hands the default to `fallback_voices` below.
+        return None
 
     def fallback_voices(self) -> tuple[str, str]:
-        # Kokoro's own English cast. Invariant 43 said the language MAP had to move onto the
-        # provider so one provider's names could not leak into the other's request; an independent
-        # audit found the LAST RESORT had not moved with it, so an unknown language on kokoro still
-        # fell through to `config`'s shipped `en-US-GuyNeural` — an edge-tts name handed to
-        # `KPipeline`, failing at synthesis after a real model call had already been spent (exactly
-        # the waste invariant 19 exists to prevent). Ids from `_KOKORO_VOICES`, i.e. from a working
-        # synthesis, never written from memory.
-        return (_KOKORO_VOICES["english"][1], _KOKORO_VOICES["english"][2])
+        return ("host-a", "host-b")
 
-    @staticmethod
-    def _entry(language: str | None) -> tuple[str, str, str] | None:
-        if not language:
-            return None
-        key = " ".join(language.lower().split())
-        return _KOKORO_VOICES.get(key) or _KOKORO_VOICES.get(key.split("-")[0])
+    def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
+        # Both of these used to raise inside `synthesize`, i.e. after a full script-generation run.
+        # A language with no id here (Thai and Vietnamese are in edge-tts's map but not in
+        # `_CHATTERBOX_LANGUAGES`) could never succeed, so every attempt burned a model call; and a
+        # stale edge-tts voice left in the settings file after switching providers cost a model load
+        # before failing. Found by an independent review against invariant 19's own discipline.
+        self._language_id(language)
+        for voice in voice_map.values():
+            shipped_voice_path(voice)
 
     def synthesize(
-        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+        self,
+        script: PodcastScript,
+        voice_map: dict[str, str],
+        out_path: Path,
+        language: str | None = None,
     ) -> list[float]:
         try:
             import numpy as np
             import soundfile as sf
-            from kokoro import KPipeline
+            import torch
+
+            # Imported for its side effect: fail HERE, with an actionable message, rather than
+            # several seconds later inside `_model_factory`.
+            importlib.import_module("chatterbox.mtl_tts")
         except ImportError as exc:  # pragma: no cover — exercised only with the extra absent
             raise TTSError(
-                "the 'kokoro' provider needs the optional extra: uv sync --extra kokoro"
+                "the 'chatterbox' provider needs the optional extra: uv sync --extra chatterbox"
             ) from exc
 
-        # The lang_code is a property of the VOICE, and both hosts speak the same language here, so
-        # it is derived from host_a's voice rather than passed separately.
-        lang_code = next(
-            (entry[0] for entry in _KOKORO_VOICES.values() if entry[1] == voice_map.get("host_a")),
-            "a",
-        )
+        language_id = self._language_id(language)
+        device = "mps" if torch.backends.mps.is_available() else "cpu"
         try:
-            pipeline = KPipeline(lang_code=lang_code)
+            model = self._model_factory(device)
+            sample_rate = model.sr
+
+            # Each speaker's conditioning is prepared ONCE and swapped, never re-prepared per
+            # utterance: `prepare_conditionals` mutates the model in place and runs the voice
+            # encoder over the whole clip, so doing it on every speaker change would pay that cost
+            # once per line of the script.
+            #
+            # The BUILT-IN voice has to be captured FIRST, because it exists only as `model.conds`
+            # and the first `prepare_conditionals` overwrites it. An independent review reproduced
+            # what happens without this: a mixed map (one host `built-in`, the other a clip) left
+            # the built-in speaker with "no conditioning to assign", so it inherited whichever clip
+            # was prepared last and BOTH hosts came out in one voice — the exact monologue-in-two-
+            # halves the shipped clips exist to prevent, failing silently after ~15 minutes of
+            # synthesis. Every speaker gets a real conditioning object and the assignment below is
+            # unconditional.
+            builtin = model.conds
+            conds = {}
+            for speaker, voice in voice_map.items():
+                path = shipped_voice_path(voice)
+                if path is None:
+                    conds[speaker] = builtin
+                    continue
+                model.prepare_conditionals(str(path))
+                conds[speaker] = model.conds
+
             per_utterance = []
             for utterance in script.utterances:
-                voice = voice_map.get(utterance.speaker)
-                if not voice:
+                if utterance.speaker not in voice_map:
                     raise TTSError(f"no voice configured for speaker {utterance.speaker!r}")
-                parts = [
-                    audio.numpy() if hasattr(audio, "numpy") else audio
-                    for _, _, audio in pipeline(utterance.text, voice=voice)
-                ]
+                model.conds = conds[utterance.speaker]
                 per_utterance.append(
-                    np.concatenate(parts) if parts else np.zeros(0, dtype="float32")
+                    self._generate_one(model, utterance.text, language_id, sample_rate, np)
                 )
+
             if not any(len(part) for part in per_utterance):
-                raise TTSError("kokoro produced no audio for this script")
-            gap = np.zeros(int(self._GAP_SECONDS * self._SAMPLE_RATE), dtype="float32")
+                raise TTSError("chatterbox produced no audio for this script")
+            gap = np.zeros(int(self._GAP_SECONDS * sample_rate), dtype="float32")
             offsets = sequence_offsets(
-                [len(part) for part in per_utterance], len(gap), self._SAMPLE_RATE
+                [len(part) for part in per_utterance], len(gap), sample_rate
             )
             chunks = []
             for index, part in enumerate(per_utterance):
                 if index:
                     chunks.append(gap)
                 chunks.append(part)
-            sf.write(out_path, np.concatenate(chunks), self._SAMPLE_RATE)
+            sf.write(out_path, np.concatenate(chunks), sample_rate)
             return offsets
         except TTSError:
             raise
         except Exception as exc:
-            raise TTSError(f"kokoro synthesis failed: {exc}") from exc
+            raise TTSError(f"chatterbox synthesis failed: {type(exc).__name__}: {exc}") from exc
+
+    def _generate_one(self, model, text: str, language_id: str, sample_rate: int, np):
+        """One utterance, re-rolled if the decoder runs away.
+
+        Not defensive programming for a hypothetical: reproduced live, the same Traditional Chinese
+        sentence came back at 34.80s / 5.48s / 11.68s across three runs against an expected ~7s, and
+        the long take was looping speech rather than silence. A run that never converges keeps the
+        SHORTEST take rather than raising — a slightly clipped line is a far better outcome for a
+        paid-for episode than losing the whole thing (the same "never lose what already succeeded"
+        rule invariants 19 and 37 apply to a failed TTS call and a failed title).
+        """
+        ceiling = expected_seconds(text) * self._RUNAWAY_FACTOR
+        takes = []
+        for _ in range(self._MAX_ATTEMPTS):
+            wav = model.generate(text, language_id=language_id)
+            audio = wav.detach().cpu().numpy().reshape(-1).astype("float32")
+            takes.append(audio)
+            if len(audio) / sample_rate <= ceiling:
+                return audio
+        return min(takes, key=len)
+
+    @staticmethod
+    def _model_factory(device: str):
+        from chatterbox.mtl_tts import ChatterboxMultilingualTTS
+
+        return ChatterboxMultilingualTTS.from_pretrained(device=device)
+
+    @staticmethod
+    def _language_id(language: str | None) -> str:
+        if not language:
+            return "en"
+        key = " ".join(language.lower().split())
+        found = _CHATTERBOX_LANGUAGES.get(key) or _CHATTERBOX_LANGUAGES.get(key.split("-")[0])
+        if not found:
+            raise TTSError(
+                f"chatterbox has no language id for {language!r}; known: "
+                f"{sorted(set(_CHATTERBOX_LANGUAGES.values()))}"
+            )
+        return found
 
 
 _PROVIDERS: dict[str, Callable[[], TTSProvider]] = {
     "edge-tts": EdgeTTSProvider,
-    "kokoro": KokoroProvider,
+    "chatterbox": ChatterboxProvider,
 }
 
 
