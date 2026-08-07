@@ -601,3 +601,84 @@ def test_the_same_visible_name_in_nfc_and_nfd_is_one_notebook():
         nfc, nfd = unicodedata.normalize("NFC", name), unicodedata.normalize("NFD", name)
         if slug(nfc).startswith("nb-") or slug(nfd).startswith("nb-"):
             assert slug(nfc) == slug(nfd), name
+
+
+def test_a_new_source_never_reuses_a_removed_sources_id():
+    """Reproduced before `next_source_id` existed, and it is invariant 12's exact failure: source
+    ids were `s{len(sources) + 1}`, which is safe only while sources are append-only. Delete `s2`
+    from `s1,s2,s3` and append, and the new source is numbered `s3` — TWO live sources under one
+    id, with a stored citation for `s3` resolving to whichever one `Corpus.get` reaches first.
+
+    Same shape as the note-id collision invariant 32 documents, one field over.
+    """
+    from rlm_notebook.notebook import append_sources, next_source_id, remove_source
+    from rlm_notebook.schema import Notebook, Source, SourceBlock
+
+    def src(index: int, text: str) -> Source:
+        return Source(
+            id=f"s{index}",
+            kind="text",
+            origin=f"origin-{index}",
+            blocks=[SourceBlock(locator="whole", text=text)],
+        )
+
+    notebook = Notebook(id="x", sources=[src(1, "one"), src(2, "two"), src(3, "three")])
+    remove_source(notebook, "s2")
+    assert [s.id for s in notebook.sources] == ["s1", "s3"]
+
+    assert next_source_id(notebook) == "s4"  # NOT s3, which is still alive
+    append_sources(notebook, [src(99, "brand new")])
+    ids = [s.id for s in notebook.sources]
+    assert len(ids) == len(set(ids)), ids
+    # ...and the surviving source still resolves to its OWN text.
+    assert next(s for s in notebook.sources if s.id == "s3").blocks[0].text == "three"
+
+    # Removing something that is not there RAISES, exactly like `delete_note`. Not symmetry:
+    # `mutate_notebook` writes the file unless the delta raises, so a returned `False` meant a
+    # 404-ing DELETE still did a full save and bumped the mtime the picker now sorts by.
+    with pytest.raises(ValueError, match="no source 's99'"):
+        remove_source(notebook, "s99")
+    # Remaining ids are never renumbered by a removal (invariant 12).
+    assert [s.id for s in notebook.sources] == ["s1", "s3", "s4"]
+
+
+
+def test_promoting_a_note_never_reuses_a_removed_sources_id():
+    """The SECOND append site, and the one an independent review found still numbering by length
+    after `append_sources` had been fixed. It matters more than the first: promotion is the ONLY
+    path that makes a note citable (invariant 32), and the duplicate id made a citation naming the
+    promoted note verify TRUE against a DIFFERENT source's text — invariant 5's coordinate
+    guarantee broken silently.
+
+    NOTE on what is asserted: the review's phrasing was that the citation "verifies TRUE against a
+    different source's text". It does — but so would ANY quote, because `verify_citations` checks
+    coordinate existence and never the quote (invariant 5). The harm the collision actually does is
+    that the promoted note becomes UNADDRESSABLE: two blocks answer to `s3`, `Corpus.get` returns
+    the older one, and no citation can ever reach the note that promotion existed to make citable.
+    """
+    from rlm_notebook.corpus import Corpus
+    from rlm_notebook.notebook import add_note, promote_note, remove_source
+    from rlm_notebook.schema import Notebook, Source, SourceBlock
+
+    notebook = Notebook(
+        id="x",
+        sources=[
+            Source(id=f"s{i}", kind="text", origin=f"o{i}",
+                   blocks=[SourceBlock(locator="whole", text=text)])
+            for i, text in ((1, "ONE"), (2, "TWO"), (3, "THREE"))
+        ],
+    )
+    remove_source(notebook, "s2")
+    add_note(notebook, "promoted note text")
+    promoted = promote_note(notebook, "n1")
+
+    ids = [s.id for s in notebook.sources]
+    assert ids == ["s1", "s3", "s4"], ids
+    assert promoted is not None and promoted.id == "s4"
+
+    corpus = Corpus(notebook.sources)
+    blob = corpus.blob()
+    assert blob.count("[[SRC:s3|") == 1  # not twice
+    # The decisive pair: the survivor still means itself, and the promoted note is reachable at all.
+    assert corpus.get("s3").blocks[0].text == "THREE"
+    assert "promoted note text" in corpus.get("s4").blocks[0].text

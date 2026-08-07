@@ -78,7 +78,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import runner
 from .audio import GeneratePodcastScript
-from .citations import verify_citations
+from .citations import locate_answer_spans, verify_citations
 from .config import (
     NotebookConfig,
     max_trace_files,
@@ -92,7 +92,7 @@ from .config import (
 from .corpus import CorpusTooLargeError
 from .guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
 from .ingest import ingest_pasted_text, ingest_uploaded_file, is_url, with_injection_flags
-from .naming import SuggestLanguage, SuggestTitle, fallback_title
+from .naming import SuggestLanguage, SuggestTitle, fallback_title, normalize_title
 from .notebook import (
     add_note,
     append_sources,
@@ -104,12 +104,14 @@ from .notebook import (
     find_audio,
     history_text,
     ingest_sources_for,
+    last_modified,
     list_notebook_summaries,
     load_notebook,
     load_or_create,
     mutate_notebook,
     notebook_path,
     promote_note,
+    remove_source,
     slug,
 )
 from .parsers.web import FetchError
@@ -315,9 +317,24 @@ class CitationResponse(BaseModel):
     quote: str
     verified: bool
     reason: str | None = None
+    #: The stretch of the accompanying prose this citation supports, already confirmed to occur in
+    #: it verbatim (`citations.locate_answer_spans`). `None` when the model gave none or gave one
+    #: that could not be located — the UI then shows the citation as a reference without a
+    #: highlight, which is the honest outcome.
+    answer_span: str | None = None
 
 
-def _citation_responses(citations: list[Citation], corpus) -> list[CitationResponse]:
+def _citation_responses(citations: list[Citation], corpus, prose: str) -> list[CitationResponse]:
+    """`prose` is the text the citations accompany, and it is REQUIRED — every caller must pass the
+    exact string its own artifact renders. The span is checked against it, so one that does not
+    occur in it is dropped rather than mis-highlighted.
+
+    It has no default, deliberately. It used to default to `""` and skip validation entirely when
+    empty, which returned the model's RAW, unchecked span — a fail-OPEN default under a docstring
+    promising the opposite, found by an independent audit. An empty `prose` now simply locates
+    nothing, which is the honest answer for an artifact with no text.
+    """
+    located = locate_answer_spans(citations, prose)
     return [
         CitationResponse(
             source_id=v.citation.source_id,
@@ -325,16 +342,28 @@ def _citation_responses(citations: list[Citation], corpus) -> list[CitationRespo
             quote=v.citation.quote,
             verified=v.verified,
             reason=v.reason,
+            answer_span=v.citation.answer_span,
         )
-        for v in verify_citations(citations, corpus)
+        for v in verify_citations(located, corpus)
     ]
 
 
 class NotebookSummary(BaseModel):
     id: str
+    #: The model-authored title, when one exists. NOT unique — a user hit three notebooks with
+    #: near-identical generated names and asked whether they can collide. They can, which is why
+    #: `updated_at` is here too: with the id no longer shown anywhere (invariant 37), "which one did
+    #: I touch last" is the only thing left to tell two same-named notebooks apart.
     title: str | None = None
+    #: A label derived from the notebook's own origins when there is no title — `naming.
+    #: fallback_title`, the SAME function the generate path falls back to, and it costs no model
+    #: call. Titling is lazy now (it fires from the actions that already run a model, never from
+    #: adding a source), so a notebook someone has only put sources into would otherwise sit in the
+    #: picker as "Untitled notebook" forever.
+    derived_title: str
     source_count: int
     turn_count: int
+    updated_at: float = 0.0
 
 
 class NotebookListResponse(BaseModel):
@@ -384,6 +413,55 @@ async def get_settings() -> dict:
     return settings_state()
 
 
+class SettingsChoices(BaseModel):
+    """What the settings page is allowed to OFFER, for the provider that is actually configured."""
+
+    output_languages: list[str]
+    voices: list[str]
+    provider: str
+
+
+@app.get("/settings/choices", response_model=SettingsChoices)
+async def settings_choices() -> SettingsChoices:
+    """The valid values for the settings page's dropdowns.
+
+    Served rather than hardcoded in the browser, because the answer is provider-specific — edge-tts
+    has hundreds of locale voice ids, chatterbox has three shipped names — and a second copy in JS
+    would drift from `tts._LANGUAGE_VOICES` the first time either changed. This project has already
+    paid for a duplicated list once (invariant 15 collapsed the known-provider list to one place for
+    exactly this reason).
+
+    Deliberately does NOT call `_config()`: like `GET /settings` itself (invariant 41), this must
+    work on a server with no model configured — a settings page is what an operator opens WHEN the
+    server is misconfigured. The provider NAME is read straight from the environment with the same
+    default `NotebookConfig` would apply, and an unknown one yields an empty voice list rather than
+    raising, so the page still renders and the language row still works.
+    """
+    from .tts import _LANGUAGE_VOICES, _PROVIDERS, _SHIPPED_VOICES, BUILTIN_VOICE
+
+    provider = (os.getenv("RN_TTS_PROVIDER") or "edge-tts").strip() or "edge-tts"
+    known = _PROVIDERS.get(provider)
+
+    # Asked of the PROVIDER, never read off edge-tts's voice map: the two sets genuinely differ, and
+    # an independent review found the page offering Thai/Vietnamese/Indonesian to a chatterbox
+    # deployment that cannot speak any of them while hiding the eleven it can. Both maps also carry
+    # BCP-47 aliases (`en`, `zh-tw`) so a hand-set env var resolves — those are for MATCHING, and a
+    # dropdown offering both "English" and "En" reads as a bug. An UNKNOWN provider falls back to
+    # the DEFAULT provider's set rather than to nothing: `output_language` is global — it drives chat
+    # and every guide artifact — so a server whose podcast cannot run at all must still be able to
+    # set the language its prose comes out in.
+    spoken = (known or _PROVIDERS["edge-tts"])().supported_languages()
+    languages = sorted({key.title() for key in spoken if "-" not in key and len(key) > 3})
+
+    if provider == "chatterbox":
+        voices = sorted(_SHIPPED_VOICES) + [BUILTIN_VOICE]
+    elif known:
+        voices = sorted({voice for pair in _LANGUAGE_VOICES.values() for voice in pair})
+    else:
+        voices = []
+    return SettingsChoices(output_languages=languages, voices=voices, provider=provider)
+
+
 @app.put("/settings")
 async def put_settings(body: SettingsRequest) -> dict:
     """Replace the settings-page state. Validated at the boundary, refusing rather than coercing.
@@ -422,8 +500,14 @@ async def list_notebooks() -> NotebookListResponse:
     notebooks, unreadable = list_notebook_summaries()
     return NotebookListResponse(
         notebooks=[
-            NotebookSummary(id=nb.id,
-            title=nb.title, source_count=len(nb.sources), turn_count=len(nb.turns))
+            NotebookSummary(
+                id=nb.id,
+                title=nb.title,
+                derived_title=nb.title or fallback_title([s.origin for s in nb.sources]),
+                source_count=len(nb.sources),
+                turn_count=len(nb.turns),
+                updated_at=last_modified(nb.id),
+            )
             for nb in notebooks
         ],
         unreadable=unreadable,
@@ -482,6 +566,10 @@ class NotebookResponse(BaseModel):
     #: of a filename-safety transform is exactly the drift this project factors out.
     slug: str
     title: str | None = None
+    #: The same origin-derived label `NotebookSummary` carries, so the HEADER and the PICKER ROW
+    #: fall back to the same name. They did not: one said "Untitled notebook" while the other showed
+    #: the derived label for that same notebook, which reads as two different notebooks.
+    derived_title: str = ""
     overview: OverviewResponse | None = None
     podcast: PodcastResponse | None = None
     sources: list[dict]
@@ -502,15 +590,26 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
         id=notebook.id,
         slug=slug(notebook.id),
         title=notebook.title,
+        derived_title=notebook.title
+        or fallback_title([s.origin for s in notebook.sources]),
         sources=[
-            {"id": s.id, "kind": s.kind, "origin": s.origin, "flags": s.flags}
+            {
+                "id": s.id,
+                "kind": s.kind,
+                "origin": s.origin,
+                "flags": s.flags,
+                # Display-only, never citable: the corpus blob is built from `blocks` alone, so a
+                # page controlling its own `<meta>` tags can influence what a row LOOKS like and
+                # nothing else — the same trust level `origin` already carries.
+                "preview": s.preview,
+            }
             for s in notebook.sources
         ],
         turns=[
             ChatTurnResponse(
                 question=t.question,
                 answer=t.answer.text,
-                citations=_citation_responses(t.answer.citations, corpus),
+                citations=_citation_responses(t.answer.citations, corpus, t.answer.text),
                 run_id=t.run_id,
             )
             for t in notebook.turns
@@ -532,7 +631,7 @@ def _podcast_response(notebook: Notebook, corpus) -> PodcastResponse | None:
     return PodcastResponse(
         utterances=[
             AudioUtteranceResponse(
-                speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus)
+                speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus, u.text)
             )
             for u in podcast.utterances
         ],
@@ -550,15 +649,15 @@ def _overview_response(notebook: Notebook, corpus) -> OverviewResponse | None:
 
     `stale` is set-equality on the source ids, not a timestamp: it answers "was this computed from
     what is in the notebook now" exactly, survives a restart, and needs no clock. Nothing in this
-    project ever REMOVES a source, so today set-equality, list-equality and a length check are
-    equivalent — the set is kept because a future removal path would then break it in the safe
+    project USED to never remove a source, so set-equality, list-equality and a length check were all
+    equivalent — the set was kept because a future removal path would then break it in the safe
     direction (marks stale) rather than the unsafe one."""
     overview = notebook.overview
     if overview is None:
         return None
     return OverviewResponse(
         text=overview.text,
-        citations=_citation_responses(overview.citations, corpus),
+        citations=_citation_responses(overview.citations, corpus, overview.text),
         starter_questions=overview.starter_questions,
         run_id=overview.run_id,
         stale=set(overview.source_ids) != {s.id for s in notebook.sources},
@@ -661,6 +760,30 @@ async def delete_note_endpoint(notebook_id: str, note_id: str) -> NotebookRespon
             notebook_id, lambda nb: delete_note(nb, note_id), create=False
         )
     except ValueError as exc:  # no such note — including one a concurrent request just deleted
+        raise HTTPException(404, str(exc)) from exc
+    return _notebook_response(notebook)
+
+
+@app.delete("/notebooks/{notebook_id}/sources/{source_id}", response_model=NotebookResponse)
+async def delete_source_endpoint(notebook_id: str, source_id: str) -> NotebookResponse:
+    """Remove one source. Same shape as deleting a note: existing notebook only (`create=False`).
+
+    **The remaining sources KEEP their ids — nothing is renumbered.** That is invariant 12, and it
+    is what makes removal safe to offer: a citation in a saved turn that pointed at the removed
+    source comes back UNVERIFIED with a reason (`citations.py` re-verifies against the current
+    corpus on every read, invariants 5 and 11) rather than silently resolving to a different
+    source's text. `notebook.next_source_id` is the other half — see its docstring for the id
+    collision that length-based numbering produced the moment a source could disappear.
+
+    Persisted artifacts computed from the old corpus (the overview, a podcast) are marked STALE by
+    the set-equality comparison invariant 38 already does, so removing a source flags them for
+    regeneration rather than leaving them silently wrong.
+    """
+    try:
+        notebook = await _mutate_or_http(
+            notebook_id, lambda nb: remove_source(nb, source_id), create=False
+        )
+    except ValueError as exc:  # no such source — including one a concurrent request just removed
         raise HTTPException(404, str(exc)) from exc
     return _notebook_response(notebook)
 
@@ -1077,7 +1200,45 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
     # against sources it never saw would be a different (and weaker) claim. Invariant 11's
     # "re-verified fresh against the current sources" governs reading a turn BACK (`get_notebook`),
     # and is unaffected.
-    return AskResponse(text=answer.text, citations=_citation_responses(answer.citations, corpus))
+    return AskResponse(
+        text=answer.text,
+        citations=_citation_responses(answer.citations, corpus, answer.text),
+    )
+
+
+class RenameRequest(BaseModel):
+    """A user-chosen notebook title. `extra="forbid"` for the same reason `SettingsRequest` has it
+    (invariant 41): pydantic's default DROPS unknown keys, so a typo'd field would silently rename
+    a notebook to nothing."""
+
+    model_config = {"extra": "forbid"}
+
+    title: str
+
+
+@app.put("/notebooks/{notebook_id}/title", response_model=NotebookResponse)
+async def rename_notebook(notebook_id: str, body: RenameRequest) -> NotebookResponse:
+    """Rename a notebook to whatever the user typed. No model involved.
+
+    Separate VERB, not a flag on the POST: generating a title is a model run that can fail, take
+    seconds and be superseded; setting one is an instant write that always succeeds. Folding them
+    into one endpoint would make the failure semantics of "rename" inherit the failure semantics of
+    a model call, for no reason.
+
+    Runs `normalize_title` — the SAME normalisation the generated path uses (invariant 37), because
+    a user-supplied title lands in exactly the same places (the header, the picker, an mp3 download
+    filename) and this API has no authentication (invariant 25), so "a person typed it" is not a
+    provenance claim it can rely on. It REFUSES an unusable value rather than falling back to a
+    derived one, which is the one way the two paths differ: substituting a title for what someone
+    typed would be the UI lying about what it did.
+    """
+    title = normalize_title(body.title)
+    if not title:
+        raise HTTPException(422, "title is empty after normalisation")
+    notebook = await _mutate_or_http(
+        notebook_id, lambda nb: setattr(nb, "title", title), create=False
+    )
+    return _notebook_response(notebook)
 
 
 @app.post("/notebooks/{notebook_id}/title", response_model=NotebookResponse)
@@ -1088,8 +1249,10 @@ async def suggest_title(
 
     Separate from `add_sources` on purpose: ingestion must stay fast and must not fail because a
     model is unreachable or unconfigured, and the client wants to render the source list the moment
-    it lands rather than after a round trip to an LM. The UI fires this afterwards and fills the
-    title in when it arrives.
+    it lands rather than after a round trip to an LM. The UI calls this LAZILY — from the actions that
+    already run a model, never from adding a source, which a user called too aggressive (invariant
+    37). A notebook can therefore have sources and no title; `NotebookSummary.derived_title` is what
+    keeps it from reading as "Untitled" in the picker.
 
     Runs in the same isolated subprocess every other model call uses (invariant 21) — `worker.py`
     only ever calls `.arun(**kwargs)`, which `naming.SuggestTitle` satisfies without being an
@@ -1111,8 +1274,9 @@ async def suggest_title(
     try:
         excerpt = corpus_of(notebook).blob(max_chars=None)[:8000]
         # The title follows the notebook's resolved language too. Consequence to accept: the UI
-        # fires `/title` right after the FIRST source, before any question exists, so resolution
-        # runs with two of its three signals and serialises two cheap calls into that path.
+        # calls this from an action that is about to run a model anyway (invariant 37), so if no
+        # question has been asked yet, resolution runs with two of its three signals and serialises
+        # two cheap calls into that path.
         #
         # Announced like every other run-taking endpoint. Today's UI never opens a ticker on the
         # title run, but this endpoint accepts `run_id` exactly like the others, so a client CAN —
@@ -1247,14 +1411,17 @@ async def guide(
     parsed = output_model.model_validate(result)
 
     if kind in ("summary", "insight"):
-        return {"text": parsed.text, "citations": _citation_responses(parsed.citations, corpus)}
+        return {
+            "text": parsed.text,
+            "citations": _citation_responses(parsed.citations, corpus, parsed.text),
+        }
     if kind == "faq":
         return {
             "items": [
                 {
                     "question": item.question,
                     "answer": item.answer,
-                    "citations": _citation_responses(item.citations, corpus),
+                    "citations": _citation_responses(item.citations, corpus, item.answer),
                 }
                 for item in parsed.items
             ]
@@ -1265,7 +1432,7 @@ async def guide(
             {
                 "when": event.when,
                 "description": event.description,
-                "citations": _citation_responses(event.citations, corpus),
+                "citations": _citation_responses(event.citations, corpus, event.description),
             }
             for event in parsed.events
         ]
@@ -1357,7 +1524,7 @@ async def audio(
 
     utterances = [
         AudioUtteranceResponse(
-            speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus)
+            speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus, u.text)
         )
         for u in script.utterances
     ]
@@ -1482,25 +1649,115 @@ async def cancel_run(notebook_id: str, run_id: str) -> dict:
     return {"cancelled": run_id, "run_id": run_id}
 
 
+def _human_size(n: int) -> str:
+    if n < 1024:
+        return f"{n} B"
+    if n < 1024 * 1024:
+        return f"{n / 1024:.1f} KB"
+    return f"{n / (1024 * 1024):.1f} MB"
+
+
+#: How much of the model's own reasoning one event carries. Enough to be a sentence worth reading,
+#: bounded because this goes down an SSE stream once per step and a REPL turn's reasoning can run
+#: long. The full text stays in the trace file, which the citation-turn lookup already reads.
+_DETAIL_CHARS = 400
+
+
 def _translate_trace_event(event: dict) -> dict:
     """Raw `trace/v1` event -> a small, stable, product-facing shape for the web UI's live ticker.
     Kept in ONE function, the same discipline the sibling studios' own `mapper.to_event` already
     uses, so the raw-to-product translation lives in one place rather than being duplicated at
-    every call site. Deliberately terse — the frontend owns presentation, this just names what
-    kind of thing happened."""
+    every call site.
+
+    **The shape is `{kind, primary, detail, meta}`, matching what `cve-reverser`/`diff-sentry`'s
+    feeds carry** — a headline, the one specific for that event, and a compact fact — because an
+    earlier version emitted only a fixed sentence per type ("reasoning about the next step") and
+    threw the payload away. A user pointed at the siblings and asked why ours said so much less;
+    the answer was that it was discarding `reasoning`, `turn`, `code` and `output` on every step.
+
+    `summary` is kept as the concatenation of the first two, so any consumer written against the
+    older shape keeps working.
+
+    **Exposure**: `detail` is the model's own prose, and a REPL step's reasoning can quote ingested
+    source text. That is the same category invariant 29 already records for this stream — it is why
+    the trace endpoints are called out as a materially different exposure than the rest of this
+    no-auth API. Deliberately NOT included: the step's `output`, which is where whole corpus spans
+    actually land; its SIZE is reported instead, which is the part that tells a reader whether a
+    step did much.
+    """
     etype = event.get("type")
-    payload = event.get("payload") or {}
+    payload = event.get("payload")
+    payload = payload if isinstance(payload, dict) else {}
     step = event.get("step_id")
+
+    def shape(kind: str, primary: str, detail: str | None = None, meta: str | None = None) -> dict:
+        clipped = None
+        if detail:
+            flat = " ".join(str(detail).split())
+            clipped = flat[:_DETAIL_CHARS] + ("\u2026" if len(flat) > _DETAIL_CHARS else "")
+        return {
+            "step": step,
+            "kind": kind,
+            "primary": primary,
+            "detail": clipped,
+            "meta": meta,
+            # Backward compatible with the one-line shape this used to emit.
+            "summary": f"{primary} \u00b7 {clipped}" if clipped else primary,
+        }
+
+    if etype == "run_start":
+        task = ((payload.get("meta") or {}).get("task") or "").rsplit(":", 1)[-1]
+        return shape("start", "Starting", None, task or None)
     if etype == "main_step":
-        return {"step": step, "kind": "thinking", "summary": "reasoning about the next step"}
+        turn = payload.get("turn")
+        output = payload.get("output") or ""
+        code = " ".join(str(payload.get("code") or "").split())
+        return shape(
+            "thinking",
+            f"Step {turn + 1}" if isinstance(turn, int) else "Step",
+            payload.get("reasoning") or code or None,
+            _human_size(len(output)) + " read" if output else None,
+        )
     if etype == "tool_call":
-        return {"step": step, "kind": "tool", "summary": f"calling {payload.get('tool', 'a tool')}"}
+        return shape("tool", "Tool", payload.get("tool") or None, payload.get("status") or None)
     if etype == "sub_call":
-        return {"step": step, "kind": "escalation", "summary": "consulting a sub-model"}
+        return shape(
+            "escalation",
+            "Sub-model",
+            payload.get("name") or payload.get("model") or None,
+            payload.get("attempt") and f"attempt {payload['attempt']}" or None,
+        )
+    if etype == "final":
+        return shape("thinking", "Finalising", payload.get("final_reasoning") or None)
+    if etype == "result":
+        output = payload.get("output")
+        # `sorted()` over a dict with mixed key types raises, and a raise here aborts the SSE
+        # connection rather than emitting an error event — so the keys are stringified first.
+        fields = ", ".join(sorted(map(str, output))) if isinstance(output, dict) else None
+        return shape("thinking", "Result", fields, None)
     if etype == "run_end":
         ok = payload.get("ok")
-        return {"step": step, "kind": "done", "summary": "finished" if ok else "finished with an error"}
-    return {"step": step, "kind": "other", "summary": etype or "event"}
+        return shape(
+            "done" if ok else "failed",
+            "Finished" if ok else "Failed",
+            payload.get("error") or None,
+        )
+    return shape("other", str(etype or "event"))
+
+
+def _orphaned_run_event() -> dict:
+    """The terminal event synthesized for a run whose recorder never reached `__exit__`. Built in
+    the SAME shape `_translate_trace_event` emits — two hand-written copies had drifted back to the
+    older two-key form, which is exactly the duplication that function's "one place" docstring
+    exists to prevent."""
+    return {
+        "step": None,
+        "kind": "failed",
+        "primary": "Failed",
+        "detail": "run ended without a final event",
+        "meta": None,
+        "summary": "run ended without a final event",
+    }
 
 
 async def _tail_trace_events(run_id: str):
@@ -1562,11 +1819,11 @@ async def _tail_trace_events(run_id: str):
                 # Synthesize a terminal event so the stream reaches "done" instead of hanging,
                 # the same fix `ctx-distillery-studio` already documents for the identical
                 # failure mode (a hard-killed run whose recorder never reached `__exit__`).
-                yield {"step": None, "kind": "done", "summary": "run ended without a final event"}
+                yield _orphaned_run_event()
                 return
             process = _RUN_PROCESSES[run_id]
             if process is not None and process.returncode is not None:
-                yield {"step": None, "kind": "done", "summary": "run ended without a final event"}
+                yield _orphaned_run_event()
                 return
             await asyncio.sleep(_TRACE_POLL_INTERVAL)
 

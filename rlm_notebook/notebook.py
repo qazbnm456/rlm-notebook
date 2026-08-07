@@ -318,6 +318,43 @@ def ingest_sources_for(notebook: Notebook, new_values: list[str]) -> list[Source
     )
 
 
+def next_source_id(notebook: Notebook) -> str:
+    """The next free `s<n>`, derived from the MAX id in use — never from `len(sources) + 1`.
+
+    Length-based numbering is safe only while sources are append-only, which stopped being true the
+    moment a source could be REMOVED. Reproduced before this existed: delete `s2` from `s1,s2,s3`
+    and append, and the new source is numbered `s3` — TWO live sources under one id, with `s3`
+    resolving to whichever `Corpus.get` reaches first. A stored citation pointing at `s3` then reads
+    the wrong text, which is precisely what invariant 12 forbids, and it is the same bug
+    `_next_note_id` was written for (invariant 32) one field over.
+    """
+    used = [int(s.id[1:]) for s in notebook.sources if s.id.startswith("s") and s.id[1:].isdigit()]
+    return f"s{max(used, default=0) + 1}"
+
+
+def remove_source(notebook: Notebook, source_id: str) -> None:
+    """Drop one source IN PLACE. RAISES `ValueError` if no such source exists — exactly what
+    `delete_note` does, and not merely for symmetry: `mutate_notebook` writes the file unless the
+    delta raises, so returning `False` on a miss meant an unauthenticated
+    `DELETE .../sources/s99` did a full `save_notebook` and only then 404'd. Harmless in content,
+    but it bumps the file's mtime — which invariant 53 made the picker's sort key, so a miss
+    reordered the list. Found by an independent audit.
+
+    Removes exactly the FIRST match by index rather than filtering every id-equal entry — defence in
+    depth on top of `next_source_id`, the same pairing `delete_note` already has.
+
+    **A citation in a saved turn that pointed at this source becomes UNVERIFIED, not wrong.**
+    `citations.py` re-verifies every citation against the current corpus on every read (invariants 5
+    and 11), so a removed source's citations lose their ✓ and say why. That is the correct outcome
+    and the reason removal is safe to offer at all: nothing silently re-points.
+    """
+    for index, source in enumerate(notebook.sources):
+        if source.id == source_id:
+            del notebook.sources[index]
+            return
+    raise ValueError(f"no source {source_id!r} in this notebook")
+
+
 def append_sources(notebook: Notebook, sources: list[Source]) -> list[Source]:
     """Append already-ingested, already-injection-scanned `sources` to `notebook.sources` IN PLACE,
     deduped by origin and RENUMBERED against THIS notebook. Returns just what was actually appended
@@ -331,6 +368,9 @@ def append_sources(notebook: Notebook, sources: list[Source]) -> list[Source]:
     an id a SAVED notebook already uses): `Source.marker()` derives the citation marker from `.id`
     at `Corpus.blob()` time, so no id is ever baked into stored block text. Callers that hand the
     result to a model must use the RETURNED objects, not the ones they passed in.
+
+    Ids come from `next_source_id` (max in use), NOT from `len(sources) + 1` — see its docstring for
+    the collision that made the difference matter.
     """
     seen = existing_origins(notebook)
     appended: list[Source] = []
@@ -338,7 +378,7 @@ def append_sources(notebook: Notebook, sources: list[Source]) -> list[Source]:
         if source.origin in seen:
             continue
         seen.add(source.origin)
-        renumbered = source.model_copy(update={"id": f"s{len(notebook.sources) + 1}"})
+        renumbered = source.model_copy(update={"id": next_source_id(notebook)})
         notebook.sources.append(renumbered)
         appended.append(renumbered)
     return appended
@@ -361,12 +401,34 @@ def list_notebook_summaries(
         return [], []
     notebooks: list[Notebook] = []
     unreadable: list[str] = []
+    stamps: dict[int, float] = {}
     for path in sorted(base.glob("*.json")):
         try:
-            notebooks.append(Notebook.model_validate_json(path.read_text(encoding="utf-8")))
+            notebook = Notebook.model_validate_json(path.read_text(encoding="utf-8"))
         except ValidationError:
             unreadable.append(path.stem)
+            continue
+        # The file's mtime, carried out-of-band rather than added to the model: it is a property of
+        # the FILE, not of the notebook, and putting it in the schema would mean writing a timestamp
+        # nobody reads on every mutation. The picker needs it because model-authored titles are not
+        # unique — a user hit three notebooks called variations of one topic and asked, reasonably,
+        # whether names can collide. They can, so "which did I touch last" has to be answerable.
+        stamps[id(notebook)] = path.stat().st_mtime
+        notebooks.append(notebook)
+    notebooks.sort(key=lambda nb: stamps.get(id(nb), 0.0), reverse=True)
+    for notebook in notebooks:
+        _MTIMES[notebook.id] = stamps.get(id(notebook), 0.0)
     return notebooks, unreadable
+
+
+#: Last-modified time per notebook id, populated by `list_notebook_summaries`. A module-level cache
+#: rather than a schema field for the reason in that function; read only by the listing endpoint,
+#: which always repopulates it first.
+_MTIMES: dict[str, float] = {}
+
+
+def last_modified(notebook_id: str) -> float:
+    return _MTIMES.get(notebook_id, 0.0)
 
 
 def history_text(notebook: Notebook) -> str:
@@ -439,12 +501,21 @@ def promote_note(notebook: Notebook, note_id: str) -> Source | None:
     and appends nothing new; otherwise appends the new (injection-scanned) `Source` and returns it.
     Raises `ValueError` if `note_id` doesn't exist, same as `delete_note`. Pops exactly the FIRST
     matching note by index (same defense-in-depth reasoning as `delete_note`), not every id-equal
-    match."""
+    match.
+
+    **Ids come from `next_source_id`, and this is the SECOND append site — missing it left the
+    collision invariant 50 claims to have fixed fully alive on the one path invariant 32 says makes
+    a note citable at all.** It appends to `notebook.sources` directly rather than through
+    `append_sources`, so moving that function onto `next_source_id` did not cover it. Reproduced by
+    an independent review over real HTTP: delete `s2` from `s1,s2,s3`, promote a note, and the new
+    source is `s3` — a duplicate. `Corpus.blob()` then emits `[[SRC:s3|whole]]` twice, `Corpus.get`
+    returns the OLDER source, and a citation naming the promoted note verifies TRUE against a
+    different source's text. That is invariant 5's coordinate guarantee broken silently."""
     index = next((i for i, n in enumerate(notebook.notes) if n.id == note_id), None)
     if index is None:
         raise ValueError(f"no note {note_id!r} in this notebook")
     note = notebook.notes.pop(index)
-    candidate = ingest_pasted_text(note.text, source_id=f"s{len(notebook.sources) + 1}")
+    candidate = ingest_pasted_text(note.text, source_id=next_source_id(notebook))
     if candidate.origin in existing_origins(notebook):
         return None
     source = with_injection_flags(candidate)

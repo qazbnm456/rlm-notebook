@@ -39,6 +39,12 @@ class Source(BaseModel):
     #: Deterministic prompt-injection heuristic flags from `injection_scan.py` (CLAUDE.md invariant
     #: 6) — additive metadata, never a gate. Empty means "not flagged", not "verified clean".
     flags: list[str] = Field(default_factory=list)
+    #: DISPLAY-ONLY metadata scraped from the page that was already fetched (a title, a description,
+    #: a site name). Never reaches a prompt and is never citable — the corpus blob is built from
+    #: `blocks` alone — so a page controlling its own `<meta>` tags can influence only what a Sources
+    #: row LOOKS like, which is the same trust level `origin` already has. Optional and defaulting
+    #: to empty, so notebooks written before this field existed still load.
+    preview: dict[str, str] = Field(default_factory=dict)
 
     def marker(self, locator: str) -> str:
         """The literal `[[SRC:<id>|<locator>]]` marker text for one of this source's blocks."""
@@ -62,6 +68,21 @@ class Citation(BaseModel):
     source_id: str
     locator: str
     quote: str
+    #: The stretch of the model's OWN prose that this citation supports, copied verbatim from it.
+    #:
+    #: This is what lets the UI draw its signature interaction — a citation as a highlighter stroke
+    #: through the sentence it backs (`web/DESIGN.md` §2) — and it exists because that interaction
+    #: BROKE. The stroke used to be located by finding `quote` inside the answer, which works only
+    #: while both are in the same language; since invariant 39 the prose follows the READER and the
+    #: quote stays in the SOURCE's language, so the two never share a substring and no span could
+    #: ever be found. A user reported the strokes had simply disappeared.
+    #:
+    #: Optional and defaulting to `None`, so every citation persisted before this field existed
+    #: still loads — the same backward-compatible precedent `ChatTurn.run_id` and `Notebook.notes`
+    #: set. `citations.py` checks it really occurs in the prose and drops it if not, which is the
+    #: same coordinate-existence discipline invariant 5 already describes: a claim that cannot be
+    #: located is discarded rather than trusted, and the citation itself survives either way.
+    answer_span: str | None = None
 
 
 class Answer(BaseModel):

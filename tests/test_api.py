@@ -1155,21 +1155,47 @@ def _write_trace(run_id: str, events: list[dict]) -> None:
             fh.write(json.dumps(full) + "\n")
 
 
-def test_translate_trace_event_covers_the_known_event_types():
-    assert api._translate_trace_event({"type": "main_step", "step_id": 0, "payload": {}})["kind"] == "thinking"
-    assert (
-        api._translate_trace_event({"type": "tool_call", "step_id": 1, "payload": {"tool": "read"}})["kind"]
-        == "tool"
+def test_translate_trace_event_carries_a_headline_a_specific_and_a_fact():
+    """The `{kind, primary, detail, meta}` shape `cve-reverser`/`diff-sentry`'s feeds use. An earlier
+    version emitted one fixed sentence per event type and threw the payload away — a user pointed at
+    those siblings and asked why ours said so much less, and the answer was that it was discarding
+    `reasoning`, `turn` and `output` on every single step."""
+    step = api._translate_trace_event(
+        {
+            "type": "main_step",
+            "step_id": 1,
+            "payload": {"turn": 0, "reasoning": "Reading s1 before answering", "output": "x" * 2048},
+        }
     )
+    assert step["kind"] == "thinking"
+    assert step["primary"] == "Step 1"  # 1-based: `turn` is 0-based and nobody reads "Step 0"
+    assert step["detail"] == "Reading s1 before answering"
+    assert step["meta"] == "2.0 KB read"
+
+    tool = api._translate_trace_event({"type": "tool_call", "step_id": 1, "payload": {"tool": "read"}})
+    assert (tool["kind"], tool["detail"]) == ("tool", "read")
     assert api._translate_trace_event({"type": "sub_call", "step_id": 2, "payload": {}})["kind"] == "escalation"
-    assert (
-        api._translate_trace_event({"type": "run_end", "step_id": 3, "payload": {"ok": True}})["summary"]
-        == "finished"
+
+    # A failed run is its own kind, so the UI can end the stream AND say which way it ended.
+    assert api._translate_trace_event({"type": "run_end", "step_id": 3, "payload": {"ok": True}})["kind"] == "done"
+    assert api._translate_trace_event({"type": "run_end", "step_id": 4, "payload": {"ok": False}})["kind"] == "failed"
+
+    # `summary` survives for any consumer written against the older one-line shape.
+    assert step["summary"].startswith("Step 1 ")
+
+    # The step's OUTPUT is never streamed, only its size: that is where whole corpus spans land,
+    # and this stream is already a materially different exposure (invariant 29).
+    assert "x" * 100 not in json.dumps(step)
+
+
+def test_a_long_reasoning_is_clipped_before_it_reaches_the_stream():
+    """One event per step, down an SSE connection: a REPL turn's reasoning can run to thousands of
+    characters and the full text is in the trace file the citation lookup already reads."""
+    event = api._translate_trace_event(
+        {"type": "main_step", "step_id": 1, "payload": {"turn": 0, "reasoning": "word " * 500}}
     )
-    assert (
-        api._translate_trace_event({"type": "run_end", "step_id": 4, "payload": {"ok": False}})["summary"]
-        == "finished with an error"
-    )
+    assert len(event["detail"]) <= api._DETAIL_CHARS + 1
+    assert event["detail"].endswith("\u2026")
 
 
 def test_stream_run_replays_a_finished_trace_without_waiting(client, monkeypatch):
@@ -1187,7 +1213,9 @@ def test_stream_run_replays_a_finished_trace_without_waiting(client, monkeypatch
     assert resp.status_code == 200
     body = resp.text
     assert body.count("data: ") == 3
-    assert '"kind": "done"' in body or '"kind":"done"' in body.replace(" ", "")
+    # A terminal kind, not specifically the happy one — a crash with no `run_end` is a FAILURE, and
+    # calling it "done" told a reader the run had completed normally.
+    assert '"failed"' in body or '"done"' in body
 
 
 def test_stream_run_reports_not_found_when_run_id_does_not_belong_to_the_notebook(client):
@@ -1253,7 +1281,7 @@ def test_stream_run_keeps_waiting_for_an_announced_run_whose_trace_does_not_exis
     events = asyncio.run(_go())
 
     assert not any(e.get("kind") == "not_found" for e in events), events
-    assert events[-1]["kind"] == "done"
+    assert events[-1]["kind"] in {"done", "failed"}
 
 
 def test_overview_announces_its_runs_before_the_language_call(client, monkeypatch, tmp_path):
@@ -1383,7 +1411,9 @@ def test_stream_run_synthesizes_a_terminal_event_for_a_dead_process_with_no_run_
     resp = client.get("/notebooks/mynb/runs/mynb-killed/stream")
 
     assert resp.status_code == 200
-    assert "done" in resp.text
+    # A crash with no `run_end` is a FAILURE. It used to be reported as "done", which told a reader
+    # the run had completed normally.
+    assert "failed" in resp.text
 
 
 def test_citation_turn_finds_the_first_event_containing_the_marker(client):
@@ -2097,3 +2127,227 @@ def test_a_finishing_run_never_clears_a_LATER_runs_active_entry(client, monkeypa
     # And both are cleaned up once they have each finished.
     assert "mynb" not in api._ACTIVE_RUNS
     assert not [k for k in api._RUN_PROCESSES if k.startswith("mynb-")]
+
+
+# --- Removing a source, renaming a notebook, and what the picker shows ---------------------------
+
+
+def test_deleting_a_source_never_renumbers_the_survivors(client):
+    """CLAUDE.md invariant 12: an existing source's id is never reassigned. This is the property
+    that makes removal safe to offer at all — a citation in a saved turn either still resolves to
+    the text it was written against, or fails verification loudly."""
+    for url in ("https://example.com/a", "https://example.com/b", "https://example.com/c"):
+        client.post("/notebooks/mynb/sources", json={"sources": [url]})
+    assert [s["id"] for s in client.get("/notebooks/mynb").json()["sources"]] == ["s1", "s2", "s3"]
+
+    resp = client.delete("/notebooks/mynb/sources/s2")
+    assert resp.status_code == 200
+    assert [s["id"] for s in resp.json()["sources"]] == ["s1", "s3"]
+
+    # And the NEXT source must not land on `s3` — the collision `next_source_id` exists to prevent.
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/d"]})
+    ids = [s["id"] for s in client.get("/notebooks/mynb").json()["sources"]]
+    assert ids == ["s1", "s3", "s4"]
+    assert len(ids) == len(set(ids))
+
+
+def test_deleting_a_source_leaves_its_citations_unverified_rather_than_repointed(client):
+    """The honest outcome, and the reason nothing needs renumbering: `citations.py` re-verifies
+    every stored citation against the CURRENT corpus on every read (invariants 5 and 11)."""
+    for url in ("https://example.com/a", "https://example.com/b"):
+        client.post("/notebooks/mynb/sources", json={"sources": [url]})
+    from rlm_notebook.notebook import mutate_notebook
+    from rlm_notebook.schema import Answer, ChatTurn, Citation
+
+    mutate_notebook(
+        "mynb",
+        lambda nb: nb.turns.append(
+            ChatTurn(
+                question="q",
+                answer=Answer(
+                    text="An answer.",
+                    citations=[
+                        Citation(
+                            source_id="s2",
+                            locator="whole",
+                            quote="content of https://example.com/b",
+                        )
+                    ],
+                ),
+            )
+        ),
+    )
+
+    assert client.get("/notebooks/mynb").json()["turns"][0]["citations"][0]["verified"] is True
+    client.delete("/notebooks/mynb/sources/s2")
+    citation = client.get("/notebooks/mynb").json()["turns"][0]["citations"][0]
+    assert citation["verified"] is False
+    assert citation["source_id"] == "s2"  # still says where it pointed, not repointed at s1
+    assert citation["reason"]
+
+
+def test_deleting_a_source_404s_for_an_unknown_id(client):
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert client.delete("/notebooks/mynb/sources/s99").status_code == 404
+    assert client.delete("/notebooks/nope/sources/s1").status_code == 404
+
+
+def test_renaming_normalises_the_same_way_a_generated_title_does(client):
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    resp = client.put("/notebooks/mynb/title", json={"title": '  "Voyager   notes."  '})
+    assert resp.status_code == 200
+    assert resp.json()["title"] == "Voyager notes"
+    assert load_notebook("mynb").title == "Voyager notes"
+
+
+def test_renaming_refuses_an_empty_title_instead_of_deriving_one(client):
+    """The one way rename differs from generation: substituting a derived label for what someone
+    typed would be the UI lying about what it did."""
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert client.put("/notebooks/mynb/title", json={"title": "   "}).status_code == 422
+    assert client.put("/notebooks/mynb/title", json={"title": "x" * 500}).status_code == 422
+    assert load_notebook("mynb").title is None
+
+
+def test_renaming_rejects_an_unknown_field_rather_than_dropping_it(client):
+    """`extra="forbid"`, for the reason invariant 41 records: pydantic's default DROPS unknown keys,
+    so a typo'd field would arrive as a rename to nothing."""
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert client.put("/notebooks/mynb/title", json={"titel": "oops"}).status_code == 422
+    assert client.put("/notebooks/nope/title", json={"title": "x"}).status_code == 404
+
+
+def test_the_picker_falls_back_to_the_same_derived_label_in_both_places(client):
+    """The header reads `NotebookResponse.derived_title` and the picker row reads
+    `NotebookSummary.derived_title`. They used to disagree — one said "Untitled notebook" while the
+    other showed a derived label for the same notebook, which reads as two different notebooks."""
+    client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/voyager"]})
+    from_get = client.get("/notebooks/mynb").json()
+    from_list = next(n for n in client.get("/notebooks").json()["notebooks"] if n["id"] == "mynb")
+
+    assert from_get["title"] is None and from_list["title"] is None
+    assert from_get["derived_title"] == from_list["derived_title"] != ""
+
+
+def test_the_picker_lists_the_most_recently_touched_notebook_first(client):
+    """Model-authored titles are NOT unique — a user hit three notebooks with near-identical
+    generated names — so "which did I touch last" has to be answerable."""
+    for name in ("first", "second", "third"):
+        client.post(f"/notebooks/{name}/sources", json={"sources": [f"https://example.com/{name}"]})
+        time.sleep(0.01)  # mtime resolution
+    assert [n["id"] for n in client.get("/notebooks").json()["notebooks"]] == [
+        "third",
+        "second",
+        "first",
+    ]
+
+    client.post("/notebooks/first/notes", json={"text": "touched"})
+    listed = client.get("/notebooks").json()["notebooks"]
+    assert listed[0]["id"] == "first"
+    assert listed[0]["updated_at"] > listed[-1]["updated_at"]
+
+
+def test_settings_choices_works_on_a_server_with_no_model_configured(client, monkeypatch):
+    """Invariant 41's reason, one endpoint further: a settings page is what an operator opens WHEN
+    the server is misconfigured, so nothing on it may go through `_config()`."""
+    monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
+    monkeypatch.delenv("RN_TTS_PROVIDER", raising=False)
+
+    resp = client.get("/settings/choices")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["provider"] == "edge-tts"
+    assert "English" in body["output_languages"]
+    # Menu entries only — the map's BCP-47 aliases (`en`, `zh-tw`) exist for matching a hand-set
+    # env var, and a dropdown offering both "English" and "En" reads as a bug.
+    assert not any(len(name) <= 3 or "-" in name for name in body["output_languages"])
+    assert all(voice.endswith("Neural") for voice in body["voices"])
+
+
+def test_settings_choices_offers_the_configured_providers_own_voice_names(client, monkeypatch):
+    """A voice NAME is provider-specific (invariant 43), so offering edge-tts ids to a chatterbox
+    deployment would name voices that fail at synthesis — after a real model call was spent."""
+    monkeypatch.setenv("RN_TTS_PROVIDER", "chatterbox")
+    body = client.get("/settings/choices").json()
+    assert body["provider"] == "chatterbox"
+    assert not any(voice.endswith("Neural") for voice in body["voices"])
+
+    # Chatterbox speaks a DIFFERENT set, not a subset: it has no id for Thai or Vietnamese, and does
+    # speak eleven the voice map has no entry for. Reading the menu off the voice map offered the
+    # first group and hid the second — and picking one persists a GLOBAL `output_language` that then
+    # makes every /audio request fail at `validate`.
+    monkeypatch.setenv("RN_TTS_PROVIDER", "edge-tts")
+    edge_languages = set(client.get("/settings/choices").json()["output_languages"])
+    assert "Thai" in edge_languages and "Danish" not in edge_languages
+    assert "Thai" not in set(body["output_languages"])
+    assert "Danish" in set(body["output_languages"])
+
+    monkeypatch.setenv("RN_TTS_PROVIDER", "not-a-real-provider")
+    unknown = client.get("/settings/choices").json()
+    assert unknown["voices"] == []  # renders, rather than raising
+    # The language row still works: `output_language` drives chat and every guide artifact, so a
+    # server whose podcast cannot run at all must still be able to set the language of its prose.
+    assert unknown["output_languages"] == sorted(edge_languages)
+
+
+# --- `answer_span`: the wiring, not just the function ------------------------------------------
+
+
+def test_an_answer_span_survives_the_ask_endpoint_and_a_bogus_one_does_not(client, monkeypatch):
+    """`citations.locate_answer_spans` is well covered on its own; the WIRING was not. An
+    independent review removed the `prose` argument from all eight `_citation_responses` call sites
+    — completely disabling the highlighter strokes — and the whole suite stayed green, which is
+    exactly the drift this project uses tripwires for (invariants 28, 39)."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        {
+            "text": "Voyager left the heliosphere in 2012. It still transmits.",
+            "citations": [
+                {
+                    "source_id": "s1",
+                    "locator": "whole",
+                    "quote": "content of https://example.com/a",
+                    "answer_span": "Voyager left the heliosphere in 2012.",
+                },
+                {
+                    "source_id": "s1",
+                    "locator": "whole",
+                    "quote": "content of https://example.com/a",
+                    "answer_span": "a sentence the model never actually wrote",
+                },
+            ],
+        },
+    )
+
+    citations = client.post("/notebooks/mynb/ask", json={"question": "q"}).json()["citations"]
+    assert citations[0]["answer_span"] == "Voyager left the heliosphere in 2012."
+    assert citations[1]["answer_span"] is None  # dropped, but the citation itself survives
+    assert citations[1]["verified"] is True
+
+    # And it survives the round trip, checked against the SAME text on read.
+    reread = client.get("/notebooks/mynb").json()["turns"][0]["citations"]
+    assert reread[0]["answer_span"] == "Voyager left the heliosphere in 2012."
+    assert reread[1]["answer_span"] is None
+
+
+def test_every_citation_response_is_checked_against_its_own_artifacts_text():
+    """A source-tree assertion, because passing the WRONG text is invisible at runtime: the spans
+    simply stop being found and the page renders with no strokes. `prose` is a required parameter
+    now (an omitted one used to skip validation and return the model's RAW span — a fail-OPEN
+    default under a docstring promising the opposite), so a MISSING argument is a TypeError; this
+    covers the other half, that each call site passes something artifact-specific rather than a
+    parent object's text."""
+    import inspect
+    import re as _re
+
+    source = inspect.getsource(api)
+    calls = _re.findall(r"_citation_responses\(([^)]*)\)", source)
+    calls = [c for c in calls if "def _citation_responses" not in c]
+    assert len(calls) >= 8, f"call sites went missing, so this would pass vacuously: {calls}"
+
+    for call in calls:
+        args = [a.strip() for a in call.split(",")]
+        assert len(args) == 3, f"_citation_responses({call}) does not pass the prose it checks against"
+        assert args[2] not in ("", '""', "None"), call

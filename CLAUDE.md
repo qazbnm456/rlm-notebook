@@ -138,6 +138,23 @@ them exist because an earlier design discussion mentioned them.
    run. Its patterns trade recall for precision on purpose (e.g. a paper *discussing* prompt
    injection as a topic can trip it) — that is an acceptable false-positive rate for a flag nobody
    is forced to act on; don't over-tighten it into false negatives chasing a clean read.
+
+   **A flag is a SENTENCE addressed to a person, never a regex.** It used to be
+   `instruction-like phrase matching '\bsystem\s*:\s*'` — a user asked what that meant, which is a
+   fair question, because it names an implementation detail and says nothing about what to do. Since
+   these flags gate nothing, whether a human can act on them is their entire value, so
+   `_INSTRUCTION_PATTERNS` pairs every pattern with its description. That same pattern was ALSO
+   measured firing on ordinary prose ("The operating system: a set of layers", "The Voyager system:
+   two probes"); it is anchored to a role label opening its own LINE now
+   (`^\s*(system|assistant|user)\s*:\s*`, MULTILINE). The precision-over-recall trade above is
+   deliberate; that one had neither.
+
+   **Both changes apply to sources ingested FROM NOW ON only.** `scan_source` runs once, in
+   `ingest.with_injection_flags`, and the result is persisted into `Source.flags`; nothing ever
+   re-scans. So on a notebook that already exists the raw-regex message is still on screen and the
+   false positives are still flagged. There is no migration, deliberately — rewriting flags on read
+   would mean re-scanning every source on every `GET`, and rewriting them on load would silently
+   edit stored notebooks.
 7. **OCR ships enabled by default, not merely pluggable-but-off.** `parsers/pdf.py` extracts each
    page's text via `pypdfium2`; a page whose text layer extracts to (near-)nothing is rendered to
    an image and dispatched to `parsers/_ocr.py`'s hybrid OCR (RapidOCR primary, Tesseract fallback
@@ -384,7 +401,11 @@ them exist because an earlier design discussion mentioned them.
     the list of places it currently applies**: any standalone config reader a handler calls needs
     the same treatment, and that list has to be re-derived rather than trusted.
 25. **This API has NO authentication or authorization of any kind.** Any caller can create,
-    extend, query, `ask`/`guide` against, or cancel a run for ANY `notebook_id` — there is no
+    extend, query, `ask`/`guide` against, cancel a run for, RENAME, or irreversibly DELETE A SOURCE
+    FROM any `notebook_id`. The last two are new and the deletion is the sharper one: a source may
+    have been a one-time paste or upload with no origin to re-fetch, so this is the first endpoint
+    here that can destroy ingested data rather than merely expose it. It also mutates GLOBAL state
+    through `PUT /settings` (invariant 41) — there is no
     concept of an owner. It is meant for local or otherwise fully-trusted-network use only (the
     same posture ctx-distillery's studio takes for its own reasons); do not expose it to an
     untrusted network without adding auth first, which this slice does not attempt. Both `api.py`'s
@@ -999,8 +1020,16 @@ them exist because an earlier design discussion mentioned them.
 
     **Titling is a separate endpoint (`POST /notebooks/{id}/title`), never folded into
     `add_sources`.** Ingestion must not wait on — or fail because of — a model call, and the client
-    should render the source list the moment it lands. The UI fires this afterwards, on the FIRST
-    source only, and fills the title in when it arrives. **Nothing about a title may cost the user
+    should render the source list the moment it lands.
+
+    **The UI no longer fires it from adding a source at all — it is LAZY.** A user called the
+    original behaviour too aggressive: pasting a link spent a model call on naming something they
+    had not started working on yet. `app.js`'s `ensureTitle()` is called from the actions that
+    ALREADY run a model (generating an overview, asking, opening a Studio tab, generating a
+    podcast), never from ingestion, and pinned by
+    `test_web_assets.py::test_titling_never_fires_from_adding_a_source`. The consequence is that a
+    notebook can have sources and no title for as long as its owner only adds sources, which is why
+    `derived_title` exists (invariant 53). **Nothing about a title may cost the user
     their source**: `SuggestTitle.arun` catches every exception and `suggest_title` catches the
     `HTTPException` a failed/timed-out run raises, both falling back to `naming.fallback_title` (a
     deterministic label derived from the origins — a pasted source's readable snippet, or a URL's
@@ -1043,8 +1072,10 @@ them exist because an earlier design discussion mentioned them.
     `source_ids` and would be re-implemented in every future consumer. An independent audit
     corrected the original "one definition, in `_notebook_response`": it is one small comparison
     each in `_podcast_response` and `_overview_response`, and none in `_notebook_response` itself; nothing in this
-    project removes a source, so set/list/length checks are equivalent today, and the set is kept
-    because a future removal path would then break it in the SAFE direction.
+    project removed a source WHEN THIS WAS WRITTEN, so set/list/length checks were equivalent and the
+    set was kept because a future removal path would then break it in the SAFE direction. That path
+    exists now (invariant 50), and the foresight paid: removing a source marks the overview and the
+    podcast stale, with no change to this comparison.
 
     **`/overview` suffixes its two run ids AFTER derivation** — `base = _derive_run_id(id, token)`
     then `f"{base}-summary"`/`f"{base}-faq"`, with `token = body.run_id or uuid4().hex` capped at
@@ -1609,7 +1640,10 @@ them exist because an earlier design discussion mentioned them.
     was), and Studio/Podcast/Notes each carry ONE visible sentence, with per-control detail in
     `title=` hovers rather than more permanent prose — the treatment `toolscout`/`cve-reverser`
     already use. Notes says what a note is *for*, since neither the section nor the `+ Save as note`
-    button explained that promotion is what makes a note citable.
+    button explained that promotion is what makes a note citable. **Those hovers are `data-tip`
+    now, not the native `title=`** — this project's own tooltip is instant and styled, while the
+    native one's ~1 second delay is what made the help feel disconnected from the hover effect it
+    was supposed to accompany.
 
     `tests/test_web_assets.py` pins all of it as source-tree assertions, since this project still
     has no JS test runner (invariant 29): no tab-click path to `fetchKind`, four `runStatus` mounts,
@@ -1623,8 +1657,10 @@ them exist because an earlier design discussion mentioned them.
     page carries both, on separate rows, saying which is which. A test pins the separation.
 
     **`STRINGS.en` is EMPTY on purpose.** English is whatever `index.html` and `app.js` already say:
-    static markup carries `data-i18n` / `-title` / `-placeholder` and keeps its own text as the
-    fallback, and every `t(key, fallback)` call passes its English at the call site. There is
+    static markup carries `data-i18n` / `-title` / `-placeholder` / `-tip` and keeps its own text
+    as the fallback (`-tip` drives this project's own tooltip rather than the native `title`, and
+    the key tripwire had to be widened to see it — seven keys were unchecked until an independent
+    review noticed), and every `t(key, fallback)` call passes its English at the call site. There is
     therefore no English table to drift out of sync with a translation nobody updated — and a
     tripwire fails the build on a bare `t("key")`, which would render the KEY to an English reader.
     A second tripwire fails on a key used but not translated, because a typo is otherwise invisible:
@@ -1638,5 +1674,187 @@ them exist because an earlier design discussion mentioned them.
     renderer.** `setUiLang` re-applies the static markup and dispatches `ui-lang-changed`; the boot
     handler re-runs the panel renders. A renderer added later is translated by construction instead
     of by somebody remembering to subscribe.
+
+49. **`Citation.answer_span` is the model pointing at its OWN prose, and it exists because locating
+    the highlight by `quote` stopped being possible.** The UI's signature interaction — a citation
+    drawn as a highlighter stroke through the sentence it backs — used to find its span with
+    `answer.indexOf(citation.quote)`. That works only while the answer and the source share a
+    language. Invariant 39 made the prose follow the READER while the quote stays in the SOURCE's
+    words, so the two never share a substring and NO span could ever be found again; a user
+    reported the strokes had simply disappeared. This is not a bug in either invariant — it is what
+    39 costs, paid here rather than by weakening the verbatim-quote rule.
+
+    **`citations.locate_answer_spans` applies invariant 5's coordinate-existence discipline to the
+    model's own text.** A span that does not occur VERBATIM in the prose is dropped; the citation
+    survives. Losing a highlight costs a reader one affordance, highlighting the wrong sentence
+    tells them a claim is supported when it is not. Matching is EXACT with one allowance — leading
+    and trailing whitespace — and deliberately no case folding, no punctuation normalisation and no
+    fuzzy match: each of those buys a few more highlights at the price of sometimes underlining
+    prose the citation does not support. It verifies WHERE, never WHETHER, exactly as invariant 5
+    already states for the corpus side.
+
+    **`_citation_responses` takes the prose it must check against as a REQUIRED argument, and every
+    call site passes the string that artifact actually renders** — a chat answer, an FAQ item's
+    `answer`, a timeline event's `description`, a podcast utterance's `text`, the overview's `text`.
+    It had a `""` default that SKIPPED validation when empty, returning the model's raw unchecked
+    span: a fail-OPEN default under a docstring promising the opposite, found by an independent
+    audit and now simply not expressible. Passing the WRONG text (a parent object's) is still silent
+    — the spans stop being found and the page renders with no strokes — which is what
+    `test_every_citation_response_is_checked_against_its_own_artifacts_text` pins, after that same
+    audit removed the argument from all eight call sites and watched the whole suite stay green.
+
+    `instructions.CITATION_RULES` teaches it as the deliberate MIRROR of `quote`: `quote` is in the
+    source's language, `answer_span` is in the model's. (NOT `VERBATIM_COORDINATES`, which an
+    earlier draft of this invariant named — that constant does not mention `answer_span` at all, and
+    naming the wrong one is exactly the drift invariant 13 exists to prevent.) Same residual-risk
+    hedge as invariants 4 and 11 — the offline suite drives a scripted LM and can demonstrate none
+    of this.
+
+50. **A source can be REMOVED now, which ended append-only id numbering — and the survivors are
+    never renumbered.** `append_sources` derived ids from `len(notebook.sources) + 1`, correct only
+    while sources were append-only. Reproduced live the moment removal existed: delete `s2` from
+    `s1,s2,s3`, append, and the new source is numbered `s3` — TWO live sources under one id, with
+    `Corpus.get` resolving whichever it reaches first, so a stored citation reads the wrong text.
+    That is exactly what invariant 12 forbids, and the identical bug `_next_note_id` was written for
+    (invariant 32) one field over. `notebook.next_source_id` derives from the MAX id in use;
+    `remove_source` deletes the first match by index rather than filtering every id-equal entry, the
+    same defence-in-depth pairing `delete_note` has, and RAISES on a miss — `mutate_notebook` writes
+    the file unless the delta raises, so returning `False` meant a 404-ing DELETE still did a full
+    save and bumped the mtime invariant 53 made the picker's sort key.
+
+    **There are TWO append sites and the first fix covered only one.** `promote_note` appends to
+    `notebook.sources` DIRECTLY rather than through `append_sources`, so it kept length-based
+    numbering — and it is the worse of the two, because promotion is the ONLY thing that makes a
+    note citable (invariant 32). Reproduced by an independent review over real HTTP: the blob emits
+    `[[SRC:s3|whole]]` twice, `Corpus.get` returns the OLDER source, and the promoted note is
+    unreachable by any citation. (The review phrased the harm as "a citation verifies TRUE against a
+    different source's text" — it does, but so would any quote, because verification is
+    coordinate-only, invariant 5. The harm is the unaddressability.)
+
+    **Nothing is renumbered on removal, and that is what makes removal safe to offer.** A citation
+    in a saved turn that pointed at the removed source comes back UNVERIFIED with a reason —
+    `citations.py` re-verifies against the current corpus on every read (invariants 5 and 11) —
+    rather than silently resolving to a different source's text. Persisted artifacts computed from
+    the old corpus (the overview, a podcast) are marked STALE by the set-equality comparison
+    invariant 38 already performs, which is why that comparison was kept as a SET even though
+    nothing removed a source at the time: it now breaks in the safe direction because it was written
+    for a removal path that did not yet exist.
+
+51. **`Source.preview` is display-only page metadata, scraped from html already in hand, and it
+    NEVER references an image.** `parsers/web.extract_preview` reads og:/twitter:/`description`/
+    `<title>` out of the SAME html `parse_web` already fetched — one host-side request per source,
+    as invariant 1 requires; a preview that fetched anything of its own would quietly break that.
+    The corpus blob is built from `blocks` alone, so a page controlling its own `<meta>` tags can
+    influence what a Sources row LOOKS like and nothing the model reads — the same trust level
+    `origin` already carries, rendered with `textContent` for the same reason (invariants 6 and 29).
+
+    **`og:image` is deliberately absent, and adding it back looks like an obvious improvement.**
+    Rendering one makes the READER's browser fetch a URL the page author chose, handing that third
+    party the reader's IP and a request to log — every pasted link becomes a beacon, in exchange for
+    a thumbnail. Pinned by a test for that reason. Regex rather than an HTML parser because the
+    point is to add no dependency to an ingestion path where `trafilatura` already does the real
+    work; a malformed match is a cosmetic miss, never a hazard.
+
+    **Every quantifier in those patterns is BOUNDED and the input is windowed to the `<head>`, and
+    both are load-bearing.** With `[^>]*?` an independent security review measured CATASTROPHIC
+    BACKTRACKING on a page of UNCLOSED `<meta` tags — nothing ever reaches a `>`, so each `<meta `
+    start position rescans the whole run. Cubic, measured end to end through `parse_web`: 19.7KB
+    took 38 seconds, and `re` does NOT release the GIL, so `asyncio.to_thread` buys the event loop
+    nothing (a watchdog thread saw a 14s hard pause). On a no-auth API where any caller can paste
+    any URL and `_default_fetcher` reads a response of any size, that is a one-request freeze of the
+    whole server. Now constant: 330ms whatever the input size, and a WELL-FORMED 681KB page with
+    5000 meta tags parses in 0.019s — the pathological input is the only one the bounds cost
+    anything on.
+
+52. **The live ticker's event shape is `{kind, primary, detail, meta}` and it carries the model's
+    own words — but never the step's OUTPUT.** `_translate_trace_event` used to emit one fixed
+    sentence per event type ("reasoning about the next step") and throw the payload away, which is
+    why this project's ticker said so much less than `cve-reverser`/`diff-sentry`'s feeds; a user
+    pointed at them and asked why. `summary` is kept as `primary` + `detail` so a consumer written
+    against the older one-line shape keeps working. The synthesized terminal event for an orphaned
+    run comes from `_orphaned_run_event`, not from a hand-written literal — two copies had already
+    drifted back to the older two-key form, which is the duplication this "one place" is for.
+
+    **`detail` is the model's own prose in the main case, and not ONLY that**: a `main_step` with no
+    `reasoning` falls back to the step's CODE, and a `result` event carries its output dict's KEY
+    NAMES (neither leaks corpus text). It can quote ingested source text — the same category
+    invariant 29 already records for this stream, which is why the trace endpoints are called out as
+    a materially different exposure than the rest of this no-auth API. The step's `output` is where
+    whole corpus spans actually land, and it is deliberately NOT streamed; its SIZE is reported
+    instead, which is the part that tells a reader whether a step did much. `_DETAIL_CHARS` bounds
+    the rest, because this goes down an SSE stream once per step and a REPL turn's reasoning runs
+    long. The full text stays in the trace file the citation-turn lookup already reads.
+
+    **`run_end` with `ok=False` is `kind: "failed"`, not `"done"`** — and any client's terminal-state
+    check has to accept BOTH, or a failed run's ticker never closes.
+
+53. **Renaming is a separate VERB from generating a title, and a rename REFUSES rather than
+    derives.** `PUT /notebooks/{id}/title` sets what a user typed; `POST` to the same path runs
+    `naming.SuggestTitle` (invariant 37). Setting a title is an instant write that always succeeds;
+    generating one is a model run that can fail, take seconds and be superseded — folding them into
+    one endpoint would give rename the failure semantics of a model call for no reason.
+    `naming.normalize_title` is split out of `clean_title` because the two callers need OPPOSITE
+    things from an unusable value: generation falls back to a derived label (a notebook must end up
+    with one), a rename returns 422, because silently substituting a derived title for what someone
+    typed would be the UI lying about what it did. It still normalises, because this API has no
+    authentication (invariant 25) and "a person typed it" is not a provenance claim it can rely on.
+
+    **A model-authored title is NOT unique, so the picker orders by file mtime.** A user hit three
+    notebooks with near-identical generated names and asked, reasonably, whether names can collide.
+    They can — and since invariant 37 stopped showing the id anywhere, "which one did I touch last"
+    is the only thing left to tell two same-named notebooks apart. The timestamp is carried
+    out-of-band (`notebook._MTIMES`/`last_modified`, populated by `list_notebook_summaries`) rather
+    than added to the schema: it is a property of the FILE, and a schema field would mean writing a
+    timestamp nobody reads on every mutation.
+
+    **`derived_title` appears in BOTH `NotebookSummary` and `NotebookResponse`.** They disagreed:
+    the header said "Untitled notebook" while the picker row showed a derived label for the same
+    notebook, which reads as two different notebooks. It is `naming.fallback_title` — the same
+    function the generate path falls back to — and costs no model call, which matters because
+    titling is lazy (it fires from actions that already run a model, never from adding a source), so
+    a notebook someone has only put sources into would otherwise sit in the picker as "Untitled"
+    forever.
+
+    **`GET /settings/choices` serves the settings page's dropdown values, and must never call
+    `_config()`** — invariant 41's reason, one endpoint further. A voice name is provider-specific
+    (invariant 43), so the answer depends on `RN_TTS_PROVIDER`, read straight from the environment;
+    an unknown provider yields an empty voice list rather than raising, so the page still renders
+    and the language row still works. Served rather than hardcoded in JS because a second copy would
+    drift from `tts._LANGUAGE_VOICES` — this project has already collapsed a duplicated
+    known-provider list once for exactly that reason (invariant 15).
+
+54. **Two more web-UI hazards that ONLY a source-tree assertion can catch, both extending invariant
+    36's reasoning to properties nothing else in this project can see.**
+
+    **A tooltip host must not clip its own tooltip.** A `data-tip` tip is an `::after` on its host,
+    so any clipping `overflow` on that host erases it outright — no console error, no layout shift,
+    just an affordance that stops existing. It shipped twice in one slice: `.source-item
+    { overflow: hidden }` (redundant, every child already clamped itself) took out the source card's
+    tip AND the ⚠ flags and ✕ remove controls inside it, and `.studio-view-tab { overflow: hidden }`,
+    added to ellipsize a long label, took out the right rail's four tabs — the one place a tip is not
+    optional, since a collapsed rail shows nothing but icons. Reported as "以前有的 hover tooltip
+    效果都不見了". `test_no_tooltip_host_clips_its_own_tooltip` harvests tip-bearing classes from the
+    markup, from `dataset.tip` in `app.js`, and from stylesheet rules already naming `[data-tip]`.
+    **Stated rather than implied: an ANCESTOR's clipping overflow does the same thing and is NOT
+    covered** — finding those needs a DOM this suite does not have. `.col`'s `overflow-y: auto` is
+    exactly such an ancestor (one non-visible axis forces the other to `auto`), which is why both tab
+    rows anchor their tips to the tab ROW rather than to a tab — in their EXPANDED state. The
+    collapsed rail deliberately does not: it anchors to the button and opens LEFTWARD, which is safe
+    only because `.col-studio.is-collapsed` sets `overflow: visible`, overriding the same `.col`
+    rule. The picker's running-dot tip needed the row treatment for the identical reason
+    (`.notebook-menu` is `overflow-y: auto`).
+
+    **A drag threshold pair must not be inverted.** A two-state toggle driven by one continuous value
+    is stable only while the OPEN threshold is at or above the CLOSE one. `STUDIO_EXPAND_AT` was set
+    BELOW `STUDIO_COLLAPSE_AT` to make re-opening from a 46px rail cheap, which turned the gap into a
+    band where every `pointermove` flipped the state — the panel visibly shuddering between two
+    widths. Expanding at exactly `STUDIO_MIN_WIDTH` is the value that both satisfies the ordering and
+    opens with no jump, since at the crossing the pointer and the panel are the same number; the dead
+    band it creates is covered by stretching the RAIL under the pointer (`--studio-rail`), never by
+    breaking the ordering. Pinned because the inverted version had a good-sounding reason behind it.
+
+    **Applying a width and REMEMBERING one are separate.** Persisting on every `pointermove` made
+    dragging the panel away overwrite the user's own width with the minimum clamp; a drag commits
+    only when it ends, and only if it ended open.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

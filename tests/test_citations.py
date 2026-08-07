@@ -61,3 +61,64 @@ def test_does_not_check_quote_faithfulness():
         _corpus(),
     )
     assert result[0].verified is True
+
+
+def test_an_answer_span_is_kept_only_when_it_occurs_verbatim_in_the_prose():
+    """The signature interaction — a citation drawn as a stroke through the sentence it backs — is
+    located by searching the prose for this span. It exists because the OLD way (searching for the
+    `quote`) stopped working at invariant 39: the prose follows the reader's language while the
+    quote stays in the source's, so the two never share a substring and a user reported the strokes
+    had simply disappeared.
+
+    Same coordinate-existence discipline invariant 5 applies to `source_id`/`locator`, pointed at
+    the model's own text: a span that cannot be found is DROPPED, and the citation survives without
+    it. Losing a highlight costs a reader little; highlighting the wrong sentence costs them trust.
+    """
+    from rlm_notebook.citations import locate_answer_spans
+    from rlm_notebook.schema import Citation
+
+    prose = "根據資料：先發射的是航海家2號。它比航海家1號早了十六天。"
+
+    def cite(span):
+        return Citation(source_id="s1", locator="whole", quote="English evidence", answer_span=span)
+
+    located = locate_answer_spans(
+        [
+            cite("先發射的是航海家2號"),
+            cite("  它比航海家1號早了十六天  "),  # stray whitespace is not a different sentence
+            cite("這句話不在答案裡"),
+            cite(None),
+        ],
+        prose,
+    )
+
+    assert [c.answer_span for c in located] == [
+        "先發射的是航海家2號",
+        "它比航海家1號早了十六天",
+        None,
+        None,
+    ]
+    # Nothing is ever dropped, only the unlocatable span (invariant 5's "flag, never hide").
+    assert len(located) == 4
+    assert all(c.quote == "English evidence" for c in located)
+
+
+def test_the_span_and_the_quote_are_in_different_languages_on_purpose():
+    """`quote` stays in the SOURCE's words (it is evidence a reader checks) and `answer_span` stays
+    in the model's (it is where the highlight goes). Having both is what lets someone reading in one
+    language cite a source written in another — the case that broke the old single-field design."""
+    from rlm_notebook.citations import locate_answer_spans
+    from rlm_notebook.schema import Citation
+
+    prose = "航海家2號比較早發射。"
+    citation = Citation(
+        source_id="s1",
+        locator="whole",
+        quote="Voyager 2, launched sixteen days EARLIER on August 20, 1977",
+        answer_span="航海家2號比較早發射",
+    )
+    located = locate_answer_spans([citation], prose)[0]
+    assert located.answer_span == "航海家2號比較早發射"
+    assert located.quote == citation.quote  # untouched
+    # ...and the quote alone could never have located anything in this prose, which is the bug.
+    assert citation.quote not in prose

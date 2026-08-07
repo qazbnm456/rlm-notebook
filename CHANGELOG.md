@@ -1539,3 +1539,116 @@ questions with verifiable citations, and get a distilled research artifact out.
   is now a real button that starts an empty notebook. That also surfaced a latent bug it made
   one-click reachable — switching from a notebook with turns to an empty one left a blank chat
   panel with no placeholder, because `chat:turnAdded` hides it and nothing un-hid it.
+
+- **A working session with the thing, turned into one slice.** Everything below was reported by a
+  user driving the real product, and each item names what was actually broken rather than what was
+  improved.
+
+  **The highlighter strokes had silently stopped existing, and could never have come back on their
+  own.** A citation was drawn as a stroke through the sentence it backs by searching the answer for
+  the citation's `quote` — which works only while the answer and the source share a language. Since
+  invariant 39 the prose follows the READER and the quote stays in the SOURCE's words, so the two
+  never share a substring and no span was ever found. `schema.Citation.answer_span` (new, optional,
+  backward-compatible) is the model's own pointer at the stretch of ITS OWN text a citation
+  supports; `citations.locate_answer_spans` drops any span that does not occur in that prose
+  verbatim, keeping the citation — the same coordinate-existence discipline invariant 5 applies to
+  `source_id`/`locator`, aimed at the model's prose instead of at the corpus. `_citation_responses`
+  now takes the exact string each artifact renders, so a chat answer, an FAQ item, a timeline event
+  and a podcast utterance each check their span against their own text.
+
+  **A source could not be removed**, and adding removal broke id numbering the moment it landed:
+  `append_sources` numbered from `len(sources) + 1`, so deleting `s2` and appending produced a
+  SECOND live `s3`. Reproduced before the fix. `notebook.next_source_id` derives from the max id in
+  use — the same bug `_next_note_id` was written for (invariant 32) one field over. Nothing is
+  renumbered on removal, which is what makes removal safe: a citation into a removed source comes
+  back unverified with a reason rather than resolving to different text.
+
+  **A pasted URL showed as a bare link.** `parsers/web.extract_preview` scrapes title/description/
+  site from the html `parse_web` ALREADY fetched — one request, as invariant 1 requires — into
+  `Source.preview`, which is display-only and never reaches the corpus blob. **`og:image` is
+  deliberately absent**: rendering it makes the reader's browser fetch a URL the page author chose,
+  turning every pasted link into a beacon, in exchange for a thumbnail.
+
+  **The live ticker said far less than the sibling studios' feeds**, because
+  `_translate_trace_event` emitted a fixed sentence per event type and threw the payload away. It
+  now carries `{kind, primary, detail, meta}` — the model's own reasoning, the tool's name, the
+  sub-model escalation's attempt number. The step's `output` is deliberately NOT streamed; its SIZE
+  is, which is the part that says whether a step did much. `summary` is kept as the concatenation of
+  the first two, so a consumer written against the old shape keeps working.
+
+  **`⚠ instruction-like phrase matching '\bsystem\s*:\s*'` was shown to a person.** Invariant 6's
+  flags gate nothing, so their entire value is whether a human can act on them — and a raw regex
+  names an implementation detail and says nothing about what to do. Every pattern now carries a
+  sentence. That same pattern was also measured firing on ordinary prose ("The operating system: a
+  set of layers"), so it is anchored to a role label opening a line.
+
+  **Renaming a notebook.** `PUT /notebooks/{id}/title` is a separate VERB from the model-generated
+  `POST` — setting a title is an instant write that always succeeds, generating one is a run that
+  can fail, take seconds and be superseded, and folding them together would give rename the failure
+  semantics of a model call. `naming.normalize_title` is split out of `clean_title` because the two
+  callers need opposite things from an unusable value: generation falls back to a derived label, a
+  rename is REFUSED, since substituting a title for what someone typed would be the UI lying.
+
+  **The picker.** Model-authored titles are not unique — a user hit three notebooks with
+  near-identical generated names — so the list is ordered by file mtime and carries `updated_at`.
+  `derived_title` (the same `fallback_title` the generate path uses, no model call) now appears in
+  BOTH `NotebookSummary` and `NotebookResponse`, because the header and the picker row disagreed:
+  one said "Untitled notebook" while the other showed a derived label for the same notebook.
+  `GET /settings/choices` serves the settings page's dropdown values for the CONFIGURED provider —
+  a voice name is provider-specific (invariant 43), and a second copy in JS would drift from
+  `tts._LANGUAGE_VOICES`. Like `GET /settings` it never calls `_config()` (invariant 41).
+
+  **Titling is LAZY now.** It used to fire from adding a source, which a user called too
+  aggressive: pasting a link spent a model call naming something they had not started working on
+  yet. `ensureTitle()` is called from the actions that already run a model. `derived_title` is what
+  keeps an untitled-but-populated notebook from reading as "Untitled" in the picker.
+
+  **Front end.** The right column is now a resizable, collapsible rail with four switchable views
+  (Studio / Podcast / References / Notes), the shape `cloud.projectdiscovery.io` uses: drag the grip
+  to size it, drag past the threshold to put it away. The two tab rows are structurally different
+  (underline vs pill) because two identical rows said nothing about which contained the other. Two
+  defects found while building it are pinned as source-tree assertions, since this project still has
+  no JS test runner (invariant 29): a tooltip host that clips its own tooltip erases it outright
+  (two real instances, one of which took out every tip inside the Sources card), and inverted
+  hysteresis on the drag thresholds makes the panel flip state on every pointer event.
+
+- **What three independent reviews then found, all of it fixed here.** Listed because each one is a
+  defect this slice introduced, not a pre-existing one.
+
+  **`promote_note` still numbered sources by length**, so the collision the fix above was written
+  for was alive on the ONE path that makes a note citable (invariant 32): the corpus blob emitted
+  one id twice and the promoted note was unreachable by any citation. Reproduced over real HTTP.
+
+  **`extract_preview`'s regexes backtracked catastrophically.** A page of unclosed `<meta` tags took
+  38 seconds at 19.7KB, cubic, with `re` holding the GIL the whole time — a one-request freeze of
+  the entire server, reachable by anyone who can paste a URL into a no-auth API. Every quantifier is
+  bounded and the input is windowed to the `<head>` now: a constant ~330ms whatever the input size,
+  while a well-formed 681KB page with 5000 meta tags still parses in 0.019s.
+
+  **`_citation_responses`' `prose` argument failed OPEN.** It defaulted to `""` and then skipped
+  validation entirely when empty, returning the model's raw unchecked span — the opposite of what
+  the docstring promised. It is required now. Worse, a reviewer removed it from all eight call sites
+  — completely disabling the highlighter strokes — and the whole suite stayed green; two tests pin
+  the wiring.
+
+  **`remove_source` returned `False` on a miss**, and `mutate_notebook` writes unless the delta
+  raises, so a 404-ing DELETE still saved the file and bumped the mtime the picker now sorts by.
+
+  **The settings page offered languages the configured provider cannot speak** — Thai/Vietnamese/
+  Indonesian to a chatterbox deployment, while hiding the eleven it can. Picking one persisted a
+  GLOBAL `output_language` and then failed every `/audio` request. `supported_languages()` is on the
+  provider now, where `default_voices` already lives (invariant 43).
+
+  **The References view could not contain the citations that linked to it.** Every citation in a
+  guide artifact or the podcast transcript was clickable and switched to a list built only from the
+  overview and chat. It only looked like it worked when the same coordinate happened to be cited in
+  chat too — which, since text and web sources all use locator `"whole"`, is most of the time.
+
+  Also: three source-tree assertions were repaired after mutation testing showed they passed with
+  their own documented defect reintroduced (the drag thresholds' state PAIRING, two hidden-toggled
+  classes the harvester could not see, and every `data-i18n-tip` key); `normalize_title` now strips
+  control characters; a malformed trace payload can no longer abort an SSE connection mid-stream;
+  and a set of smaller UI defects — three tooltips lost while restyling the header, a duplicate
+  translation key, a `t` shadowed in three closures, Escape-during-rename that could still commit,
+  arrow keys silently rewriting a collapsed panel's width, `localStorage` written on every
+  `pointermove`, and hover rules that were inert on the element they were pointing at.

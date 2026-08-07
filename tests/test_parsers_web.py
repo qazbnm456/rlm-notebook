@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from rlm_notebook.parsers import web
 from rlm_notebook.parsers.web import FetchError, _SafeRedirectHandler, parse_web
 
 _HTML = """\
@@ -111,3 +112,88 @@ def test_default_fetcher_uses_the_guarded_opener_never_plain_urlopen(monkeypatch
     assert web._default_fetcher("https://example.com/a") == "<html><body>ok</body></html>"
     assert len(opened) == 1
 
+
+
+def test_a_preview_is_scraped_from_the_html_already_in_hand():
+    """No second request: `parse_web` hands `extract_preview` the SAME html it fetched once.
+    Invariant 1 allows exactly one host-side fetch per source, and a preview that fetched anything
+    of its own would quietly break that."""
+    html = """
+    <html><head>
+      <title>Fallback title</title>
+      <meta property="og:title" content="Voyager 1 leaves the heliosphere">
+      <meta name="description" content="ignored, og wins">
+      <meta property="og:description" content="  A  probe   crosses  a boundary. ">
+      <meta property="og:site_name" content="NASA">
+    </head><body>x</body></html>
+    """
+    preview = web.extract_preview(html)
+    assert preview["title"] == "Voyager 1 leaves the heliosphere"
+    assert preview["description"] == "A probe crosses a boundary."  # whitespace collapsed
+    assert preview["site"] == "NASA"
+
+
+def test_the_title_tag_is_the_fallback_when_no_meta_carries_one():
+    preview = web.extract_preview("<html><head><title> Plain <b>page</b> </title></head></html>")
+    assert preview["title"] == "Plain page"
+    assert "description" not in preview
+
+
+def test_attribute_order_inside_a_meta_tag_does_not_matter():
+    """`content` before `property` is just as valid, and a page that writes it that way is not
+    trying to hide anything — a one-sided regex would simply lose the preview."""
+    html = '<meta content="Reversed order" property="og:title">'
+    assert web.extract_preview(html)["title"] == "Reversed order"
+
+
+def test_a_preview_never_carries_an_image():
+    """`og:image` is deliberately absent. Rendering one makes the READER's browser fetch a URL the
+    page author chose, handing that third party an IP and a request to log — every pasted link
+    would become a beacon, in exchange for a thumbnail. Pinned because adding it back looks like an
+    obvious improvement."""
+    html = (
+        '<meta property="og:image" content="https://tracker.example/pixel.png">'
+        '<meta property="og:title" content="A page">'
+    )
+    preview = web.extract_preview(html)
+    assert preview == {"title": "A page"}
+    assert not any("tracker.example" in value for value in preview.values())
+
+
+def test_a_preview_is_display_only_and_never_reaches_the_corpus():
+    """The blob is built from `blocks` alone, so a page controlling its own `<meta>` tags can
+    influence what a Sources row LOOKS like and nothing the model reads."""
+    from rlm_notebook.corpus import Corpus
+
+    html = '<meta property="og:title" content="INJECTED-INTO-PREVIEW"><p>real body text</p>'
+    source = web.parse_web(
+        "https://example.com/a", "s1", fetcher=lambda url, timeout=15.0: html
+    )
+    assert source.preview["title"] == "INJECTED-INTO-PREVIEW"
+    assert "INJECTED-INTO-PREVIEW" not in Corpus([source]).blob()
+
+
+def test_a_hostile_page_cannot_stall_the_preview_scraper():
+    """`re` does not release the GIL, so a slow match freezes the event loop and every other thread
+    — `asyncio.to_thread` buys nothing. An independent security review measured the unbounded
+    version taking 38s on a 19.7KB page of UNCLOSED `<meta` tags (cubic, and `_default_fetcher`
+    reads a response of any size), reachable by anyone who can paste a URL into this no-auth API.
+
+    Asserts a CONSTANT bound, not a fast one: the point is that the worst case stops depending on
+    what the server was served. A generous ceiling on purpose — this must not flake on a loaded CI
+    box, and the defect it guards against was three orders of magnitude away from it.
+    """
+    import time
+
+    hostile = "<html><head><title>t</title>" + '<meta name="a" ' * 200_000  # ~2.9 MB, never closed
+    start = time.perf_counter()
+    web.extract_preview(hostile)
+    hostile_seconds = time.perf_counter() - start
+    assert hostile_seconds < 5.0, f"{hostile_seconds:.1f}s — the input window is not bounding it"
+
+    # And a WELL-FORMED page of the same shape stays fast, which is why the bounds cost nothing
+    # real: every genuine `<meta …>` closes its `>`.
+    benign = "<html><head>" + '<meta name="x" content="y">' * 5000 + "</head>"
+    start = time.perf_counter()
+    web.extract_preview(benign)
+    assert time.perf_counter() - start < 1.0

@@ -67,14 +67,33 @@ def fallback_title(origins: list[str]) -> str:
     return title[:_MAX_TITLE_CHARS]
 
 
+def normalize_title(raw: str) -> str:
+    """Collapse whitespace, strip surrounding quotes and a trailing period, cap the length. Returns
+    `""` when nothing usable is left.
+
+    Split out of `clean_title` because the two callers need OPPOSITE things from an unusable value:
+    a GENERATED title falls back to something derived from the origins (a notebook must end up with
+    a label), while a user RENAMING it must be refused — silently substituting a derived title for
+    what someone typed would be the UI lying about what it did.
+    """
+    # Control characters are STRIPPED, not just collapsed: `str.split()` drops ASCII whitespace but
+    # keeps `\x1b`, `\x00` and the bidi overrides, and this is the only guard on a value an
+    # UNAUTHENTICATED `PUT /notebooks/{id}/title` writes (invariants 25 and 53). It is the same
+    # thing invariant 41 already requires of `clean_language`, for a value with a smaller blast
+    # radius. Not exploitable through today's sinks — every one renders with `textContent` — which
+    # is exactly why it should not be left to depend on that staying true.
+    cleaned = "".join(ch for ch in (raw or "") if ch.isprintable() or ch.isspace())
+    title = " ".join(cleaned.split()).strip().strip("\"'“”「」").rstrip(".")
+    if not title or len(title) > _MAX_TITLE_CHARS * 2:
+        return ""
+    return title[:_MAX_TITLE_CHARS]
+
+
 def clean_title(raw: str, origins: list[str]) -> str:
     """Normalise whatever the model returned into something a switcher row can show. Falls back
     rather than displaying an empty or absurd string — the model is unsupervised here (no schema
     validation, unlike every `RLMTask` output in this project), so this is the only guard."""
-    title = " ".join((raw or "").split()).strip().strip("\"'“”「」").rstrip(".")
-    if not title or len(title) > _MAX_TITLE_CHARS * 2:
-        return fallback_title(origins)
-    return title[:_MAX_TITLE_CHARS]
+    return normalize_title(raw) or fallback_title(origins)
 
 
 _LANGUAGE_INSTRUCTIONS = """\

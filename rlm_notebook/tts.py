@@ -64,6 +64,19 @@ class TTSProvider(Protocol):
         language does not silently overrule a configured voice."""
         ...
 
+    def supported_languages(self) -> set[str]:
+        """Every language name this provider can actually speak, lowercase.
+
+        On the PROVIDER for the same reason `default_voices` is (invariant 43): the sets genuinely
+        differ. An independent review found the settings page offering Thai, Vietnamese and
+        Indonesian — which live in edge-tts's voice map — to a `chatterbox` deployment that has no
+        language id for any of them, while hiding the eleven chatterbox DOES speak. Picking one
+        persisted a GLOBAL `output_language` (it drives chat and every guide artifact too) and then
+        made every `/audio` request fail at `validate`. Invariant 19 saved the model call; the page
+        is what offered the broken value.
+        """
+        ...
+
     def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
         """Refuse a language or a voice this provider cannot serve, BEFORE anything expensive runs.
 
@@ -146,6 +159,9 @@ class EdgeTTSProvider:
 
     def fallback_voices(self) -> tuple[str, str]:
         return ("en-US-GuyNeural", "en-US-JennyNeural")
+
+    def supported_languages(self) -> set[str]:
+        return set(_LANGUAGE_VOICES)
 
     def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
         # Nothing to pre-flight: a bad voice id is caught by the service itself, and there is no
@@ -503,6 +519,9 @@ class ChatterboxProvider:
 
     def fallback_voices(self) -> tuple[str, str]:
         return ("host-a", "host-b")
+
+    def supported_languages(self) -> set[str]:
+        return set(_CHATTERBOX_LANGUAGES)
 
     def validate(self, language: str | None, voice_map: dict[str, str]) -> None:
         # Both of these used to raise inside `synthesize`, i.e. after a full script-generation run.

@@ -8,6 +8,7 @@ builds a live RLM *tool*, which is exactly what invariant 1 says this call site 
 
 from __future__ import annotations
 
+import re
 import urllib.error
 import urllib.request
 from urllib.parse import urlparse
@@ -64,6 +65,87 @@ def _default_fetcher(url: str, *, timeout: float = 15.0) -> str:
     return raw.decode("utf-8", errors="replace")
 
 
+#: The `<meta>` tags worth showing in a Sources row, in the order they are preferred. Open Graph
+#: first because a page that bothers to set it has written copy meant to be shown as a card.
+_PREVIEW_META = {
+    "title": ("og:title", "twitter:title"),
+    "description": ("og:description", "twitter:description", "description"),
+    "site": ("og:site_name",),
+}
+
+#: Every quantifier here is BOUNDED, and `extract_preview` windows its input as well. Both are
+#: required, and neither is defensive tidying: with `[^>]*?` an independent security review measured
+#: CATASTROPHIC BACKTRACKING on `'<meta name="a" ' * n` — unclosed tags, so `[^>]*?` never reaches a
+#: `>` and every `<meta ` start position rescans the whole run. Cubic, measured end to end through
+#: `parse_web`: 6.5KB took 0.50s, 15.3KB took 12.98s, 19.7KB took 38.08s. `re` does NOT release the
+#: GIL — a watchdog thread saw a 14s hard pause — so `asyncio.to_thread` buys the event loop
+#: nothing. On a no-auth API (invariant 25) where any caller can paste any URL, and where
+#: `_default_fetcher` reads a response of any size, that is a one-request freeze of the whole
+#: server. A WELL-FORMED 681KB page with 5000 meta tags parsed in 0.019s, because a real
+#: `<meta …>` closes its `>`; the pathological input is the only one these bounds cost anything on.
+_ATTR_GAP = r"[^>]{0,300}?"
+_META_TAG = re.compile(
+    rf"""<meta\s{_ATTR_GAP}(?:property|name)\s*=\s*["']([^"']{{1,200}})["']{_ATTR_GAP}"""
+    rf"""content\s*=\s*["']([^"']{{0,2000}})["']"""
+    rf"""|<meta\s{_ATTR_GAP}content\s*=\s*["']([^"']{{0,2000}})["']{_ATTR_GAP}"""
+    rf"""(?:property|name)\s*=\s*["']([^"']{{1,200}})["']""",
+    re.IGNORECASE | re.DOTALL,
+)
+_TITLE_TAG = re.compile(r"<title[^>]{0,200}>(.{0,2000}?)</title>", re.IGNORECASE | re.DOTALL)
+
+#: How much of the document the scraper looks at. A preview only ever lives in `<head>`, so this is a
+#: WINDOW, not a truncation of the source: `parse_web` still hands the whole document to
+#: `trafilatura`, and nothing a reader can cite is affected.
+_PREVIEW_WINDOW = 64 * 1024
+
+
+def extract_preview(html: str) -> dict[str, str]:
+    """DISPLAY-ONLY page metadata, parsed from HTML this function was already handed.
+
+    **No extra request is made, and no image is ever referenced.** `og:image` is deliberately absent:
+    rendering one would make the reader's browser fetch a URL the page author chose, handing that
+    third party the reader's IP and a request to log, for a thumbnail. The value of a preview is the
+    title and the description; the picture is not worth turning every pasted link into a beacon.
+
+    Regex rather than a parser because the whole point is to add no dependency to an ingestion path
+    that already has `trafilatura` doing the real work. Values are whitespace-collapsed and
+    truncated here and rendered with `textContent` in the UI (never `innerHTML` — invariant 29), so
+    a malformed match is a cosmetic miss, never a hazard. No ESCAPING happens here, and an earlier
+    draft of this docstring claimed it did.
+
+    Every pattern above is bounded and the input is windowed — see `_META_TAG` for the measured
+    denial-of-service that made both mandatory.
+    """
+    # Window FIRST. Everything below is bounded too, but bounding the INPUT is what makes the worst
+    # case a constant rather than a function of what someone chose to serve.
+    window = html[:_PREVIEW_WINDOW]
+    head_end = window.lower().find("</head>")
+    if head_end != -1:
+        window = window[:head_end]
+
+    found: dict[str, str] = {}
+    tags: dict[str, str] = {}
+    for match in _META_TAG.finditer(window):
+        key = (match.group(1) or match.group(4) or "").strip().lower()
+        value = match.group(2) if match.group(1) else match.group(3)
+        if key and value and key not in tags:
+            tags[key] = " ".join(value.split())
+
+    for field, candidates in _PREVIEW_META.items():
+        for candidate in candidates:
+            if tags.get(candidate):
+                found[field] = tags[candidate][:300]
+                break
+
+    if "title" not in found:
+        match = _TITLE_TAG.search(window)
+        if match:
+            title = " ".join(re.sub(r"<[^>]+>", "", match.group(1)).split())
+            if title:
+                found["title"] = title[:300]
+    return found
+
+
 def parse_web(url: str, source_id: str, *, fetcher=None) -> Source:
     """Ingest a web page. `fetcher` is an injection seam for tests (a fake returning canned HTML);
     the default fetches over the real network with the SSRF guard applied first."""
@@ -76,4 +158,6 @@ def parse_web(url: str, source_id: str, *, fetcher=None) -> Source:
         kind="web",
         origin=url,
         blocks=[SourceBlock(locator="whole", text=text)],
+        # From the SAME html already in hand — one fetch, as invariant 1 requires.
+        preview=extract_preview(html),
     )
