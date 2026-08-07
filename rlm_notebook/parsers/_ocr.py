@@ -1,7 +1,7 @@
 """OCR dispatch for a rendered PDF page image: RapidOCR primary, Tesseract fallback.
 
 Extracted out of `parsers/pdf.py` (invariant 7's design record,
-`docs/design/pymupdf-license-replacement.md`) so `parse_pdf` doesn't need to know which backend
+the pymupdf-replacement design record) so `parse_pdf` doesn't need to know which backend
 actually produced a page's text — just whether OCR produced anything at all.
 """
 

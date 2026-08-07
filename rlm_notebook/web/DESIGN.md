@@ -2,7 +2,7 @@
 
 The web frontend's design contract. Implementation (`index.html`/`style.css`/`app.js`) follows this
 file. Architecture and the full decision record (why this exists, what was audited, what's deferred)
-live in `docs/design/web-ui-blueprint.md` and `CLAUDE.md` — this file owns *look and feel* only, the
+live in the web-UI blueprint and `CLAUDE.md` — this file owns *look and feel* only, the
 same split `ctx-distillery/studio/DESIGN.md` established for the sibling family.
 
 **This is NOT a replay-only trace console, unlike every sibling's `studio/`.**
@@ -63,7 +63,7 @@ are `style.css`'s `:root` blocks — source of truth**; the values below are des
 **Both `--text-faint` values and Study's `--highlight-wash` were corrected during the
 pre-implementation audit** — the originals measured 3.08:1 (Paper) and 2.97:1 (Study) against
 `--surface-3` (WCAG AA's floor is 4.5:1 for normal text), and the original wash was self-contrast ≈1.0
-against an elevated panel. See `docs/design/web-ui-blueprint.md`'s audit round 1 for the computed
+against an elevated panel. See the web-UI blueprint's audit round 1 for the computed
 values behind the fix.
 
 **Accent discipline** (same "do not cross-use" rule the siblings enforce): `--accent` only on
@@ -76,8 +76,9 @@ panels touching.
 Font-selection procedure run explicitly (not a reflex pick — Fraunces/Inter/JetBrains-Mono-everywhere
 were all considered and rejected first):
 
-- **Literata** — content meant to be read at length: the full source-text viewer (still not built —
-  see the deferred items below). Reserved via the `.reading-face` class; NOT yet applied to Guide/
+- **Literata** — content meant to be read at length. The full source-text viewer SHIPPED
+  (§5.7/invariant 31) and this note went stale claiming otherwise. Reserved via the `.reading-face`
+  class; NOT yet applied to Guide/
   podcast content either, since Phase 2 reused `renderAnswerWithCitations`'s existing Public Sans
   treatment for consistency with Chat rather than introducing a font switch mid-panel — worth
   reconsidering once a dedicated long-form reading surface exists. Commissioned by Google originally
@@ -115,7 +116,7 @@ stays exactly as strict; a YouTube link is ingested transparently by the SAME fi
 server-side by `ingest.ingest_one` — no separate UI affordance needed, just a `<p class="hint">`
 under the URL input naming that YouTube links work and are captions-only, per invariant 33),
 paste-text posts to the SAME endpoint with `{texts: [...]}` (a post-launch addendum — see
-`docs/design/web-ui-blueprint.md`'s "Post-launch addendum"), and file upload POSTs
+the web-UI blueprint's "Post-launch addendum"), and file upload POSTs
 `multipart/form-data` to `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md`, one file per
 request) — never a local-path string, which is what keeps it from reopening invariant 26's
 local-path ban. Below: the source list, one `.source-item` per source — kind, origin
@@ -159,6 +160,26 @@ multi-MB episode doesn't sit fully
 base64-encoded in a DOM attribute for its whole lifetime) plus a transcript below it, one
 `.podcast-utterance` per line with the same citation-highlighter treatment. Does not yet
 collapse-when-empty (still deferred — no phase has needed it yet). Notes section: see §5.8.
+
+**The transcript is SUBTITLES, not a wall of text** (Post-launch addendum 6, after a user listened
+to a real episode and asked for it): each line carries a `.podcast-timecode` in `m:ss` (`h:mm:ss` once an episode passes an hour),
+clicking a
+line seeks the `<audio>` element to it and plays, and the line currently being spoken carries
+`.is-speaking` — `--studio-accent`, deliberately NOT the citation highlighter, so "where the voice
+is" and "what came from a source" never read as the same signal. Highlight and scroll are driven
+off the player's own `timeupdate`, so scrubbing, pausing and seeking all stay in sync for free with
+no timer of our own.
+
+The timing comes from `Podcast.offsets`, a list of per-utterance start seconds PARALLEL to
+`utterances`, measured by the TTS provider at synthesis (every provider here already synthesizes
+utterance by utterance, so it knows them — parsing MP3 frames to recover a number we were already
+handed would be a second, worse implementation). **Anything but one strictly-increasing
+offset per utterance degrades to the plain transcript** — no timecodes, no seek, no highlight.
+Missing and wrong-length are the easy cases (an episode persisted before this field existed has
+none); the one a LENGTH check cannot catch is one zero per line, which is exactly what a provider
+reporting no boundary events returns. An independent audit simulated the length-only version:
+every line stamped `0:00`, the second row highlighted for the whole episode, every click seeking to
+zero. Mis-aligned subtitles are worse than none at all.
 
 ### 5.5 Reasoning-trace ticker + citation-turn detail (Phase 3)
 
@@ -252,13 +273,19 @@ nothing in this section's UI should imply a note is "grounded" before that point
 `#chat-overview`, a block ABOVE `#chat-history` (never inside it: `ask` rebuilds the history list
 wholesale from `state.turns` after every answer, which would wipe anything else in there).
 
-Three states, one container:
+Three states, one container (the third was added by invariant 38 and this list went stale at two):
 
-- **No overview yet, sources present** — a primary `✨ Generate overview` button plus the hint
+- **Never generated, sources present** — a primary `✨ Generate overview` button plus the hint
   "…or just ask a question below."
-- **Generated** — `Overview` head, the Summary rendered through `renderAnswerWithCitations` (so its
-  citations behave exactly like a Chat answer's), the trace affordance, then `Start with` and up to
-  three clickable starter questions taken from the FAQ task.
+- **Generated, current** — `Overview` head, the Summary rendered through
+  `renderAnswerWithCitations` (so its citations behave exactly like a Chat answer's), the trace
+  affordance, `+ Save as note`, then `Start with` and up to three clickable starter questions taken
+  from the FAQ task.
+- **Generated, sources changed since** — the same, still readable, marked stale, plus
+  `↻ Regenerate`. Confiscating an overview because the user added a source is worse than showing it
+  with a marker: it is still true about the sources it was computed from, and it cost a real RLM
+  run. `+ Save as note` stays here especially — a stale overview is precisely the one worth keeping
+  before regenerating.
 
 Hidden entirely when the notebook has no sources. Bounded at `max-height: 45%` with its own scroll:
 a Summary runs to several paragraphs, and as an unbounded flex item it would refuse to shrink,

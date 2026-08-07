@@ -303,6 +303,7 @@ def tts_voice_map(config: NotebookConfig, language: str | None, provider=None) -
     # come from the provider that will actually speak them. `None` keeps the pre-provider behaviour
     # for callers that have not resolved one yet.
     pair = provider.default_voices(language) if provider is not None else default_voices_for(language)
+    fallback = provider.fallback_voices() if provider is not None else None
 
     def _pick(env_name: str, file_key: str, index: int, configured: str) -> str:
         # The settings file sits directly below the env and ABOVE the language default. Both the env
@@ -315,10 +316,16 @@ def tts_voice_map(config: NotebookConfig, language: str | None, provider=None) -
         # would read it in the wrong accent. `write_settings` replaces the whole set, so OMITTING the
         # key is how a user goes back to "follow the language" — the settings page renders an empty
         # input as exactly that, and says so.
+        # The provider's own cast sits BELOW the language default and ABOVE `configured`: an
+        # independent audit found an unknown language on kokoro falling straight through to
+        # `configured`'s shipped `en-US-GuyNeural`, an edge-tts name handed to `KPipeline` — a
+        # synthesis failure after a real model call. `configured` still wins when a provider has no
+        # opinion, and an explicitly-set env var still beats everything (checked first).
         return (
             _env_wins(env_name)
             or stored.get(file_key)
             or (pair[index] if pair else None)
+            or (fallback[index] if fallback else None)
             or configured
         )
 
@@ -358,7 +365,14 @@ _LANGUAGE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z ()\-]{0,39}$")
 #: A voice reaches an OUTBOUND request unescaped: edge-tts accepts any `xx-YY-<anything>Neural` and
 #: interpolates it into `<voice name='...'>` SSML with no escaping. An independent audit demonstrated
 #: a crafted value composing extra markup into that request. Bounded here rather than trusted.
-_VOICE_PATTERN = re.compile(r"^[a-z]{2,}-[A-Z]{2,}-[A-Za-z]+Neural$")
+#:
+#: TWO alternatives, one per provider's naming scheme — `zh-TW-YunJheNeural` (edge-tts) and
+#: `zf_xiaobei` (kokoro). A single edge-tts-shaped pattern rejected EVERY kokoro voice id, so the
+#: settings page could not name a voice for the provider a user had actually configured (found by an
+#: independent audit, alongside the last-resort cast it shares a cause with). Both alternatives stay
+#: strict character classes with no quote, angle bracket or space reachable, which is the property
+#: that closes the SSML hole — widening the SHAPES accepted is not widening the CHARACTERS.
+_VOICE_PATTERN = re.compile(r"^(?:[a-z]{2,}-[A-Z]{2,}-[A-Za-z]+Neural|[a-z]{2}_[a-z]+)$")
 
 _SETTING_PATTERNS = {
     "output_language": _LANGUAGE_PATTERN,

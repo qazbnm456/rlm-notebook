@@ -334,7 +334,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   dark — and a citation-as-highlighter-stroke signature interaction, not a footnote number.
 
   **Went through a pre-implementation independent design audit before any code was written**
-  (`docs/design/web-ui-blueprint.md`, gitignored, same convention as `docs/research/`). The audit
+  (the web-UI blueprint, gitignored, same convention as `docs/research/`). The audit
   found 4 blockers: the originally planned SSE reasoning-trace fusion was unbuildable as scoped (no
   `run_id` ever reaches a client mid-run from `ask`/`guide`'s synchronous contract, and
   citation-to-trace-turn linking had no data model at all) — pulled from this round entirely rather
@@ -394,7 +394,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   unresolved.
 
   **Went through the same pre-implementation independent design audit Phase 1 established**
-  (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum) before any code was written. Found 2
+  (the web-UI blueprint's Phase 2 addendum) before any code was written. Found 2
   blockers, both fixed before implementation started: the ordering list omitted the notebook-load/
   corpus/blob-size steps every other endpoint performs first, which as originally written would
   have surfaced a 500 (bad `RN_TTS_PROVIDER`) ahead of a 404/413 whenever both conditions held,
@@ -1284,6 +1284,115 @@ questions with verifiable citations, and get a distilled research artifact out.
   server now REPORTS the episode's suffix rather than leaving the client to infer it from the
   configured provider, and the CLI corrects its default extension only when the user did not choose
   the path themselves.
+
+- **A code-vs-docs consistency audit across the whole repo, and the eleven fixes it produced.**
+  Run as the closing step of the slice above, over all 45 invariants rather than just the diff. It
+  found doc claims in both directions — things the docs promised that the code did not do, and
+  things the code did that no doc mentioned — plus four invariants whose "confirmed by a test"
+  turned out to rest on nothing.
+
+  **Real defects, all mutation-tested:**
+
+  - `RN_MAX_UPLOAD_BYTES=not-an-int` returned a raw 500 with a traceback. Invariant 24 claimed every
+    `SystemExit` in `config.py` was reachable only through `from_env()`, so `_config()` covered them
+    all; `max_upload_bytes` has one of its own and is the first statement of the upload handler.
+    (It is standalone *because* invariant 30 says an upload must not depend on a model being
+    configured — which is exactly how it fell outside the wrapper.)
+  - Trace links were dead for `"my notebook"` or any non-Latin notebook id — the ids invariant 10
+    exists to support. The server-side half of this was fixed two slices ago; the CLIENT was still
+    building run ids from the raw id. `NotebookResponse.slug` now carries the server's own
+    transform rather than a second copy of it in JS.
+  - `RN_TTS_PROVIDER=kokoro` plus a language kokoro does not know fell through to the shipped
+    `en-US-GuyNeural` — an edge-tts name handed to `KPipeline`, so synthesis failed *after* a real
+    model call. The language map moved onto the provider in the previous slice; the last resort had
+    not moved with it. And the settings page's voice pattern rejected every kokoro id, so a user
+    could not name a voice for the provider they had configured.
+  - Generating a podcast whose script came back empty left the previous episode on disk, so
+    `GET .../audio/file` kept serving audio the notebook no longer had.
+
+  **Four invariants that claimed a test and had none** — each now pinned, each verified by mutating
+  the code and watching the new test go red: invariant 2's "do not swap back to plain `urlopen`"
+  (swapping it left the suite green — the redirect tests call the handler directly and never
+  exercise which opener fetches); invariant 22's `start_new_session=True` (deleting it left the
+  suite green, because the existing test hardcodes the flag itself instead of calling
+  `runner.start_run`); invariant 29's pre-spawn `_RUN_PROCESSES` reservation, the fix for the
+  user-reported "run ended without a final event"; and invariant 23's identity check, which the
+  invariant said was "confirmed with an interleaved-`asyncio` test" that did not exist. The first
+  attempt at that last one was itself hollow — asserting both entries are gone afterwards is
+  satisfied by the buggy version too — and only caught the bug once rewritten to check that a
+  *finishing* run leaves a *later* run's slot alone.
+
+  One test was also quietly downloading spaCy models over the network and skipping on CI; it fakes
+  `kokoro` and `soundfile` through `sys.modules` now, verified with a meta-path blocker rather than
+  by trusting its own docstring.
+
+  **Doc corrections worth naming**, since several were overclaims of the exact kind invariant 5
+  exists to prevent: the size cap fires at question time, not at ingestion time; there is no
+  model-side injection conclusion to union with, and the flags reach the CLI only; `GET /notebooks`
+  is no longer "metadata only" now that it carries a model-authored title; synthesis runs on
+  schema-validated output, not "citation-checked" output; there are six citation-grounded tasks, not
+  five; `NotebookConfig.ocr_provider` has zero consumers; the CLI's `audio` persists nothing. Two
+  design documents referenced from 21 places had never existed, and the rest of `docs/` is
+  gitignored anyway.
+
+- **Twenty-fourth slice: subtitle-style transcript, a podcast that lands, and speakable prose.**
+  All three reported by a user listening to a real episode.
+
+  **The transcript is now subtitles**: the line being spoken is highlighted, a timecode sits beside
+  each line, and clicking a line seeks to it. Timing comes from the PROVIDER — every provider here
+  already synthesizes utterance by utterance — rather than from parsing the audio. `Podcast.offsets`
+  is parallel to `utterances` rather than a field on `Utterance`, because `Utterance` is the model's
+  output shape and the model cannot know how long its own words take to say; anything but one
+  strictly-increasing offset per utterance means "no timing" and renders a plain transcript.
+
+  **A bug the offsets themselves revealed**: the first version keyed on edge-tts's `WordBoundary`,
+  but the installed version defaults to `boundary="SentenceBoundary"` and emits only that — so every
+  offset came back 0.0, a transcript highlighting nothing. Found by generating a real episode and
+  reading the numbers.
+
+  **An independent review then found the safety net for that case did not exist.** A provider
+  reporting no boundaries returns `[0.0, 0.0, ...]` — the RIGHT LENGTH, so the documented length
+  check could never fire; simulated, it stamps every line `0:00`, highlights the second row for the
+  whole episode and seeks every click to zero. The guard is monotonicity now, and the claim in the
+  docstring is gone. The same review showed by mutation that the entire API side of `offsets` (the
+  response, what gets persisted, and the reopen path) had no coverage at all — deleting all three
+  left the suite green — and that the edge-tts offset test could not catch a per-utterance state bug
+  because its fixture gave every utterance the same duration. Both are pinned now, and kokoro's
+  gap-before-offset rule moved into a pure function (`tts.sequence_offsets`) so CI can check it
+  without the extra, a model download, or any audio. Every fix here was mutation-tested.
+
+  Also from that review, all in the player: clicking into an expanded trace payload (or the mouseup
+  ending a drag-selection) seeked and autoplayed; the hover state was the colour the row already had
+  AND outranked `.is-speaking`, so hovering the playing line deleted its highlight; `formatTimecode`
+  had no hour component; and the playhead follower used `scrollIntoView`, which walks every
+  scrollable ancestor — the transcript is its own scroll box now, so following the playhead can no
+  longer drag the studio column back from whatever the reader had scrolled to.
+
+  **The episode has a shape.** `audio.py` asked only for "a natural conversation" — no opening, no
+  segment plan, and no close, so episodes simply stopped when the model ran out of facts.
+  NotebookLM's Audio Overview was never used as a reference; that gap is closed after a user named
+  it. There is now an opening that frames the sources, a body that follows the interesting thread,
+  and a close that draws the threads together and says what it adds up to, grounded in the sources.
+
+  **Prose is written to be SPOKEN in one language.** A TTS voice for one language cannot pronounce
+  another script, which the user heard. The mechanism was confirmed rather than assumed: kokoro's
+  Chinese G2P returns the literal string `NASA`, and `Voyager i→`, as its own "phonemes" — raw
+  Latin letters reach the acoustic model as unknown tokens. Foreign proper nouns are now rendered
+  the way a native speaker would say them, scoped to what is actually spoken and exempting a
+  `Citation.quote`. Two things the first draft of the rule got wrong, both caught by checking a real
+  episode rather than re-reading the prompt: it invited the original in parentheses (the exact
+  failure it exists to prevent — an utterance is both the transcript AND what the voice reads), and
+  it let acronyms through, which a live run duly demonstrated. Both closed, and re-verified by
+  regenerating: `NASA` became `美國國家航空暨太空總署`, every proper noun renders spoken, each
+  citation kept its verbatim English quote and verified, and the episode closes on a genuine
+  reflection rather than a stray fact. One Latin letter survives — the `E` in `泰坦三號E半人馬座運
+  載火箭`, which is how the designation is written in Chinese — and is left stated rather than
+  chased with a stricter sentence.
+
+  Also: kokoro now inserts a short gap between utterances (free, since it holds raw samples — unlike
+  edge-tts, where invariant 17 refuses re-encoding), and `.btn` sets `color`/`text-decoration`
+  because it has to work on an `<a>` — the download link had been rendering as UA-blue underlined
+  text on the dark theme.
 
 - **Three more UX defects, all reported by a user actually using the thing.**
 

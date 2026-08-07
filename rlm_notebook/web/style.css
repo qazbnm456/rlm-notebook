@@ -146,12 +146,27 @@ input:focus {
   box-shadow: 0 0 0 2px color-mix(in oklch, var(--accent) 24%, transparent);
 }
 
+/* `.btn` has to work on an <a> as well as a <button>. The global reset covers `button` only, so an
+   anchor carrying this class kept the UA's blue-and-underlined link styling and read as unstyled
+   text on the dark theme — reported from a screenshot of the podcast download link. */
 .btn {
   border: 1px solid var(--border-strong);
   background: var(--surface-2);
   border-radius: var(--radius);
   padding: 0.5em 1em;
   cursor: pointer;
+  color: inherit;
+  text-decoration: none;
+  display: inline-block;
+}
+
+/* `.btn` carries an author `display` (inline-block, so an `<a class="btn">` takes vertical padding
+   like the `<button>`s do), and an author `display` outranks the UA's `[hidden] { display: none }`.
+   No `.btn` element is hidden-toggled today, but this is the most-used class in the file, so the
+   pairing is declared up front rather than left for whoever adds the first one to debug
+   (invariant 36 — the exact bug that blanked the whole UI once already). */
+.btn[hidden] {
+  display: none;
 }
 
 .btn:hover {
@@ -618,11 +633,69 @@ input:focus {
   font-size: 0.82rem;
 }
 
+/* --- Subtitle-style transcript --- */
+
+.podcast-timecode {
+  margin-left: 0.5rem;
+  padding: 0 0.35em;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-2);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.podcast-timecode:hover {
+  opacity: 1;
+  border-color: var(--accent-dim);
+}
+
+.podcast-utterance.is-seekable {
+  cursor: pointer;
+  border-radius: var(--radius);
+  padding: 0.35rem 0.5rem;
+  margin-left: -0.5rem;
+  margin-right: -0.5rem;
+  /* Only background and border transition — a colour change on the TEXT would fight the citation
+     highlighter-stroke, which is this UI's signature interaction. Both are listed because hover
+     moves `border-color` (see below) while `.is-speaking` moves `background`. */
+  transition: background 0.15s ease, border-color 0.15s ease;
+}
+
+/* Deliberately NOT `background` and deliberately NOT more specific than `.is-speaking`: an
+   independent review found the first version set `--surface-2`, the colour `.podcast-utterance`
+   already carries (so hovering looked like nothing happened), and at specificity (0,3,0) it
+   outranked `.is-speaking` at (0,2,0) — hovering the line that was currently playing DELETED its
+   highlight. A border colour is a channel `.is-speaking` doesn't use, so the two compose. */
+.podcast-utterance.is-seekable:hover {
+  border-color: var(--accent-dim);
+}
+
+/* The line currently being spoken. A left rule plus a wash, deliberately NOT the citation
+   highlighter's colour — a reader must be able to tell "the model cited this" from "this is playing
+   now" at a glance, and both can be true of the same line. */
+.podcast-utterance.is-speaking {
+  background: color-mix(in oklch, var(--studio-accent) 14%, transparent);
+  box-shadow: inset 3px 0 0 var(--studio-accent);
+}
+
 .podcast-transcript {
   display: flex;
   flex-direction: column;
   gap: 0.6rem;
   margin-top: 0.6rem;
+}
+
+/* A subtitle transcript scrolls in its OWN box rather than lengthening the studio column, so the
+   auto-scroll that follows the playhead never moves an ancestor — `app.js` sets `scrollTop` here
+   directly instead of calling `scrollIntoView`, which walks every scrollable ancestor. It measures
+   with `getBoundingClientRect`, so nothing here has to establish an `offsetParent` for it. */
+.podcast-transcript.is-timed {
+  position: relative;
+  max-height: 22rem;
+  overflow-y: auto;
 }
 
 .podcast-utterance {

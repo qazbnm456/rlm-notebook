@@ -74,7 +74,8 @@ def ingest_uploaded_file(data: bytes, filename: str, source_id: str) -> Source:
 
     Dispatches on `filename`'s suffix against `_ALLOWED_UPLOAD_SUFFIXES` — anything else raises
     `ValueError` naming the allowed set, rather than guessing. `.pdf` writes `data` to a temp file
-    (no `.pdf` suffix needed — PyMuPDF sniffs content, not the path, verified against a real PDF
+    (no `.pdf` suffix needed — `pypdfium2` sniffs content, not the path, re-verified against a real
+    suffixless PDF after it replaced PyMuPDF, since the original evidence was the old backend's
     during this feature's design) and calls the EXISTING `parse_pdf` unchanged, then overrides the
     result's `.origin` from the temp path to the caller's `filename` (`Source` has no validators, so
     `model_copy` is a safe, non-revalidating shallow copy). The temp file is deleted in a `finally`

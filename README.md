@@ -5,13 +5,18 @@ ones), and YouTube video captions — and uses an RLM
 ([`rlm-harness`](https://github.com/qazbnm456/rlm-harness)) to answer questions grounded in them, with a
 citation you can check back against the original text yourself.
 
-**Status: six slices in.** Ingestion (text/web/PDF, with local hybrid OCR for scanned pages),
-citation-grounded chat, a persistent multi-turn notebook, a Notebook Guide (summary/FAQ/
-timeline/key-insight generation), and an Audio Overview (two-host podcast script + synthesized
-speech) are all driveable from the command line — and also from an HTTP API (`ask`/`guide`/`audio`,
-each run isolated in its own cancellable subprocess) and a full browser web UI (source management,
-chat, a Studio panel, and a live reasoning ticker — see "Web UI" below). See `CLAUDE.md` for the
-hard invariants this project is built against.
+**Status: twenty-four slices in.** Ingestion (text/web/PDF/YouTube captions, with local hybrid OCR
+for scanned pages), citation-grounded chat, a persistent multi-turn notebook, notes that can be
+promoted into citable sources, a Notebook Guide (summary/FAQ/timeline/key-insight generation), and
+an Audio Overview (two-host podcast script + synthesized speech, with a subtitle-style transcript)
+are all driveable from the command line — and also from an HTTP API (`ask`/`guide`/`audio`, each
+run isolated in its own cancellable subprocess) and a full browser web UI (source management, chat,
+a Studio panel, a podcast player, and a live reasoning ticker — see "Web UI" below).
+
+A notebook names itself, model-authored prose follows the READER's language rather than the
+documents', a settings page carries the presentation settings, and models can run on a Claude
+Pro/Max subscription instead of an API key. See `CLAUDE.md` for the hard invariants this project is
+built against — it is the authoritative record; this file is the tour.
 
 ## Install and run
 
@@ -61,8 +66,9 @@ context for understanding a follow-up question only; every citation in every ans
 against the current sources regardless of what an earlier turn cited.
 
 Sources with a flagged prompt-injection pattern (see `injection_scan.py`) still answer normally;
-the flag is surfaced alongside the answer rather than blocking it, for as long as that source
-stays part of the notebook.
+the flag is metadata on the source rather than a block. The CLI prints it alongside the answer; the
+HTTP API's `AskResponse` does not carry it today, so the web UI cannot show it either — stated
+because an earlier version of this paragraph implied otherwise.
 
 A YouTube URL ingests that video's captions — official if available, else auto-generated — never
 the video or audio stream itself (no `ffmpeg`, no transcription model, no API key needed). A video
@@ -91,8 +97,16 @@ uv run rlm-notebook audio --notebook mynb
 
 The transcript prints first (with citations, same as `ask`/`guide`) regardless of whether audio
 synthesis succeeds — a TTS failure doesn't lose the script. The default TTS provider (`edge-tts`)
-needs no API key; set `RN_TTS_PROVIDER`/`RN_TTS_VOICE_HOST_A`/`RN_TTS_VOICE_HOST_B` in `.env` to
-change voices (see `.env.example`).
+needs no API key and writes MP3; `RN_TTS_PROVIDER=kokoro` (`uv sync --extra kokoro`) is fully local,
+no network at all, and writes WAV — each provider owns its own format and its own language→voice
+map. Set `RN_TTS_VOICE_HOST_A`/`_B` in `.env` to override the cast (see `.env.example`).
+
+**Everything the model writes follows the READER's language, not the documents'.** Set
+`RN_OUTPUT_LANGUAGE` (a hard override, applying to chat as well as artifacts), or leave it unset and
+the server resolves one per notebook — from your browser's `Accept-Language`, the sources, and any
+questions already asked, with the questions weighted highest. Citation coordinates and quotes are
+never translated: they are what makes a citation checkable. Podcast voices follow the resolved
+language too.
 
 ## HTTP API
 
@@ -114,7 +128,13 @@ curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application
 curl -X POST localhost:8000/notebooks/mynb/ask -H "Content-Type: application/json" \
     -d '{"question": "what does it say about X?"}'
 curl -X POST localhost:8000/notebooks/mynb/guide/summary
-curl -X POST localhost:8000/notebooks/mynb/audio         # podcast script + base64-encoded MP3
+curl -X POST localhost:8000/notebooks/mynb/audio         # podcast script + base64-encoded audio
+curl -X GET  localhost:8000/notebooks/mynb/audio/file    # ...and the persisted episode as a file
+curl -X POST localhost:8000/notebooks/mynb/overview      # the chat overview, persisted on the notebook
+curl -X POST localhost:8000/notebooks/mynb/title         # let the model name the notebook
+curl -X GET  localhost:8000/settings                     # output language + the two podcast voices
+curl -X PUT  localhost:8000/settings -H "Content-Type: application/json" \
+    -d '{"output_language": "Traditional Chinese"}'      # replaces ALL settings; env still wins
 curl -X POST localhost:8000/notebooks/mynb/cancel        # cancel that notebook's in-flight run
 
 # Optional on ask/guide/audio: {"run_id": "my-token"} picks your OWN run id (sanitized, then
@@ -180,8 +200,11 @@ NotebookLM's most basic closed loop — with a secondary `⌁ trace` icon on the
 showing the trace turn where the model read that source span, a transparency mechanism, never a
 stronger faithfulness claim than `citations.py` itself already makes. Every Chat answer can be
 saved as a note, and every note can later be promoted into a real, citable source — NotebookLM's
-own research loop of reading, noting, and deepening a notebook over successive turns. See
-`rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-33.
+own research loop of reading, noting, and deepening a notebook over successive turns. A generated
+podcast plays in-page (and downloads) with a subtitle-style transcript: a timecode per line, click
+a line to seek to it, and the line being spoken is highlighted as it plays. A ⚙ settings page
+carries the output language and the two podcast voices (presentation settings only — no keys, no
+safety bounds). See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-45.
 
 ## What this is not (yet)
 

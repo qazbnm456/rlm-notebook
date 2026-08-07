@@ -1,7 +1,7 @@
 """Text-to-speech synthesis for the Audio Overview — host-side, provider-abstracted.
 
 CLAUDE.md's Audio Overview invariant: synthesis runs entirely host-side, on an already-generated,
-already citation-checked `PodcastScript` (`audio.py`) — never inside the RLM sandbox, and never a
+already schema-validated `PodcastScript` (`audio.py`) — never inside the RLM sandbox, and never a
 tool the model can call. The provider is selected by `RN_TTS_PROVIDER` (default `"edge-tts"`, a
 free service needing no API key) so the tool works with no paid credentials out of the box —
 mirroring the OCR default (CLAUDE.md invariant 7): a capability this project's core value
@@ -17,7 +17,7 @@ deliberately refused.
 from __future__ import annotations
 
 import asyncio
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
@@ -40,16 +40,42 @@ class TTSProvider(Protocol):
 
     `default_voices` belongs here too, because a voice NAME is provider-specific: edge-tts wants
     `zh-TW-YunJheNeural` and Kokoro wants `zf_xiaobei`. Keeping the language→voice map on the
-    provider is what stops one provider's names leaking into another's request.
+    provider is what stops one provider's names leaking into another's request — and so does
+    `fallback_voices`, the LAST resort when no language matches. An independent audit found the map
+    had moved onto the provider while the last resort had not, so an unknown language on kokoro
+    still fell through to an edge-tts name.
     """
 
     #: File extension and MIME type of what `synthesize` writes.
     suffix: str
     media_type: str
 
-    def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None: ...
+    def default_voices(self, language: str | None) -> tuple[str, str] | None:
+        """This provider's cast for `language`, or `None` if it does not know that language —
+        `None` means "leave the configured voices alone" (invariant 40: substituting a voice for a
+        language nobody asked for is worse than a wrong-language voice)."""
+        ...
 
-    def default_voices(self, language: str | None) -> tuple[str, str] | None: ...
+    def fallback_voices(self) -> tuple[str, str]:
+        """This provider's own shipped cast, used only when nothing else resolved. Distinct from
+        `default_voices(None)` on purpose: that one must keep returning `None` so an unknown
+        language does not silently overrule a configured voice."""
+        ...
+
+    def synthesize(
+        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+    ) -> list[float]:
+        """Write the audio and return each utterance's START OFFSET in seconds.
+
+        The offsets are what let the transcript behave like subtitles — highlight the line being
+        spoken, click a line to seek to it. Every provider here already synthesizes utterance by
+        utterance, so it knows them; returning them costs nothing and asking the browser to guess
+        would be impossible.
+
+        Returning `[]` is allowed and means "no timing available": the UI then renders a plain
+        transcript rather than breaking. A caller must never assume `len(offsets) == len(utterances)`.
+        """
+        ...
 
 
 #: A factory `(text, voice) -> an object with an async .stream()` yielding edge-tts-shaped chunks.
@@ -92,12 +118,18 @@ class EdgeTTSProvider:
     def default_voices(self, language: str | None) -> tuple[str, str] | None:
         return default_voices_for(language)
 
-    def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None:
+    def fallback_voices(self) -> tuple[str, str]:
+        return ("en-US-GuyNeural", "en-US-JennyNeural")
+
+    def synthesize(
+        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+    ) -> list[float]:
         if not script.utterances:
             raise TTSError("script has no utterances to synthesize")
         try:
-            audio = asyncio.run(self._synthesize_all(script, voice_map))
+            audio, offsets = asyncio.run(self._synthesize_all(script, voice_map))
             out_path.write_bytes(audio)
+            return offsets
         except TTSError:
             raise
         except Exception as exc:
@@ -109,19 +141,81 @@ class EdgeTTSProvider:
             # caller is concerned, so both share one error boundary.
             raise TTSError(f"TTS synthesis failed: {type(exc).__name__}: {exc}") from exc
 
-    async def _synthesize_all(self, script: PodcastScript, voice_map: dict[str, str]) -> bytes:
+    async def _synthesize_all(
+        self, script: PodcastScript, voice_map: dict[str, str]
+    ) -> tuple[bytes, list[float]]:
+        """The concatenated audio, plus each utterance's start offset in seconds.
+
+        Timing comes from edge-tts's own boundary events rather than from measuring the MP3: their
+        `offset`/`duration` are in 100-nanosecond units RELATIVE to the utterance being synthesized,
+        so the last boundary's end APPROXIMATES that utterance's duration, and a running sum gives
+        the offsets. Approximates, not equals: an independent review measured the per-utterance error
+        at -0.049s..+0.066s against durations recovered from the MP3 frame headers, non-systematic in
+        sign and cumulating to about +/-0.11s over five or six lines — fine for highlighting a line,
+        and not a drift that grows in one direction. The drift-free alternative sits in the same
+        function (edge-tts emits fixed-bitrate MP3, so a stream's own frame headers give its exact
+        duration) and is a follow-up if a long episode ever visibly desynchronises; it is written
+        down here rather than left as a thing to rediscover.
+
+        **Matches ANY `*Boundary` event, not `WordBoundary` specifically.** The first version keyed
+        on `WordBoundary`; the installed edge-tts defaults to `boundary="SentenceBoundary"` and emits
+        only that, so every offset came back 0.0 — caught by generating a real episode and reading
+        the numbers, not by the offsets being obviously absent. Requesting word boundaries instead
+        would work too, but sentence-level is all this needs (one offset per utterance) and asking
+        for less data is the cheaper fix.
+
+        A provider (or a fake) that emits no boundary at all yields offsets that stop advancing —
+        `[0.0, 0.0, ...]`, which is exactly as long as `utterances` and therefore CANNOT be caught by
+        a length check. An independent review found the docstring here claiming otherwise, and
+        simulated the consequence: every line stamped `0:00`, the SECOND row highlighted for the
+        whole episode and the first never, every click seeking to 0. So the real guard is
+        monotonicity, applied by the consumer (`app.js`'s `timed`), not length alone. The default
+        provider does not reach this state today — verified live, edge-tts raises `NoAudioReceived`
+        (surfacing as `TTSError`) for punctuation-only text rather than returning boundary-less
+        audio — but a guard that rests on that is a guard resting on someone else's error handling.
+        """
         chunks: list[bytes] = []
+        offsets: list[float] = []
+        elapsed = 0.0
         for utterance in script.utterances:
             voice = voice_map.get(utterance.speaker)
             if not voice:
                 raise TTSError(f"no voice configured for speaker {utterance.speaker!r}")
             communicate = self._communicate_factory(utterance.text, voice)
             buf = bytearray()
+            end_ticks = 0
             async for chunk in communicate.stream():
                 if chunk["type"] == "audio":
                     buf.extend(chunk["data"])
+                elif chunk["type"].endswith("Boundary"):
+                    end_ticks = max(end_ticks, chunk.get("offset", 0) + chunk.get("duration", 0))
             chunks.append(bytes(buf))
-        return b"".join(chunks)
+            offsets.append(elapsed)
+            elapsed += end_ticks / 10_000_000  # 100ns ticks -> seconds
+        return b"".join(chunks), offsets
+
+
+def sequence_offsets(lengths: Sequence[int], gap: int, sample_rate: int) -> list[float]:
+    """Each utterance's start offset in seconds, when `lengths` samples are concatenated with `gap`
+    samples of silence BETWEEN them (never before the first, never after the last).
+
+    **The gap belongs to the line BEFORE it**, so an offset is where its own line's audio starts and
+    a click lands on that line rather than in the preceding pause. Its own leading silence is the
+    provider's business: kokoro emits about 0.39s of it per utterance, measured on a real episode,
+    which is why "lands on the speech" is really "lands at the start of this line's audio".
+
+    A pure function rather than bookkeeping inlined in `KokoroProvider.synthesize` so CI can check
+    invariant 44's gap-before-offset claim without the `kokoro` extra, a model download, or any
+    audio — an independent review found the claim rested on a hand-verification and nothing else.
+    """
+    offsets: list[float] = []
+    samples = 0
+    for index, length in enumerate(lengths):
+        if index:
+            samples += gap
+        offsets.append(samples / sample_rate)
+        samples += length
+    return offsets
 
 
 #: Language name (or BCP-47 tag) -> a (host_a, host_b) edge-tts voice pair. Every id here was read
@@ -248,9 +342,24 @@ class KokoroProvider:
     #: Kokoro's native sample rate.
     _SAMPLE_RATE = 24_000
 
+    #: A short silence between utterances. `EdgeTTSProvider` can't do this without re-encoding
+    #: (invariant 17), but here we hold raw samples, so it is free — and back-to-back turns with no
+    #: gap at all is a large part of why a concatenated two-host script sounds unnatural.
+    _GAP_SECONDS = 0.35
+
     def default_voices(self, language: str | None) -> tuple[str, str] | None:
         entry = self._entry(language)
         return (entry[1], entry[2]) if entry else None
+
+    def fallback_voices(self) -> tuple[str, str]:
+        # Kokoro's own English cast. Invariant 43 said the language MAP had to move onto the
+        # provider so one provider's names could not leak into the other's request; an independent
+        # audit found the LAST RESORT had not moved with it, so an unknown language on kokoro still
+        # fell through to `config`'s shipped `en-US-GuyNeural` — an edge-tts name handed to
+        # `KPipeline`, failing at synthesis after a real model call had already been spent (exactly
+        # the waste invariant 19 exists to prevent). Ids from `_KOKORO_VOICES`, i.e. from a working
+        # synthesis, never written from memory.
+        return (_KOKORO_VOICES["english"][1], _KOKORO_VOICES["english"][2])
 
     @staticmethod
     def _entry(language: str | None) -> tuple[str, str, str] | None:
@@ -259,7 +368,9 @@ class KokoroProvider:
         key = " ".join(language.lower().split())
         return _KOKORO_VOICES.get(key) or _KOKORO_VOICES.get(key.split("-")[0])
 
-    def synthesize(self, script: PodcastScript, voice_map: dict[str, str], out_path: Path) -> None:
+    def synthesize(
+        self, script: PodcastScript, voice_map: dict[str, str], out_path: Path
+    ) -> list[float]:
         try:
             import numpy as np
             import soundfile as sf
@@ -277,16 +388,31 @@ class KokoroProvider:
         )
         try:
             pipeline = KPipeline(lang_code=lang_code)
-            chunks = []
+            per_utterance = []
             for utterance in script.utterances:
                 voice = voice_map.get(utterance.speaker)
                 if not voice:
                     raise TTSError(f"no voice configured for speaker {utterance.speaker!r}")
-                for _, _, audio in pipeline(utterance.text, voice=voice):
-                    chunks.append(audio.numpy() if hasattr(audio, "numpy") else audio)
-            if not chunks:
+                parts = [
+                    audio.numpy() if hasattr(audio, "numpy") else audio
+                    for _, _, audio in pipeline(utterance.text, voice=voice)
+                ]
+                per_utterance.append(
+                    np.concatenate(parts) if parts else np.zeros(0, dtype="float32")
+                )
+            if not any(len(part) for part in per_utterance):
                 raise TTSError("kokoro produced no audio for this script")
+            gap = np.zeros(int(self._GAP_SECONDS * self._SAMPLE_RATE), dtype="float32")
+            offsets = sequence_offsets(
+                [len(part) for part in per_utterance], len(gap), self._SAMPLE_RATE
+            )
+            chunks = []
+            for index, part in enumerate(per_utterance):
+                if index:
+                    chunks.append(gap)
+                chunks.append(part)
             sf.write(out_path, np.concatenate(chunks), self._SAMPLE_RATE)
+            return offsets
         except TTSError:
             raise
         except Exception as exc:

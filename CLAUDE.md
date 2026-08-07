@@ -22,7 +22,12 @@ uv pip install -e ../rlm-harness
   `scripted_lm`, so the planner → tools → SUBMIT chain executes for real (`importorskip("dspy")`).
   `test_api.py`/`tests/test_runner.py` need the `api` extra installed to be collected at all (CI's
   `uv sync --extra api` covers this — see `pyproject.toml`); without it they're silently absent
-  from the run, not failing, so a bare local `uv sync` can look greener than CI actually is.
+  from the run, not failing, so a bare local `uv sync` can look greener than CI actually is. **The
+  same trap runs the OTHER way for `kokoro`**, which CI does NOT sync: a local venv with that extra
+  installed is greener than CI. Nothing in the suite may `importorskip` a kokoro-only package —
+  `tests/test_tts.py` fakes `kokoro` AND `soundfile` through `sys.modules` for exactly this reason,
+  after an audit blocked both and watched a test SKIP while its docstring claimed it ran without
+  them. Verify with a meta-path blocker, not by trusting the docstring.
 - A LIVE run additionally needs real model credentials and a Deno sandbox (`brew install deno`).
   Don't run it in CI; it costs money.
 - Before claiming done, actually run both commands and paste the output.
@@ -48,7 +53,8 @@ deliberate assessment named it the highest-priority one. The three remaining gap
 assessment then closed in turn: a source-text viewer (`GET .../sources/{source_id}` plus a
 click-a-citation-see-the-passage modal, invariant 31), Notes (invariant 32), and YouTube caption
 ingestion (invariant 33); a separate slice replaced `pymupdf`/`pymupdf4llm` with `pypdfium2` over a
-Invariant 34 then closed the lost-update defect every write
+real AGPL-vs-MIT licence conflict (invariant 7). Invariant 34 then closed the lost-update defect
+every write
 path shared — a notebook write re-reads the file under a per-notebook lock and applies its own
 delta, instead of persisting a snapshot read minutes earlier — and gave `traces/` its first
 retention policy.
@@ -90,15 +96,20 @@ them exist because an earlier design discussion mentioned them.
    version of this module, which fetched with the default opener and had no per-hop check; verified
    against a real redirect target before landing the fix. Do not swap back to plain
    `urllib.request.urlopen`.
-3. **Ingestion is host-side only, never inside the sandbox.** `parsers/{text,web,pdf}.py` run
-   before any `RLMTask` exists. `pypdfium2`, `trafilatura`, and the OCR backends (invariant 7) are
+3. **Ingestion is host-side only, never inside the sandbox.** `parsers/{text,web,pdf,youtube}.py`
+   and `parsers/_ocr.py` all run before any `RLMTask` exists — `youtube` is dispatched FIRST in
+   `ingest.ingest_one` and was missing from this list until an independent audit found it.
+   `pypdfium2`, `trafilatura`, `yt-dlp` (invariant 33 — a core dependency doing host-side network
+   I/O), and the OCR backends (invariant 7) are
    native/C-extension dependencies unsuited to the pyodide/deno sandbox rlm-harness builds by default —
    and untrusted parsing logic has no reason to run inside the same trust boundary as the model's
    own code anyway. `corpus.py` only ever hands the RLM a plain string, already parsed.
 4. **The corpus blob uses `[[SRC:<id>|<locator>]]` markers, and EVERY citation-grounded task's
    instructions teach the model to treat them as opaque and echo them verbatim in a `Citation`.**
-   This applies to `AnswerQuestion` (`task.py`) and all four Notebook Guide tasks (`guide.py`)
-   alike — `instructions.py`'s `CITATION_RULES` is the ONE copy of this rule, imported by both
+   This applies to `AnswerQuestion` (`task.py`), all four Notebook Guide tasks (`guide.py`) and
+   `GeneratePodcastScript` (`audio.py`) — SIX, not the five an earlier count here and in
+   `instructions.py` claimed; the podcast composes the identical shared pieces and emits verified
+   `Citation`s, and an independent audit found the count had never been updated when it did — `instructions.py`'s `CITATION_RULES` is the ONE copy of this rule, imported by both
    modules rather than hand-duplicated (see invariant 13). Without an explicit rule the model has
    no reason to preserve an ad hoc marker format across `.find()`/slice operations, and
    `citations.py` (invariant 5) has nothing to verify against if it doesn't. **Residual risk, now
@@ -118,8 +129,12 @@ them exist because an earlier design discussion mentioned them.
    coordinate verification is marked unverified, never silently dropped, never silently trusted.
 6. **`injection_scan.py`'s flags are deterministic and additive — they gate nothing.** A flagged
    source's content still reaches the model and its answer still returns; the flag is metadata
-   surfaced alongside the answer, unioned with (never overridden by) whatever the model itself
-   concluded. This is a transparency mechanism, not a blocking one — do not wire it to refuse a
+   attached to the SOURCE at ingestion (`ingest.with_injection_flags`) and printed alongside the
+   answer by `cli.py`. Two corrections from an independent audit, because the original wording
+   described a design that was never built: there is no model-side injection conclusion to union
+   with — `schema.Answer` is `text` + `citations` only, and no task's instructions mention injection
+   — and `AskResponse` carries no flags at all, so "surfaced alongside the answer" is true of the
+   CLI and NOT of the API or the web UI. This is a transparency mechanism, not a blocking one — do not wire it to refuse a
    run. Its patterns trade recall for precision on purpose (e.g. a paper *discussing* prompt
    injection as a topic can trip it) — that is an acceptable false-positive rate for a flag nobody
    is forced to act on; don't over-tighten it into false negatives chasing a clean read.
@@ -127,7 +142,12 @@ them exist because an earlier design discussion mentioned them.
    page's text via `pypdfium2`; a page whose text layer extracts to (near-)nothing is rendered to
    an image and dispatched to `parsers/_ocr.py`'s hybrid OCR (RapidOCR primary, Tesseract fallback
    — both Apache-2.0, both CPU-only). The backends are core `dependencies` in `pyproject.toml`, not
-   an opt-in extra — a plain `uv sync` installs them, no flag required. (An earlier draft of this
+   an opt-in extra — a plain `uv sync` installs them, no flag required. **One honest qualifier**: the RapidOCR
+   primary path genuinely ships complete, but `pytesseract` is a WRAPPER — the `tesseract` binary is
+   a system dependency no Python manifest can express, and `_ocr.py` swallows
+   `TesseractNotFoundError`, so the fallback silently is not there on a machine without it. The
+   "below a small character threshold" check is literally `_MIN_TEXT_CHARS = 1`, i.e. a page whose
+   text layer extracts to nothing at all. (An earlier draft of this
    project put them behind an `ocr` extra and CI's plain `uv sync` never installed them; caught by
    an independent review that reproduced the exact CI sync and got a real test failure. A sibling
    open-source project, `lfnovo/open-notebook` issue #819, shipped the same
@@ -135,6 +155,12 @@ them exist because an earlier design discussion mentioned them.
    Docker image — this is that pitfall, hit for real once, not a hypothetical.) A `vision_llm` OCR
    mode (reusing the already-configured multimodal `dspy.LM` for hard/handwritten pages) is a
    deferred follow-up, not yet implemented.
+
+   **`NotebookConfig.ocr_provider` / `RN_OCR_PROVIDER` currently has ZERO consumers** — an
+   independent audit found `parse_pdf` takes no config at all and calls `ocr_image` unconditionally,
+   so BOTH branches are absent, not just `vision_llm`. The variable is validated on read and then
+   ignored. Left in place because it is the seam the `vision_llm` follow-up will use, but a reader
+   must not infer from its existence that anything dispatches on it today.
 
    **`pypdfium2` replaced `pymupdf`/`pymupdf4llm` — a real AGPL-vs-MIT license conflict, found and
    fixed, not a preemptive style choice.** `pymupdf`/`pymupdf4llm` are dual-licensed "GNU AGPL v3
@@ -154,7 +180,7 @@ them exist because an earlier design discussion mentioned them.
    worked before by luck via `rapidocr-onnxruntime`'s own transitive `Pillow` dependency, the
    EXACT same "worked by luck until resolution shifted" failure class already documented for
    `python-multipart`, invariant 30 — caught and fixed proactively this time, not after a second
-   incident). Full design record: `docs/design/pymupdf-license-replacement.md`.
+   incident). Full design record: the pymupdf-replacement design record.
 
    **A deliberately simpler OCR-need heuristic than `pymupdf4llm`'s former one — a disclosed
    tradeoff, not silently assumed equivalent.** `pymupdf4llm` ran an ONNX classifier over page
@@ -174,11 +200,18 @@ them exist because an earlier design discussion mentioned them.
    named only one.
 8. **`corpus.py` enforces a size cap on the assembled blob and fails loudly, not silently, past
    it.** The single-blob-as-REPL-variable design (rlm-harness's core mechanic) has a real memory
-   ceiling in the pyodide/deno sandbox; a notebook that exceeds the cap must get a clear error at
-   ingestion time, not a mysteriously failing/slow chat turn later. Known gap: `Corpus.blob()`
-   currently concatenates every source in full *before* checking the length, so the cap catches an
-   oversized notebook loudly but only after paying the memory cost of assembling it once — real
-   memory-safety (abort while assembling) is a follow-up, not yet done.
+   ceiling in the pyodide/deno sandbox; the cap exists to stop a mysteriously failing
+   or slow chat turn later.
+
+   **Two known gaps, and the second was an overclaim this invariant used to make.** (a)
+   `Corpus.blob()` concatenates every source in full BEFORE checking the length, so the cap catches
+   an oversized notebook loudly but only after paying the memory cost of assembling it once. (b) It
+   fires at QUESTION time, not at ingestion time — `max_chars` defaults to `None` (no check at all)
+   and every call site that passes it is an `ask`/`guide`/`audio` path, so
+   `add_sources`/`upload_source`/`cli._prepare` never evaluate it. An independent audit found this
+   invariant claiming the opposite ("a clear error at ingestion time"). Checking at ingestion means
+   assembling the whole blob on every source add, which IS gap (a): the two are one follow-up, not
+   two.
 9. **`AnswerQuestion` always runs in the `pyodide` sandbox; `NotebookConfig.from_env` refuses any
    other `RN_INTERPRETER` value rather than silently overriding it.** Matches the sibling projects'
    own pin (e.g. ctx-distillery's `PINNED_INTERPRETER`) — an operator who set `RN_INTERPRETER=local`
@@ -196,8 +229,12 @@ them exist because an earlier design discussion mentioned them.
     Arabic, Cyrillic and emoji character, so `"模型要睡覺"` reduced to the empty string and
     `notebook_path` rejected it — a user hit exactly that (`400 invalid notebook id … reduces to an
     empty token`) naming a notebook in Chinese, with nothing in the message to suggest the NAME was
-    the problem rather than the request. The hash is deterministic, collision-resistant, and inside
-    the same whitelist, so every traversal and length property above is unchanged — `".."` becomes
+    the problem rather than the request. The id is NFC-normalized before hashing (so two spellings of
+    the same Unicode string reach the same file) and encoded with `surrogatepass` (so a lone
+    surrogate cannot raise out of `slug` — load-bearing, because `api._derive_run_id` calls `slug()`
+    OUTSIDE every error wrapper, which made a raising `slug` an unauthenticated 500). Neither was
+    documented until an independent audit found them. The hash is deterministic, collision-resistant,
+    and inside the same whitelist, so every traversal and length property above is unchanged — `".."` becomes
     hex, which is further from a traversal token than the folded form was. It affects the FILENAME
     only: `Notebook.id` stores what the user typed, and `list_notebook_summaries` already reports
     that stored value rather than the filename stem (a property it was given for this exact reason),
@@ -226,14 +263,19 @@ them exist because an earlier design discussion mentioned them.
 12. **Extending an existing notebook with `--source` dedupes by origin, and never reassigns an
     existing source's id.** `notebook.existing_origins` + `ingest.ingest_new`'s `skip_origins` (reached through
     `notebook.ingest_sources_for`) make
-    re-passing the same path/URL on a later turn a no-op rather than a duplicate; new sources are
-    numbered starting from `len(notebook.sources) + 1`, so a source already cited in a saved
+    re-passing the same path/URL on a later turn a no-op rather than a duplicate; a source already cited in a saved
     `ChatTurn.answer` can never have its id silently repointed at different text on a later `ask`.
+    The GUARANTEE is what matters; the mechanism this invariant used to name (`numbered starting
+    from len(notebook.sources) + 1`) is discarded by `append_sources`, which re-numbers against the
+    freshly-loaded notebook inside the lock (invariant 34) — an independent audit found forcing
+    `start_index=1` leaves the suite green, because the caller's value never survives.
 13. **Every citation-grounded RLMTask shares its citation-marker and validate-before-submit
     instructions from `instructions.py` (`CITATION_RULES`, `validate_before_submit_rule(...)`) —
     not a hand-copied paragraph per task.** `AnswerQuestion` and the four Notebook Guide tasks
-    (`GenerateSummary`/`GenerateFAQ`/`GenerateTimeline`/`GenerateKeyInsight`) each compose the SAME
-    two shared pieces onto their own task-specific opening. A wording fix to either shared piece
+    (`GenerateSummary`/`GenerateFAQ`/`GenerateTimeline`/`GenerateKeyInsight`), plus
+    `GeneratePodcastScript`, each compose the SAME shared pieces onto their own task-specific
+    opening — THREE pieces since invariant 39 added `VERBATIM_COORDINATES` through
+    `chat_language_rule`/`artifact_language_rule`, not the two this sentence used to name. A wording fix to either shared piece
     must never be applied to just one task's local copy — there should be no local copy to apply
     it to. **The task-specific opening (including its "ground only in sources" sentence) is
     deliberately NOT unified across all five** — `AnswerQuestion`'s says so for a missing *answer*
@@ -282,6 +324,10 @@ them exist because an earlier design discussion mentioned them.
     freely-named per episode.** Keeps `Utterance.speaker` a closed enum citations/voice-mapping
     can rely on, and keeps `RN_TTS_VOICE_HOST_A`/`_B` a fixed two-variable surface rather than an
     open-ended per-episode cast configuration — a deliberate MVP scope cut, not an oversight.
+    ("Closed enum" is a `Literal["host_a", "host_b"]`, not an `enum.Enum`.) **Known gap**:
+    `config.tts_voice_map` hardcodes both speaker keys with no tripwire, unlike `cli._SPEAKER_LABELS`
+    which invariant 28's sibling test covers — a third host would need both updated and only one
+    would fail loudly.
 20. **`ingest.py`/`notebook.py` (`is_url`/`ingest_one`/`ingest_new`, `load_or_create`,
     `ingest_sources_for`/`append_sources`, `mutate_notebook`) are shared by `cli.py` AND `api.py` —
     neither entry point depends on the other.** `cli.py` used to own this logic outright; it was extracted here once `api.py` needed
@@ -317,8 +363,8 @@ them exist because an earlier design discussion mentioned them.
     only clears its OWN entry (an `is run` identity check), confirmed with an interleaved-`asyncio`
     test, so the overwrite/cleanup itself never corrupts state. A per-run-id (rather than
     per-notebook-id) registry would remove limitation (b); deferred, not implemented here.
-24. **`api._config()` converts `NotebookConfig.from_env()`'s `SystemExit` into an HTTP 500, rather
-    than letting it escape a request handler.** `cli.py` lets the same `SystemExit` propagate and
+24. **Every `SystemExit` a request handler can reach is converted to an HTTP 500, rather than
+    letting it escape.** `api._config()` does this for `NotebookConfig.from_env()`'s. `cli.py` lets the same `SystemExit` propagate and
     exit the process, which is correct for a one-shot CLI invocation — it is NOT correct for a
     long-running server process, where an unhandled `SystemExit` inside a request handler is a
     crash, not a clean error response. Verified against a real running server (`curl`, not just the
@@ -328,6 +374,15 @@ them exist because an earlier design discussion mentioned them.
     is reachable only through `from_env()`, and every `api.py` call site uses `_config()`, never
     `NotebookConfig.from_env()` directly — confirmed by an independent review; don't add a new
     direct call that bypasses this wrapper.
+
+    **That enumeration was WRONG, and there was a live escape.** `config.max_upload_bytes()` has a
+    `SystemExit` of its OWN (through `_env_int`) and is the FIRST statement of `upload_source`,
+    outside any wrapper — deliberately not a `NotebookConfig` field (invariant 30), which is exactly
+    how it fell outside `_config()`'s coverage. A later independent audit reproduced
+    `RN_MAX_UPLOAD_BYTES=not-an-int` plus an upload returning a raw 500 with a traceback against a
+    real server. Caught in the handler now, and pinned by a test. **The RULE is the invariant, not
+    the list of places it currently applies**: any standalone config reader a handler calls needs
+    the same treatment, and that list has to be re-derived rather than trusted.
 25. **This API has NO authentication or authorization of any kind.** Any caller can create,
     extend, query, `ask`/`guide` against, or cancel a run for ANY `notebook_id` — there is no
     concept of an owner. It is meant for local or otherwise fully-trusted-network use only (the
@@ -336,8 +391,14 @@ them exist because an earlier design discussion mentioned them.
     module docstring and `README.md` say so explicitly — don't let that warning quietly disappear
     in a later edit. `GET /notebooks` (invariant 29) extends this posture from "any id is reachable
     if you know it" to "every id is enumerable without knowing it" — reviewed and accepted as part
-    of that slice, since the response is metadata only (ids, source counts, turn counts — never
-    source text or answers), not a new category of exposure.
+    of that slice, since the response was metadata only (ids, source counts, turn counts — never
+    source text or answers), not a new category of exposure. **That has since drifted, and is
+    restated here rather than left implied**: `NotebookSummary` also carries `title`, which
+    invariant 37 made model-authored prose derived from a 4000-character corpus excerpt. An
+    unauthenticated caller enumerating this endpoint now gets a one-line model summary of every
+    notebook's subject matter. Far short of source text, and inside the same accepted posture — but
+    no longer "metadata only", and an independent audit had to find that rather than the sentence
+    being updated when `title` was added.
 26. **`add_sources` accepts ONLY http(s) URLs, never a local file path — unlike `cli.py`'s
     `--source`.** `ingest.ingest_one` treats any non-URL string as a path on the machine running
     the process and reads it with no allowlist or directory boundary; that is a reasonable design
@@ -376,7 +437,7 @@ them exist because an earlier design discussion mentioned them.
     `toolscout` each ship a `studio/` that is a single-verdict security/review console (one input,
     one derived-state card, a Trajectory replay drawer); this project's persistent, multi-notebook,
     multi-turn knowledge workspace is structurally different, and the divergence is a recorded
-    design decision (`docs/design/web-ui-blueprint.md`'s §0), not an oversight. Zero-build vanilla
+    design decision (the web-UI blueprint's §0), not an oversight. Zero-build vanilla
     HTML/CSS/JS, same family convention as the siblings' own `studio/` stacks — no framework, no
     build step. Assets live under `rlm_notebook/web/`, NOT a top-level `web/` — a top-level directory
     has no entry in `pyproject.toml`'s `[tool.hatch.build.targets.wheel] packages` list and would
@@ -478,7 +539,8 @@ them exist because an earlier design discussion mentioned them.
       own in-memory run id satisfied with no server round-trip. **Both are persisted now** —
       `Overview.run_id` (invariant 38) and `Podcast.run_id` (invariant 42) — and each carries its
       own run id for exactly this reason. `citation_turn` checks `run_id` actually belongs to `notebook_id`
-      (`run_id.startswith(f"{notebook_id}-")`) — a follow-up completion check found `stream_run`
+      (`run_id.startswith(f"{slug(notebook_id)}-")` — the raw form an earlier draft of this
+      invariant showed is exactly what invariant 38 had to fix) — a follow-up completion check found `stream_run`
       lacked the same check, fixed in a small post-merge commit so both endpoints apply it
       consistently.
 
@@ -601,10 +663,12 @@ them exist because an earlier design discussion mentioned them.
     added) — that case is genuinely safe and unchanged.
 
     **`DELETE /notebooks/{id}/notes/{note_id}` is the first `DELETE` route in this API** — every
-    other mutator here is a `POST`. Uses `_load_notebook_or_404` (an existing note can only be
-    deleted from an EXISTING notebook, matching `ask`/`guide`'s existing-notebook-only precedent),
-    unlike `POST /notebooks/{id}/notes` itself, which uses `load_or_create` like `add_sources` (a
-    brand-new notebook can start life by adding a note).
+    other mutator here is a `POST`. An existing note can only be deleted from an EXISTING
+    notebook (`_mutate_or_http(..., create=False)`, matching `ask`/`guide`'s
+    existing-notebook-only precedent), unlike `POST /notebooks/{id}/notes` itself, which creates
+    (`create=True`, like `add_sources`) so a brand-new notebook can start life by adding a note.
+    Both went through `_load_notebook_or_404`/`load_or_create` when this was written; invariant 34
+    routed every write through `mutate_notebook` and those symbol names went stale here.
 
     **The "+ Save as note" button belongs to a CALL SITE that opts in, never to the shared
     `renderAnswerWithCitations`.** That shared function is called from SIX sites (Chat plus all four
@@ -858,7 +922,10 @@ them exist because an earlier design discussion mentioned them.
     needs the Claude Code CLI installed and logged in, a runtime prerequisite no package manifest
     can express. `ClaudeAgentLM` refuses to construct when `ANTHROPIC_API_KEY` is set (the CLI
     silently prefers it over subscription OAuth, which would quietly bill API credit) — an upstream
-    guard, verified live here, not something this project implements.
+    guard, verified live here, not something this project implements. `config._maybe_subscription_lm`
+    additionally raises `SystemExit` for a BARE `claude-agent-sdk/` with no model after the slash —
+    a `from_env`-family refusal like every other one in that module, reaching the API as a clean 500
+    through `_config()`. Undocumented until an independent audit found it, and still untested.
 
     **This is the path on which this project's FIRST real live run happened**, and with it the
     first actual evidence for invariants 4 and 11, both of which had carried an explicit "residual
@@ -923,8 +990,11 @@ them exist because an earlier design discussion mentioned them.
     cost a sandbox boot plus several planner turns. This is one plain `dspy.Predict` over a 4000-
     character excerpt — measured at ~8s live against a real model. It STILL runs inside the API's
     isolated subprocess, so invariant 21 is untouched: `worker.py` only ever calls `.arun(**kwargs)`
-    on the class it is handed, so satisfying that one method is the entire contract, and `api.py`
-    still imports neither `dspy` nor `rlm_harness`.
+    on the class it is handed, so satisfying that one method is the entire contract. (An earlier
+    draft of this paragraph ended "and `api.py` still imports neither `dspy` nor `rlm_harness`" —
+    the exact claim invariant 21 records as verified FALSE and says not to restate. `import
+    rlm_notebook.api` loads both, transitively through the task classes it imports for `_dotted()`.
+    The guarantee is about EXECUTION.)
 
     **Titling is a separate endpoint (`POST /notebooks/{id}/title`), never folded into
     `add_sources`.** Ingestion must not wait on — or fail because of — a model call, and the client
@@ -968,7 +1038,10 @@ them exist because an earlier design discussion mentioned them.
     consequence, not a bug: adding a source mid-generation makes the overview land ALREADY STALE.
     Same reasoning `ask` already uses for verifying citations against the snapshot corpus — "the
     blob the model actually read". Staleness itself is SET-EQUALITY on source ids computed
-    server-side in `_notebook_response` (one definition, not one per consumer); nothing in this
+    SERVER-side, never by a client — a client-side check would need the response to expose
+    `source_ids` and would be re-implemented in every future consumer. An independent audit
+    corrected the original "one definition, in `_notebook_response`": it is one small comparison
+    each in `_podcast_response` and `_overview_response`, and none in `_notebook_response` itself; nothing in this
     project removes a source, so set/list/length checks are equivalent today, and the set is kept
     because a future removal path would then break it in the SAFE direction.
 
@@ -995,6 +1068,13 @@ them exist because an earlier design discussion mentioned them.
     id the slug changes — `"my notebook"`, or any non-Latin id, which invariant 10 explicitly
     supports. Pre-existing, and found by this slice's audit precisely because persisting
     `Overview.run_id` would have made a dead link the notebook's front page.
+
+    **That fix covered only the SERVER half, and a later audit found the client still building run
+    ids from the RAW id** — so the very ids invariant 10 exists to support still had dead trace
+    links, just from the other end. `NotebookResponse.slug` now carries the server's own
+    `slug(notebook_id)` and `app.js` builds its run ids from that. Returned rather than
+    re-implemented in JS: the hash fallback would have to be duplicated too, and two copies of a
+    filename-safety transform is exactly the drift this project factors out.
 
 39. **Model-authored prose follows the READER's language, not the documents'. Citation coordinates
     never follow anything.** Every model-authored string used to come out in the sources' language,
@@ -1081,8 +1161,21 @@ them exist because an earlier design discussion mentioned them.
     against the default VALUE: an operator who deliberately sets `RN_TTS_VOICE_HOST_A=en-US-GuyNeural`
     on a Chinese notebook is making a choice, and a value-equality check would silently overrule it.
     The two voices resolve independently, so setting one and leaving the other keeps the un-set one
-    following the language. An unknown language returns `None` and the configured voices stand — a
-    wrong-language voice is bad, but substituting a voice for a language nobody asked for is worse.
+    following the language. An unknown language returns `None` from `default_voices` and the configured
+    voices stand — a wrong-language voice is bad, but substituting a voice for a language nobody
+    asked for is worse.
+
+    **`fallback_voices` is a SECOND, separate provider method, and it exists because the last resort
+    had not moved onto the provider when the language map did.** An independent audit found kokoro
+    plus an unknown language falling straight through to `config`'s shipped `en-US-GuyNeural` — an
+    edge-tts name handed to `KPipeline`, failing at synthesis after a real model call had already
+    been spent, precisely the waste invariant 19 exists to prevent. It sits BELOW the language
+    default and ABOVE the shipped `config` value, so an explicit env var still wins and a known
+    language still wins over a generic cast. Deliberately not `default_voices(None)`, which must keep
+    returning `None` for the reason above. `_VOICE_PATTERN` had the same single-provider shape and
+    rejected every kokoro id, so the settings page could not name a voice for the provider a user had
+    actually configured; it now accepts BOTH naming schemes — widening the accepted SHAPES, never the
+    accepted CHARACTERS, so the SSML hole invariant 41 closed stays closed.
 
     Verified live end to end: an English source in a forced-Chinese notebook produced a Chinese
     two-host script AND synthesized it with the zh-TW cast into a valid 203KB MP3.
@@ -1105,7 +1198,7 @@ them exist because an earlier design discussion mentioned them.
     500) whenever `RN_MAIN_MODEL` is unset — and a settings page is what an operator opens WHEN the
     server is misconfigured. Same reasoning invariant 30 already applies to `max_upload_bytes`. This
     is also why the TTS provider is NOT on the page: it is a `NotebookConfig` field, so reporting it
-    would require exactly that call, . `tts._PROVIDERS` had one entry when that was decided, which made it also a control
+    would require exactly that call. `tts._PROVIDERS` had one entry when that was decided, which made it also a control
     that could not take effect; invariant 43 added a second, so only the `_config()` reason still
     stands — and it is sufficient on its own. Exposing the provider would now be a real feature
     request, blocked on giving it a standalone reader rather than on there being nothing to pick.
@@ -1153,8 +1246,13 @@ them exist because an earlier design discussion mentioned them.
     `save_notebook` rather than hand-copied — but note this is only the ATOMIC half of invariant
     34's discipline, not its lock-and-re-read half, which a full-replacement write does not need.
 
-42. **A generated Audio Overview is PERSISTED — one mp3 per notebook, served as a real file —
-    which deliberately reverses Phase 2's "no audio is ever persisted past one request".** That
+42. **A generated Audio Overview from the API is PERSISTED — one file per notebook, served as a
+    real file — which deliberately reverses Phase 2's "no audio is ever persisted past one
+    request".** Scoped to the API on purpose, and an independent audit found the original wording
+    missing that scope: `cli._cmd_audio` writes `--out` and returns — no `Podcast` record, no
+    `notebooks/audio/<slug>`, and it discards the offsets, so a CLI-generated episode can never have
+    subtitles. Correct for a one-shot CLI whose caller named the output path themselves; stated
+    rather than left to be inferred from an unqualified sentence. That
     decision bought a real simplification (no file-serving endpoint, no retention to get right) and
     it cost the user their episode on every reload: the audio existed only as the browser tab's
     `Blob`. A user reported it after asking where the mp3 was.
@@ -1174,6 +1272,11 @@ them exist because an earlier design discussion mentioned them.
     **The audio is written BEFORE the notebook record**, so a crash between the two leaves an orphan
     file (harmless — the next generate overwrites it) rather than a notebook pointing at audio that
     isn't there.
+
+    **An empty script is a regenerate too.** An independent audit found that arm returning early
+    with the previous episode untouched, so `GET .../audio/file` kept serving audio for a script the
+    notebook no longer had while the UI said there was none. It clears both the file and the record
+    before returning now.
 
     Same staleness treatment as the overview (invariant 38): `Podcast.source_ids` captured at run
     start, compared server-side, surfaced so the player can say "sources have changed since this".
@@ -1229,5 +1332,124 @@ them exist because an earlier design discussion mentioned them.
     Verified end to end through the real product: `RN_TTS_PROVIDER=kokoro` generated a 14-turn
     Chinese episode with no network TTS call at all, wrote `notebooks/audio/<slug>.wav` (2m53s,
     24kHz), removed the previous `.mp3`, and served it as `audio/wav` with range support.
+
+44. **The podcast transcript behaves like subtitles, and the timing comes from the PROVIDER rather
+    than from measuring the audio.** `TTSProvider.synthesize` returns each utterance's start offset
+    in seconds; every provider here already synthesizes utterance by utterance, so it knows them,
+    and parsing MP3 frame headers to recover a number the provider already reports would be a
+    second, worse implementation.
+
+    **`Podcast.offsets` is a list PARALLEL to `utterances`, never a field on `Utterance`.**
+    `Utterance` is the MODEL's output shape, and the model has no idea how long its own words take
+    to say; the offsets are measured at synthesis.
+
+    **The consumer's guard is MONOTONICITY, not length alone — length cannot catch the case that
+    actually happens.** (An empty list, which is what a persisted episode from before this field
+    existed carries, IS caught by length; the shape below is not.) A provider
+    that reports no boundaries at all yields `[0.0, 0.0, ...]`, which is exactly as long as
+    `utterances`; an independent review found `tts.py` claiming a length check covered this and
+    simulated what actually happened — every line stamped `0:00`, the SECOND row highlighted for the
+    whole episode and the first never, every click seeking to zero. `app.js`'s `timed` therefore
+    requires finite, non-negative, strictly increasing offsets AND a matching length, and anything
+    else renders a plain transcript (which is also what a persisted episode from before this field
+    existed gets). Mis-aligned subtitles are worse than none.
+
+    **Match ANY `*Boundary` event from edge-tts, not `WordBoundary`.** The first version keyed on
+    `WordBoundary`; the installed edge-tts defaults to `boundary="SentenceBoundary"` and emits only
+    that, so every offset came back 0.0 — a transcript highlighting nothing and seeking nowhere.
+    Caught by generating a real episode and READING the numbers, not by them being obviously
+    absent. The boundary sum APPROXIMATES each utterance's duration rather than equalling it:
+    measured against durations recovered from the MP3 frame headers, the per-utterance error is
+    -0.049s..+0.066s, non-systematic in sign, cumulating to about ±0.11s over five or six lines.
+    Fine for highlighting a line, and NOT a drift that grows in one direction. The drift-free
+    alternative is named in the docstring (edge-tts emits fixed-bitrate MP3, so a stream's own
+    frame headers give its exact duration) and left as a follow-up.
+
+    **Kokoro needs none of that: it holds raw samples, so the offsets come from a PURE FUNCTION,
+    `tts.sequence_offsets`.** The gap between utterances is charged to the line BEFORE it, so an
+    offset is where its own line's audio starts. Extracting the bookkeeping out of
+    `KokoroProvider.synthesize` is what lets CI check that claim at all — with no `kokoro` extra, no
+    model download and no audio — after an independent review found the invariant rested on one
+    hand-verification. Both offset tests use THREE DIFFERENT durations on purpose: with equal ones a
+    running-total bug and a correct implementation produce the same list, and the review demonstrated
+    exactly that by hoisting edge-tts's `end_ticks` out of its loop and watching every test pass.
+    Precise wording, since the earlier "lands on the speech rather than the silence" overclaimed:
+    an offset lands at the start of that line's own AUDIO. Measured on a real episode, kokoro then
+    emits about 0.394s of its own leading silence before the words — identical on the FIRST line,
+    which has no gap before it, which is how it was attributed to the provider rather than to us.
+
+    **`.btn` sets `color: inherit`, `text-decoration: none` and `display: inline-block` because it
+    has to work on an `<a>`.** The global reset covers `button` only, so the podcast download link
+    rendered as UA-blue underlined text on the dark theme — reported from a screenshot. The
+    `display` is what would enrol the file's most-used class in invariant 36's `[hidden]` tripwire
+    the moment anyone `hidden`-toggles a `.btn`, so `.btn` carries its own `[hidden] { display:
+    none }` up front. Stated precisely, because an audit mutation-proved the looser version wrong:
+    removing that rule TODAY leaves all four web-asset tests green, since no `.btn` element is
+    hidden-toggled yet. It is a pre-emptive pairing, not a tripwire the code currently trips.
+
+    **The transcript scrolls in its OWN box (`.podcast-transcript.is-timed`) and the playhead
+    follower moves `scrollTop` directly, never `scrollIntoView`.** `scrollIntoView` walks EVERY
+    scrollable ancestor, so a listener who scrolled the studio column away to read something else
+    was dragged back to the podcast panel every few seconds. Positions are read from
+    `getBoundingClientRect`, not `offsetTop`, so the arithmetic does not silently break if the box
+    ever stops being positioned. Only a TIMED transcript becomes a scroll box; an untimed one has
+    nothing following it and reads better inline.
+
+    **A transcript line seeks on click, but not when the click was meant for something inside it.**
+    The exclusion list is `.citation, .citation-row, .citation-detail, .podcast-timecode` — an
+    independent review found `.citation-detail` missing, which is the expanded trace payload
+    `renderAnswerWithCitations` appends as a SIBLING of the citation list inside the same utterance,
+    so clicking into that JSON jumped the player. `click` also fires on the mouseup that ends a
+    drag-selection, so a non-collapsed selection suppresses the seek too — otherwise selecting
+    transcript prose to quote it would seek and autoplay. And the `play()` promise is caught: the
+    persisted file having been cleared should be a silent no-op, not an unhandled rejection.
+
+    **A `.is-seekable:hover` rule must not touch a property `.is-speaking` sets.** The first
+    version used `background: var(--surface-2)` — the colour `.podcast-utterance` already carries,
+    so hovering looked like nothing happened — and at specificity (0,3,0) it outranked
+    `.is-speaking` at (0,2,0), so hovering the line that was currently playing DELETED its
+    highlight. **The fix is DISJOINT PROPERTIES, not lower specificity**: hover is still (0,3,0)
+    and still wins any property it declares, it just declares `border-color`, which `.is-speaking`
+    (`background` + `box-shadow`) never sets. A second audit caught this invariant claiming the
+    specificity had been fixed when only the property had.
+
+45. **The podcast script has a stated SHAPE, and is written to be SPOKEN in one language.** Neither
+    was true before: `audio.py` asked only for "a natural conversation", with no opening, no segment
+    plan and — the one users notice — no close, so episodes stopped when the model ran out of facts.
+    NotebookLM's Audio Overview was never used as a reference; this is that gap closed after a user
+    named it. The instructions now ask for an opening that frames the sources, a body that follows
+    the interesting thread rather than the sources' order, and a CLOSE that draws the threads
+    together and says what it adds up to — with the reflection grounded in the sources ("what this
+    makes me wonder" is honest, inventing a finding is not).
+
+    **Foreign proper nouns are rendered the way a native speaker would SAY them, ACRONYMS INCLUDED,
+    and no original-in-parentheses.** A TTS voice for one language genuinely cannot pronounce
+    another script, and the mechanism was confirmed rather than assumed: kokoro's Chinese G2P
+    (`misaki` zh) passes Latin text through UNCONVERTED — `KPipeline(lang_code="z")` returns the
+    literal string `NASA` and `Voyager i→` as its own "phonemes", so raw letters reach the acoustic
+    model as unknown tokens and come out as the mangled noise a user heard. Two consequences the
+    first draft of this rule got wrong, both found by checking rather than reasoning: (a) it invited
+    the model to give the original once in parentheses, which is the exact failure the rule exists
+    to prevent — an `Utterance.text` IS both the transcript and the string the voice reads, so there
+    is no reader-only channel to put it in; (b) it let acronyms through, and a live episode duly
+    contained `NASA` — defensible under "say it the way a native speaker would", which is precisely
+    why the rule now names acronyms explicitly. Scoped to what is actually SPOKEN and explicitly
+    exempting a `Citation.quote`, which stays verbatim because it is evidence a reader checks
+    against the source (invariant 39's carve-out, applied where it matters here).
+
+    **Same residual-risk hedge as invariants 4 and 11, and for the same reason**: this is a
+    PROMPT-COMPLIANCE claim, and the offline suite drives a scripted LM whose turns are fixed dicts,
+    so it can demonstrate none of it. The evidence below is two live runs against one small corpus
+    on one provider. The MECHANISM evidence is kokoro-specific too — `edge-tts`, the DEFAULT
+    provider, was not probed the same way, so "the voice cannot pronounce another script" is
+    established for the local provider and assumed for the cloud one. Evidence, not proof; do not
+    rewrite either into a guarantee. Verified by
+    regenerating a real Chinese episode from English sources against the tightened rule: `NASA`
+    became `美國國家航空暨太空總署`, and `航海家一號`/`卡爾·薩根`/`鈽二三八` all render spoken,
+    while every one of the episode's citations kept its verbatim English `quote` and verified.
+    **Stated residual, not fixed**: one Latin letter survived — the `E` in `泰坦三號E半人馬座運載
+    火箭` — because that IS how the designation is written in Chinese. A prompt rule cannot reach
+    the last letter of a model designation; a provider whose Chinese G2P transliterates Latin
+    (rather than passing it through) is the fix for that class, not a stricter sentence here.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

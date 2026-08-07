@@ -3,7 +3,7 @@ download — CLAUDE.md's captions-only MVP decision), then parse WebVTT into tim
 
 CLAUDE.md invariant 1/3: this all runs host-side, during ingestion, never inside the RLM sandbox
 or reachable as a live tool — the same trust boundary `parsers/web.py` already establishes, just
-for a different source kind. See `docs/design/web-ui-blueprint.md`'s "Post-launch addendum 3" for
+for a different source kind. See the web-UI blueprint's "Post-launch addendum 3" for
 the full design record, including the real ToS/legal caveat this feature accepts rather than
 hides, and the live-verified `yt-dlp` behavior this module's algorithms are built against.
 """
@@ -71,7 +71,7 @@ def _parse_vtt(raw: str) -> list[tuple[float, str]]:
     collapses via dedup regardless of whether that preceding cue had a tag; a genuine multi-line
     OFFICIAL dialogue cue's two lines are both genuinely NEW text, so neither line collides with
     anything and both survive. Verified against a real, live-fetched auto-caption track after
-    this fix (no more adjacent duplicate lines) — see `docs/design/web-ui-blueprint.md`'s
+    this fix (no more adjacent duplicate lines) — see the web-UI blueprint's
     addendum 3 for the full before/after account.
 
     A cue's payload ends at a TRULY empty line (VTT's own grammar) — NOT a whitespace-only-but-

@@ -264,6 +264,12 @@ class _FakeTTSProvider:
     def default_voices(self, language):
         return None
 
+    def fallback_voices(self):
+        # Tracks `tts.TTSProvider`: a double that does not implement the whole Protocol lets a real
+        # gap hide (an independent audit found the LAST-RESORT cast had never moved onto the
+        # provider, so an unknown language on kokoro fell through to an edge-tts voice name).
+        return ("fake-voice-a", "fake-voice-b")
+
     def __init__(self, *, fail: bool = False) -> None:
         self._fail = fail
         self.calls: list = []

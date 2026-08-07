@@ -6,6 +6,9 @@ injection-seam pattern `parsers/web.py`'s `fetcher` parameter uses for the SSRF-
 from __future__ import annotations
 
 import re
+import tempfile
+import wave
+from pathlib import Path
 
 import pytest
 
@@ -228,3 +231,189 @@ def test_finding_audio_survives_a_provider_switch(tmp_path):
     wav = audio_path("nb", base_dir=tmp_path, suffix=".wav")
     wav.write_bytes(b"new-wav")
     assert find_audio("nb", base_dir=tmp_path) == wav
+
+
+def test_offsets_come_from_any_boundary_event_and_track_each_utterance_separately():
+    """Two regressions in one, because the fixture has to be shaped for both.
+
+    (1) The first version keyed on `WordBoundary`; the installed edge-tts defaults to
+    `boundary="SentenceBoundary"` and emits only that, so every offset came back 0.0 — a transcript
+    that highlights nothing and seeks nowhere. Caught by generating a real episode and READING the
+    numbers, not by them being obviously absent.
+
+    (2) An independent review then found this test could not catch a per-utterance state bug,
+    because its first fixture gave every utterance the SAME duration: hoisting `end_ticks = 0` out
+    of the per-utterance loop (making it a running maximum) left all 18 tts tests green. Hence
+    THREE DIFFERENT durations here — with equal ones, `[0, 5, 7]` and `[0, 5, 10]` are
+    indistinguishable.
+    """
+
+    #: Seconds per utterance text, deliberately all different.
+    durations = {"one": 5.0, "two": 2.0, "three": 8.0}
+
+    class _Sentence:
+        """Emits what the real service emits: audio plus one SentenceBoundary, in 100ns ticks."""
+
+        def __init__(self, text, voice):
+            self._ticks = int(durations[text] * 10_000_000)
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"\x00" * 16}
+            yield {"type": "SentenceBoundary", "offset": 0, "duration": self._ticks}
+
+    provider = EdgeTTSProvider(_communicate_factory=_Sentence)
+    script = _script(speakers_texts=[("host_a", "one"), ("host_b", "two"), ("host_a", "three")])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        offsets = provider.synthesize(script, {"host_a": "x", "host_b": "y"}, Path(tmp) / "out.mp3")
+
+    assert offsets == [0.0, 5.0, 7.0], offsets
+
+
+def test_no_boundary_events_degrades_to_flat_offsets_rather_than_raising():
+    """A provider that reports no timing must still produce audio. Note what this pins and what it
+    does NOT: the offsets come back the RIGHT LENGTH and all zero, so a length check cannot catch
+    them — rejecting them is the consumer's job, and `app.js`'s `timed` requires the offsets to
+    strictly increase for exactly this reason (`tts.py`'s docstring used to claim a length check
+    handled it, which an independent review disproved)."""
+
+    class _Silent:
+        def __init__(self, text, voice):
+            pass
+
+        async def stream(self):
+            yield {"type": "audio", "data": b"\x00" * 8}
+
+    script = _script(speakers_texts=[("host_a", "x"), ("host_a", "y")])
+    with tempfile.TemporaryDirectory() as tmp:
+        offsets = EdgeTTSProvider(_communicate_factory=_Silent).synthesize(
+            script, {"host_a": "v"}, Path(tmp) / "o.mp3"
+        )
+    assert offsets == [0.0, 0.0]
+    assert not all(offsets[i] < offsets[i + 1] for i in range(len(offsets) - 1))
+
+
+def test_sequence_offsets_charges_the_inter_utterance_gap_to_the_previous_line():
+    """Invariant 44 says kokoro's gap is added BEFORE the offset is recorded, so a click lands at
+    the start of its own line rather than inside the preceding silence. An independent review
+    verified that by hand and flagged that NOTHING in CI checked it — hence a pure function to
+    check, needing no `kokoro` extra, no model download and no audio.
+
+    Durations are deliberately all different: with equal ones a running-total bug and a correct
+    implementation produce the same list.
+    """
+    from rlm_notebook.tts import sequence_offsets
+
+    rate, gap = 24_000, 8_400  # 0.35s at 24kHz, KokoroProvider's own gap
+    lengths = [24_000, 48_000, 12_000]  # 1.0s, 2.0s, 0.5s
+
+    assert sequence_offsets(lengths, gap, rate) == [0.0, 1.35, 3.7]
+    # No gap before the first line or after the last: the total is the sum plus N-1 gaps.
+    total = (sum(lengths) + gap * (len(lengths) - 1)) / rate
+    assert total == pytest.approx(sequence_offsets(lengths, gap, rate)[-1] + 0.5)
+    # Degenerate shapes stay sane rather than raising.
+    assert sequence_offsets([], gap, rate) == []
+    assert sequence_offsets([24_000], gap, rate) == [0.0]
+
+
+def test_kokoro_provider_offsets_come_from_sequence_offsets(tmp_path, monkeypatch):
+    """The provider end of the same claim, with FAKE `kokoro` AND `soundfile` modules injected
+    through `sys.modules`, so this genuinely runs on a CI install that has neither. Pins that
+    `synthesize` returns one offset per utterance, spaced by the gap, and that the written file is
+    exactly as long as the last offset plus the last line — which is what a running-total bug
+    breaks and an equality assert against `sequence_offsets` alone could not detect."""
+    np = pytest.importorskip("numpy")
+    import sys
+    import types
+
+    from rlm_notebook.tts import KokoroProvider, sequence_offsets
+
+    seconds = {"one": 1.0, "two": 2.0, "three": 0.5}
+
+    class _FakeKPipeline:
+        def __init__(self, lang_code="a"):
+            self.lang_code = lang_code
+
+        def __call__(self, text, voice=None, **kwargs):
+            n = int(seconds[text] * KokoroProvider._SAMPLE_RATE)
+            yield ("gs", "ps", np.full(n, 0.25, dtype="float32"))
+
+    module = types.ModuleType("kokoro")
+    module.KPipeline = _FakeKPipeline
+    monkeypatch.setitem(sys.modules, "kokoro", module)
+
+    # `soundfile` is declared ONLY in the `kokoro` extra, which CI does not sync — an independent
+    # audit blocked the module and watched this test SKIP while its docstring claimed it ran without
+    # the extra. Faked with the stdlib `wave` writer so the assertion below reads a real WAV header.
+    def _write(path, samples, rate):
+        with wave.open(str(path), "wb") as handle:
+            handle.setnchannels(1)
+            handle.setsampwidth(2)
+            handle.setframerate(rate)
+            handle.writeframes((np.asarray(samples) * 32767).astype("<i2").tobytes())
+
+    sound = types.ModuleType("soundfile")
+    sound.write = _write
+    monkeypatch.setitem(sys.modules, "soundfile", sound)
+
+    script = _script(speakers_texts=[("host_a", "one"), ("host_b", "two"), ("host_a", "three")])
+    out = tmp_path / "episode.wav"
+    offsets = KokoroProvider().synthesize(
+        script, {"host_a": "zf_xiaoxiao", "host_b": "zm_yunxi"}, out
+    )
+
+    rate, gap = KokoroProvider._SAMPLE_RATE, int(KokoroProvider._GAP_SECONDS * 24_000)
+    assert offsets == sequence_offsets([int(seconds[t] * rate) for t in seconds], gap, rate)
+    assert len(offsets) == len(script.utterances)
+    with wave.open(str(out)) as handle:
+        total = handle.getnframes() / handle.getframerate()
+    assert total == pytest.approx(offsets[-1] + 0.5, abs=0.01)
+
+
+def test_an_unknown_language_falls_back_to_the_providers_own_cast_not_another_providers(
+    monkeypatch, tmp_path
+):
+    """An independent audit found the language MAP had moved onto the provider (invariant 43) while
+    the LAST RESORT had not: kokoro plus a language it does not know fell straight through to
+    `config`'s shipped `en-US-GuyNeural`, an edge-tts name handed to `KPipeline` — a synthesis
+    failure after a real model call had already been spent, the waste invariant 19 exists to
+    prevent. Pinned for BOTH providers so neither can regain the other's names."""
+    from rlm_notebook.config import NotebookConfig, tts_voice_map
+    from rlm_notebook.tts import KokoroProvider
+
+    monkeypatch.setenv("RN_NOTEBOOKS_DIR", str(tmp_path))
+    for name in ("RN_TTS_VOICE_HOST_A", "RN_TTS_VOICE_HOST_B"):
+        monkeypatch.delenv(name, raising=False)
+    config = NotebookConfig(main_model="m", sub_model="m")
+
+    kokoro = tts_voice_map(config, "Klingon", KokoroProvider())
+    assert set(kokoro.values()) == {"am_adam", "af_heart"}
+    assert not any("Neural" in voice for voice in kokoro.values())
+
+    edge = tts_voice_map(config, "Klingon", EdgeTTSProvider())
+    assert all(voice.endswith("Neural") for voice in edge.values())
+
+    # A language each provider DOES know still wins over its own fallback.
+    assert set(tts_voice_map(config, "Chinese", KokoroProvider()).values()) == {
+        "zm_yunjian",
+        "zf_xiaobei",
+    }
+
+
+def test_the_settings_voice_pattern_accepts_both_providers_naming_schemes():
+    """One edge-tts-shaped pattern rejected EVERY kokoro voice id, so the settings page could not
+    name a voice for the provider a user had actually configured. Widening the SHAPES is not
+    widening the CHARACTERS — the SSML hole invariant 41 closed stays closed."""
+    from rlm_notebook.config import _VOICE_PATTERN
+
+    for voice in ("zh-TW-YunJheNeural", "en-US-GuyNeural", "zf_xiaobei", "am_adam"):
+        assert _VOICE_PATTERN.match(voice), voice
+    for bad in (
+        "en-US-x'/><audio src=\"http://evil/x.mp3\"/><a b='Neural",
+        "zf xiaobei",
+        "ZF_Xiaobei",
+        "zf_xiaobei<script>",
+        "",
+    ):
+        assert not _VOICE_PATTERN.match(bad), bad
+

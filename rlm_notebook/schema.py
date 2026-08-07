@@ -56,7 +56,7 @@ class Citation(BaseModel):
     """A claimed citation. `source_id`/`locator` MUST be copied verbatim from a marker the model
     actually saw in the corpus blob (see `task.py`'s instructions) — `citations.py` verifies this
     coordinate exists; it does not verify `quote` is genuinely verbatim from that block (the model is
-    #: INSTRUCTED to copy it exactly — see `instructions.CITATION_RULES` — but nothing checks it) (see
+    INSTRUCTED to copy it exactly — see `instructions.CITATION_RULES` — but nothing checks it; see
     CLAUDE.md invariant 5)."""
 
     source_id: str
@@ -160,13 +160,13 @@ class ChatTurn(BaseModel):
     #: migration needed) or for a turn created outside the API (e.g. `cli.py`, which has no
     #: subprocess-per-run concept to name). Lets the web UI's Chat panel offer a "view reasoning"
     #: link back to `traces/{run_id}.jsonl` on a re-opened notebook's history, even long after the
-    #: run finished — see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum.
+    #: run finished — see the web-UI blueprint's Phase 3 addendum.
     run_id: str | None = None
 
 
 class Note(BaseModel):
     """A user-curated note — written directly, or copied from a past `Answer`'s text (see the web
-    UI's "Save as note" button, `docs/design/web-ui-blueprint.md`'s Notes addendum). Deliberately
+    UI's "Save as note" button, the web-UI blueprint's Notes addendum). Deliberately
     carries NO citations of its own: a note's text may have originated from a citation-grounded
     `Answer`, but the note itself is not re-verified against `sources` (CLAUDE.md invariant 5's
     coordinate-only guarantee doesn't extend to freeform notes) until/unless it's PROMOTED into a
@@ -211,6 +211,15 @@ class Podcast(BaseModel):
     """
 
     utterances: list[Utterance] = Field(default_factory=list)
+    #: Each utterance's start offset in seconds, PARALLEL to `utterances` — what lets the transcript
+    #: behave like subtitles (highlight the line being spoken, click a line to seek). A separate
+    #: list rather than a field on `Utterance` because `Utterance` is the MODEL's output shape and
+    #: the model has no idea how long its own words take to say; this is measured at synthesis.
+    #: May be empty, or a different length, when a provider reports no timing. A LENGTH check is
+    #: not enough on its own: a provider that reports no boundaries at all returns one zero per
+    #: utterance, which is the right length — consumers must also require the offsets to ADVANCE
+    #: (`app.js`'s `timed`) and otherwise render a plain transcript rather than mis-aligning it.
+    offsets: list[float] = Field(default_factory=list)
     run_id: str | None = None
     #: Same staleness key as `Overview`: the sources this was generated from, captured at RUN START.
     source_ids: list[str] = Field(default_factory=list)

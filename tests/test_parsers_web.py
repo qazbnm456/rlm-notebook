@@ -73,3 +73,41 @@ def test_redirect_to_loopback_is_refused():
     req = urllib.request.Request("http://example.com/safe-looking-page")
     with pytest.raises(FetchError, match="refused"):
         handler.redirect_request(req, None, 302, "Found", {}, "http://127.0.0.1:8080/internal")
+
+
+def test_default_fetcher_uses_the_guarded_opener_never_plain_urlopen(monkeypatch):
+    """Invariant 2 ends "Do not swap back to plain `urllib.request.urlopen`" and, until an
+    independent audit checked, nothing enforced it: swapping `_opener.open` for
+    `urllib.request.urlopen` left the whole suite green, because the two redirect tests call
+    `_SafeRedirectHandler.redirect_request` directly and never exercise WHICH opener does the
+    fetching. `urlopen` uses the default opener, which follows redirects with no per-hop
+    re-validation — the exact hole `_SafeRedirectHandler` exists to close.
+    """
+    import urllib.request
+
+    from rlm_notebook.parsers import web
+
+    def _explode(*args, **kwargs):
+        raise AssertionError("the plain default opener must never be reached")
+
+    monkeypatch.setattr(urllib.request, "urlopen", _explode)
+
+    opened: list = []
+
+    class _Response:
+        def read(self):
+            return b"<html><body>ok</body></html>"
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+    monkeypatch.setattr(
+        web._opener, "open", lambda req, timeout=None: opened.append(req) or _Response()
+    )
+
+    assert web._default_fetcher("https://example.com/a") == "<html><body>ok</body></html>"
+    assert len(opened) == 1
+

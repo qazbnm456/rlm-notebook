@@ -1,9 +1,13 @@
 """`GeneratePodcastScript` — the RLM task behind the Audio Overview (`rlm-notebook audio`).
 
-Same citation-grounded `RLMTask` pattern as `AnswerQuestion`/the Notebook Guide tasks: one input
-field (`sources`), one output field (`script: PodcastScript`), sharing `instructions.py`'s
-citation-marker and validate-before-submit rules. Audio synthesis itself (`tts.py`) runs entirely
-AFTER this task returns, on its already-citation-checked output — this module produces text only.
+Same citation-grounded `RLMTask` pattern as `AnswerQuestion`/the Notebook Guide tasks: two input
+fields (`sources` and, since invariant 39, `output_language`), one output field
+(`script: PodcastScript`), sharing `instructions.py`'s citation-marker and validate-before-submit
+rules. Audio synthesis itself (`tts.py`) runs entirely AFTER this task returns, on its
+already-SCHEMA-VALIDATED output — this module produces text only. (Not "already citation-checked":
+nothing gates synthesis on verification, and an independent audit flagged the stronger phrasing as
+exactly the kind of upgrade invariant 5 forbids. Citations are computed for DISPLAY alongside the
+transcript.)
 """
 
 from __future__ import annotations
@@ -33,6 +37,31 @@ reacting, and building on what the other just said. Aim for a natural episode le
 the sources actually contain — a handful of substantive exchanges for a short source, more for a
 long or dense one; do not pad with filler to hit some target length, and do not try to cover every
 single detail in the sources at the cost of a natural conversation.
+
+Give the episode a SHAPE. It has three parts, and the last one is the one most easily forgotten:
+
+1. An opening that says what these sources are and why they are worth half an hour of someone's
+   attention — one or two turns, not a formal preamble.
+2. The body: the substance, in whatever order makes the conversation work. Follow the interesting
+   thread rather than the order the sources happen to be in.
+3. A CLOSE. Do not simply stop when you run out of facts. Land it: one host briefly draws the
+   threads together, and then the two of them say what it adds up to — the implication, the tension
+   that is still unresolved, the thing that changed how they see it. Ground that reflection in what
+   the sources actually support; "what this makes me wonder" is honest, inventing a finding is not.
+   An episode that ends mid-fact feels broken even when every fact in it was right.
+
+**Write to be SPOKEN, in one language.** This script is read aloud by a text-to-speech voice for the
+language you are writing in, and that voice cannot pronounce another script: a Latin-alphabet name
+dropped into Chinese prose comes out mangled or silent. So when a source names something in another
+language — a probe, a rocket, a person, a technical term — render it the way a native speaker of
+YOUR language would SAY it out loud, and do NOT also give the original in parentheses: an
+`Utterance.text` is the transcript AND the thing the voice reads, so there is nowhere to put an
+aside only a reader would see. `航海家一號` reads aloud; `Voyager 1` does not, inside a Chinese
+sentence. **This includes acronyms**, which are the easiest ones to leave in by accident: a person
+may well say `NASA` out loud in a Chinese sentence, but the voice cannot — spell it out in your own
+language instead. Numbers, dates and units are the same: write them as they are spoken, not as they
+are printed. (A `Citation`'s `quote` is the exception and stays verbatim — it is evidence a reader
+checks against the source, never something the voice reads.)
 
 {artifact_language_rule("the language named by the `output_language` variable")}
 

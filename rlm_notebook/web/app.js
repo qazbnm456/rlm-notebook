@@ -27,6 +27,10 @@ const store = createStore();
 
 const state = {
   notebookId: null,
+  // The server-side `notebook.slug(id)`, which is what `_derive_run_id` actually prefixes a run id
+  // with. Building run ids from the raw id left every trace link dead for `"my notebook"` or any
+  // non-Latin id (invariant 10) — found by an independent audit.
+  notebookSlug: null,
   title: null,
   overview: null,
   podcast: null,
@@ -344,6 +348,7 @@ async function openNotebook(notebookId) {
   }
   notebookGeneration += 1;
   state.notebookId = notebook.id;
+  state.notebookSlug = notebook.slug || notebook.id;
   state.title = notebook.title || null;
   state.overview = notebook.overview || null;
   state.podcast = notebook.podcast || null;
@@ -567,6 +572,7 @@ let notebookGeneration = 0;
 function resetToNewNotebook() {
   notebookGeneration += 1;
   state.notebookId = null;
+  state.notebookSlug = null;
   state.title = null;
   state.overview = null;
   state.podcast = null;
@@ -633,6 +639,9 @@ function initSourcesPanel() {
     const isFirstSource = !state.notebookId;
     if (isFirstSource) {
       state.notebookId = `nb-${crypto.randomUUID().slice(0, 8)}`;
+      // Already inside the slug whitelist, so it is its own slug until the
+      // server confirms one on the next notebook response.
+      state.notebookSlug = state.notebookId;
       notebookGeneration += 1;
     }
     const activeKind = document.querySelector("#source-kind-tabs .tab.is-active").dataset.kind;
@@ -1054,7 +1063,7 @@ function initChatPanel() {
     const generation = notebookGeneration;
     const askedNotebookId = state.notebookId;
     const token = crypto.randomUUID();
-    const runId = `${state.notebookId}-${token}`;
+    const runId = `${state.notebookSlug || state.notebookId}-${token}`;
 
     const pendingTurn = { question, pending: true, run_id: runId };
     store.emit("chat:turnAdded", { turn: pendingTurn });
@@ -1185,7 +1194,7 @@ function initStudioPanel() {
     }
     const generation = notebookGeneration;
     const token = crypto.randomUUID();
-    const runId = `${state.notebookId}-${token}`;
+    const runId = `${state.notebookSlug || state.notebookId}-${token}`;
     body.classList.add("is-pending");
     body.textContent = "Generating…";
     openTicker(state.notebookId, runId, (evt) => {
@@ -1247,12 +1256,51 @@ function initStudioPanel() {
 
 // --- Studio panel: podcast player ------------------------------------------------------------
 
-function renderPodcastUtterance(utterance, runId) {
+function formatTimecode(seconds) {
+  const total = Math.max(0, Math.floor(seconds));
+  const ss = String(total % 60).padStart(2, "0");
+  const mm = Math.floor(total / 60) % 60;
+  const hh = Math.floor(total / 3600);
+  // An hour component only when there is one, so a three-minute episode stays `2:41` rather than
+  // `0:02:41` — but a long one no longer renders `63:05`.
+  return hh ? `${hh}:${String(mm).padStart(2, "0")}:${ss}` : `${mm}:${ss}`;
+}
+
+function renderPodcastUtterance(utterance, runId, { start = null, onSeek = null } = {}) {
   const div = document.createElement("div");
   div.className = "podcast-utterance";
+
   const speaker = document.createElement("div");
   speaker.className = "podcast-speaker";
   speaker.textContent = utterance.speaker === "host_a" ? "Host A" : "Host B";
+
+  // A timecode only when the provider actually reported one. Without it the line stays a plain
+  // transcript entry rather than showing a made-up 0:00 or becoming a seek target that lies.
+  if (start !== null) {
+    const stamp = document.createElement("button");
+    stamp.type = "button";
+    stamp.className = "podcast-timecode";
+    stamp.textContent = formatTimecode(start);
+    stamp.addEventListener("click", () => onSeek && onSeek(start));
+    speaker.appendChild(stamp);
+    div.classList.add("is-seekable");
+    div.addEventListener("click", (event) => {
+      // The line itself seeks, but never when the click was meant for something inside it — a
+      // citation span opens its source viewer, the timecode has its own handler, and
+      // `.citation-detail` is the expanded trace payload `renderAnswerWithCitations` appends as a
+      // SIBLING of the citation list inside this same utterance (an independent review found
+      // clicking into that JSON, or drag-selecting a marker out of it to copy, jumped the player).
+      if (event.target.closest(".citation, .citation-row, .citation-detail, .podcast-timecode")) {
+        return;
+      }
+      // `click` also fires on the mouseup that ends a drag-selection, so selecting transcript prose
+      // to quote it would otherwise seek and autoplay.
+      const selection = window.getSelection();
+      if (selection && !selection.isCollapsed && selection.toString().trim()) return;
+      if (onSeek) onSeek(start);
+    });
+  }
+
   div.appendChild(speaker);
   div.appendChild(renderAnswerWithCitations(utterance.text, utterance.citations || [], runId));
   return div;
@@ -1266,7 +1314,7 @@ function renderPodcastUtterance(utterance, runId) {
 // range-request it, so seeking in a long episode doesn't re-download it, and reopening a notebook
 // costs no re-synthesis. The `cacheBust` token is what makes REGENERATING visible — the path is
 // stable per notebook, so without it the browser would keep serving the previous episode.
-function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix }) {
+function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offsets }) {
   body.innerHTML = "";
 
   if (stale) {
@@ -1303,8 +1351,71 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix }) {
 
   const transcript = document.createElement("div");
   transcript.className = "podcast-transcript";
-  utterances.forEach((u) => transcript.appendChild(renderPodcastUtterance(u, runId)));
+
+  // Timing is usable only when there is exactly one offset per utterance AND the offsets actually
+  // advance. The length check alone is not enough: a provider that reports no boundaries at all
+  // yields `[0.0, 0.0, ...]`, which is the RIGHT LENGTH and would stamp every line `0:00`, highlight
+  // the second row for the whole episode and seek every click to zero (an independent review
+  // simulated exactly that). A persisted episode from before offsets existed has none and falls
+  // back here too — mis-aligned subtitles are worse than none, and `schema.Podcast.offsets` says so.
+  const timed =
+    Array.isArray(offsets) &&
+    offsets.length === utterances.length &&
+    offsets.every((v, i) => Number.isFinite(v) && v >= 0 && (i === 0 || v > offsets[i - 1]));
+  const seek = (t) => {
+    player.currentTime = t;
+    // The play promise rejects when the media cannot start (the persisted file was cleared and
+    // `audio/file` 404s, or autoplay policy blocks it). Seeking still worked; swallow it rather
+    // than leaving an unhandled rejection in the console.
+    const played = player.play();
+    if (played && typeof played.catch === "function") played.catch(() => {});
+  };
+  const rows = utterances.map((u, i) => {
+    const row = renderPodcastUtterance(u, runId, {
+      start: timed ? offsets[i] : null,
+      onSeek: timed ? seek : null,
+    });
+    transcript.appendChild(row);
+    return row;
+  });
   body.appendChild(transcript);
+
+  if (!timed) return;
+  // Only a timed transcript becomes its own scroll box; an untimed one has nothing following it and
+  // reads better inline.
+  transcript.classList.add("is-timed");
+
+  // Subtitle behaviour: the line whose window contains the playhead is current. `timeupdate` fires
+  // ~4x a second, so this runs often — it does an O(n) scan over a transcript of a few dozen lines
+  // and touches the DOM only when the index actually changes.
+  let current = -1;
+  player.addEventListener("timeupdate", () => {
+    const t = player.currentTime;
+    let index = -1;
+    for (let i = 0; i < offsets.length; i += 1) {
+      if (offsets[i] <= t) index = i;
+      else break;
+    }
+    if (index === current) return;
+    if (rows[current]) rows[current].classList.remove("is-speaking");
+    current = index;
+    const row = rows[current];
+    if (!row) return;
+    row.classList.add("is-speaking");
+    // Scroll the transcript's OWN box (it has `overflow-y: auto`), never `scrollIntoView` — that
+    // walks EVERY scrollable ancestor, so a listener who had scrolled the studio column away to
+    // read something else got dragged back to the podcast panel every few seconds. Measured with
+    // rects rather than `offsetTop`, which is relative to whatever the offsetParent happens to be
+    // and would silently mis-scroll if this box ever stops being positioned. Only move when the
+    // line is actually outside the box.
+    const rowBox = row.getBoundingClientRect();
+    const viewBox = transcript.getBoundingClientRect();
+    if (rowBox.top < viewBox.top) {
+      transcript.scrollTop -= viewBox.top - rowBox.top;
+    } else if (rowBox.bottom > viewBox.bottom) {
+      transcript.scrollTop += rowBox.bottom - viewBox.bottom;
+    }
+  });
 }
 
 function initPodcastPlayer() {
@@ -1327,6 +1438,7 @@ function initPodcastPlayer() {
       runId: podcast.run_id,
       audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file`,
       suffix: podcast.audio_suffix,
+      offsets: podcast.offsets,
       stale: podcast.stale,
     });
   });
@@ -1339,7 +1451,7 @@ function initPodcastPlayer() {
     generateBtn.disabled = true;
     const generation = notebookGeneration;
     const token = crypto.randomUUID();
-    const runId = `${state.notebookId}-${token}`;
+    const runId = `${state.notebookSlug || state.notebookId}-${token}`;
     body.classList.add("is-pending");
     body.textContent = "Generating script and synthesizing audio — this can take a while…";
     openTicker(state.notebookId, runId, (evt) => {
@@ -1365,6 +1477,7 @@ function initPodcastPlayer() {
       state.podcast = {
         utterances: data.utterances,
         run_id: runId,
+        offsets: data.offsets,
         stale: false,
       };
       renderPodcast(body, {
@@ -1375,6 +1488,7 @@ function initPodcastPlayer() {
         audioSrc: `/notebooks/${encodeURIComponent(state.notebookId)}/audio/file?v=${token}`,
         stale: false,
         suffix: data.audio_suffix,
+        offsets: data.offsets,
       });
     } catch (err) {
       body.classList.remove("is-pending");

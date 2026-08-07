@@ -1,7 +1,7 @@
 """Shared PDF test-fixture builders using `reportlab` (BSD) — a `dev`-only dependency, never a
 runtime dependency of the shipped package. Replaces this project's former `fitz` (pymupdf) based
 fixture-building, which relied on pymupdf being present as a (now-removed) AGPL runtime
-dependency — see CLAUDE.md invariant 7 / `docs/design/pymupdf-license-replacement.md`. Not a
+dependency — see CLAUDE.md invariant 7 / the pymupdf-replacement design record. Not a
 `test_*.py` file itself, so pytest never collects it directly.
 """
 

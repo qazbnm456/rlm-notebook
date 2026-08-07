@@ -19,7 +19,7 @@ notebook from its sources), `POST /notebooks/{id}/overview` (the chat overview),
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
 already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
-(`docs/design/web-ui-blueprint.md`'s Phase 2 addendum has the full reasoning). A generated episode IS persisted — one file per
+(the web-UI blueprint's Phase 2 addendum has the full reasoning). A generated episode IS persisted — one file per
 notebook, served by `GET /notebooks/{id}/audio/file`. That reverses Phase 2's original
 no-audio-past-one-request decision, which cost the user their episode on every reload; see CLAUDE.md
 invariant 42. Retention stays a non-question because the file is REPLACED on regenerate.
@@ -30,7 +30,7 @@ opaque bytes the caller already had, plus a claimed filename used for kind detec
 the CLIENT picks the run id, not the server, so it can open the trace stream before/alongside firing
 the request that will populate it. `_run_isolated` exclusively creates the trace file before
 spawning the subprocess (a hard uniqueness gate, mapped to a 409 on collision — see
-`docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.1 for why this is a real, not merely
+the web-UI blueprint's Phase 3 addendum P3.1 for why this is a real, not merely
 unlikely, concern once a client partly controls the id). See CLAUDE.md invariant 29 for why a
 reasoning-trace SSE endpoint was originally deferred as unbuildable, and what changed.
 
@@ -413,7 +413,7 @@ async def list_notebooks() -> NotebookListResponse:
     """Every notebook that exists, for the web UI's notebook switcher. Reads the same
     `notebook.DEFAULT_NOTEBOOKS_DIR` constant every other notebook operation already uses — there is
     no separate config surface for this (checked: `NotebookConfig` has no notebooks-directory field
-    at all; see `docs/design/web-ui-blueprint.md`'s audit note). Reports each notebook's own `id`
+    at all; see the web-UI blueprint's audit note). Reports each notebook's own `id`
     field, never the slugged filename stem (`notebook.slug()` is lossy, so the two can differ for
     the same file). A corrupted notebook file is listed under `unreadable` by its filename stem
     rather than silently dropped or breaking the whole listing."""
@@ -461,6 +461,9 @@ class PodcastResponse(BaseModel):
     utterances: list[AudioUtteranceResponse]
     run_id: str | None = None
     stale: bool = False
+    #: Each utterance's start offset in seconds, parallel to `utterances`. Empty or mismatched
+    #: means "no timing" — the client renders a plain transcript rather than mis-aligning it.
+    offsets: list[float] = []
     #: The extension of the file `GET .../audio/file` will serve — reported rather than left for the
     #: client to guess, since it depends on WHICH provider generated this episode, not on which one
     #: is configured now (invariant 43).
@@ -469,6 +472,13 @@ class PodcastResponse(BaseModel):
 
 class NotebookResponse(BaseModel):
     id: str
+    #: `notebook.slug(id)` — the SAME transform `_derive_run_id` applies before a run id becomes a
+    #: trace filename. The client needs it because it builds its own run ids to open a live ticker
+    #: on, and building them from the RAW id made every trace link dead for any id the slug changes
+    #: — `"my notebook"`, or any non-Latin id, which invariant 10 exists to support. Returned rather
+    #: than re-implemented in JS: the hash fallback would have to be duplicated too, and two copies
+    #: of a filename-safety transform is exactly the drift this project factors out.
+    slug: str
     title: str | None = None
     overview: OverviewResponse | None = None
     podcast: PodcastResponse | None = None
@@ -488,6 +498,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
     corpus = corpus_of(notebook)
     return NotebookResponse(
         id=notebook.id,
+        slug=slug(notebook.id),
         title=notebook.title,
         sources=[
             {"id": s.id, "kind": s.kind, "origin": s.origin, "flags": s.flags}
@@ -523,6 +534,7 @@ def _podcast_response(notebook: Notebook, corpus) -> PodcastResponse | None:
             )
             for u in podcast.utterances
         ],
+        offsets=podcast.offsets,
         run_id=podcast.run_id,
         stale=set(podcast.source_ids) != {s.id for s in notebook.sources},
         audio_suffix=(found.suffix if (found := find_audio(notebook.id)) else None),
@@ -680,7 +692,7 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
     a path it reads from its own filesystem.
 
     **Size-cap enforcement, empirically verified before landing this** (a prior draft's plan didn't
-    actually enforce anything — see `docs/design/web-ui-blueprint.md`'s "Post-launch addendum" for
+    actually enforce anything — see the web-UI blueprint's "Post-launch addendum" for
     the full audit finding). Deliberately does NOT declare `file: UploadFile = File(...)` as a
     parameter — FastAPI parses the ENTIRE multipart body itself, inside its own request-handling
     code, BEFORE any handler with a `File`/`Form` parameter ever runs, for ANY route shaped that
@@ -690,7 +702,10 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
     already cleared the cap. A missing `Content-Length` (chunked transfer encoding) is refused
     outright (411) rather than accepted with a disclosed gap — there's no safe way to bound an
     unknown-length body before reading it, so this project doesn't try to."""
-    cap = max_upload_bytes()
+    try:
+        cap = max_upload_bytes()
+    except SystemExit as exc:  # a malformed RN_MAX_UPLOAD_BYTES, same shape as `_config()`'s
+        raise HTTPException(500, f"server misconfigured: {exc}") from exc
     content_length = request.headers.get("content-length")
     if content_length is None:
         raise HTTPException(411, "Content-Length header is required for file uploads")
@@ -790,7 +805,7 @@ async def get_source(notebook_id: str, source_id: str) -> SourceDetailResponse:
 class RunOptions(BaseModel):
     """Shared optional body for every endpoint that runs an isolated RLMTask — a CLIENT-supplied
     run id, so the caller can open `GET .../runs/{run_id}/stream` before or alongside firing the
-    request that will populate it (see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.1).
+    request that will populate it (see the web-UI blueprint's Phase 3 addendum P3.1).
     `None` (the default — an absent body binds to this) reproduces today's exact behavior: a
     server-generated id, invisible to the caller until the response arrives."""
 
@@ -978,7 +993,9 @@ async def _prune_traces() -> None:
     except (OSError, SystemExit):
         # SystemExit: a malformed RN_TRACE_* value (config.py raises it, matching every other
         # `RN_*` reader). Housekeeping is not the place to take a request down over it — the
-        # misconfiguration surfaces loudly from `_config()` on any endpoint that runs a model.
+        # misconfiguration refuses STARTUP instead: the lifespan reads the same settings itself,
+        # since `NotebookConfig.from_env` never touches `RN_TRACE_*` (standalone readers,
+        # invariant 34) and `_config()` would therefore never see them.
         pass
 
 
@@ -1218,6 +1235,8 @@ class AudioUtteranceResponse(BaseModel):
 class AudioResponse(BaseModel):
     utterances: list[AudioUtteranceResponse]
     audio_base64: str | None = None
+    #: Each utterance's start offset in seconds (see `PodcastResponse.offsets`).
+    offsets: list[float] = []
     #: What `GET .../audio/file` will serve — the client must not guess it from the configured
     #: provider (invariant 43).
     audio_suffix: str | None = None
@@ -1228,7 +1247,7 @@ async def audio(
     notebook_id: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
 ) -> AudioResponse:
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
-    audio. Two host-side steps, not one (`docs/design/web-ui-blueprint.md`'s Phase 2 addendum):
+    audio. Two host-side steps, not one (the web-UI blueprint's Phase 2 addendum):
     `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
     only step that touches `dspy`/`rlm_harness`, and the only one cancellable via
     `POST .../cancel` — then TTS synthesis (`tts.py`) runs AFTER that subprocess returns, IN-PROCESS
@@ -1291,6 +1310,13 @@ async def audio(
         # A source with nothing worth discussing is a legitimate output (audio.py's instructions
         # explicitly allow it) — same "don't try to synthesize silence" handling cli._cmd_audio
         # already has, rather than calling synthesize() and getting a TTSError for an empty script.
+        #
+        # Still a REGENERATE, though: an independent audit found this arm returning early with the
+        # previous episode untouched, so `GET .../audio/file` kept serving audio for a script the
+        # notebook no longer had and the UI said there was none. Invariant 42's "replaced on
+        # regenerate" has to cover the empty case too.
+        await asyncio.to_thread(clear_audio, notebook_id)
+        await _mutate_or_http(notebook_id, lambda nb: setattr(nb, "podcast", None), create=False)
         return AudioResponse(utterances=[], audio_base64=None)
 
     voice_map = tts_voice_map(config, language, provider)
@@ -1298,7 +1324,7 @@ async def audio(
     os.close(fd)
     tmp_path = Path(tmp_name)
     try:
-        await asyncio.to_thread(provider.synthesize, script, voice_map, tmp_path)
+        offsets = await asyncio.to_thread(provider.synthesize, script, voice_map, tmp_path)
         audio_bytes = tmp_path.read_bytes()
     except TTSError as exc:
         raise HTTPException(
@@ -1318,13 +1344,17 @@ async def audio(
     await asyncio.to_thread(destination.write_bytes, audio_bytes)
 
     podcast = Podcast(
-        utterances=script.utterances, run_id=run_id, source_ids=[s.id for s in notebook.sources]
+        utterances=script.utterances,
+        offsets=offsets or [],
+        run_id=run_id,
+        source_ids=[s.id for s in notebook.sources],
     )
     await _mutate_or_http(notebook_id, lambda nb: setattr(nb, "podcast", podcast), create=False)
 
     return AudioResponse(
         utterances=utterances,
         audio_base64=base64.b64encode(audio_bytes).decode("ascii"),
+        offsets=offsets or [],
         audio_suffix=provider.suffix,
     )
 
@@ -1447,7 +1477,7 @@ async def _tail_trace_events(run_id: str):
 
 @app.get("/notebooks/{notebook_id}/runs/{run_id}/stream")
 async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
-    """Live reasoning-trace ticker (see `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.2).
+    """Live reasoning-trace ticker (see the web-UI blueprint's Phase 3 addendum P3.2).
     `run_id` already encodes `notebook_id`, by construction (`_derive_run_id`) — checked explicitly
     here too (mirroring `citation_turn`'s same check) rather than silently trusting the caller
     passed a matching pair, so a mismatched `notebook_id` can't be used to stream a trace that
@@ -1470,7 +1500,7 @@ async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
 @app.get("/notebooks/{notebook_id}/runs/{run_id}/citation-turn")
 async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: str) -> dict:
     """Which trace turn (if any) shows the model reading a specific citation's source span (see
-    `docs/design/web-ui-blueprint.md`'s Phase 3 addendum P3.3). Searches the ENTIRE serialized
+    the web-UI blueprint's Phase 3 addendum P3.3). Searches the ENTIRE serialized
     payload of each event, in step order, for the first one containing the literal marker
     `[[SRC:<source_id>|<locator>]]` — not a fixed field list, which audit round 1 found misses real
     marker occurrences in a `sub_call` event's `input`/`raw`/`processed` fields (a hardcoded
@@ -1511,7 +1541,7 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
 #: `html=True` serves `index.html` for `/` and any other directory-shaped request, matching how a
 #: single-page static app is normally served. Resolved relative to the INSTALLED PACKAGE directory
 #: (`Path(__file__).parent`), not the process's current working directory — the same reasoning
-#: `docs/design/web-ui-blueprint.md`'s audit note gives for why these assets live under
+#: the web-UI blueprint's audit note gives for why these assets live under
 #: `rlm_notebook/web/` rather than a top-level `web/`: a wheel installed elsewhere on disk must still
 #: find them.
 app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="web")

@@ -1,8 +1,9 @@
 """Shared instruction fragments for every RLMTask that grounds its output in the corpus blob and
-cites it — `AnswerQuestion` (`task.py`) and the Notebook Guide tasks (`guide.py`). Plain string
-constants/functions, not a class hierarchy: the citation-marker rules are IDENTICAL text every one
-of these tasks needs (CLAUDE.md invariant 4), and hand-duplicating that paragraph across five task
-classes is a drift hazard waiting to happen — a wording fix applied to one and forgotten in the
+cites it — `AnswerQuestion` (`task.py`), the four Notebook Guide tasks (`guide.py`) and
+`GeneratePodcastScript` (`audio.py`). Plain string constants/functions, not a class hierarchy: the
+citation-marker rules are IDENTICAL text every one of these tasks needs (CLAUDE.md invariant 4), and
+hand-duplicating that paragraph across SIX task classes (an independent audit found this docstring
+still saying five, from before the podcast joined them) is a drift hazard waiting to happen — a wording fix applied to one and forgotten in the
 others would silently weaken the guarantee for whichever task got missed.
 """
 

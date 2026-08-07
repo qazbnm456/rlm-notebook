@@ -143,3 +143,31 @@ def test_start_run_creates_the_trace_directory(tmp_path):
         assert trace_dir.exists()
 
     asyncio.run(_go())
+
+
+def test_start_run_puts_the_worker_in_its_own_session_not_the_servers(tmp_path):
+    """Invariant 22 rests on `start_new_session=True` in `runner.start_run`, and an independent
+    audit mutation-proved nothing checked it: DELETING that argument left the whole suite green,
+    because `_spawn()` above hardcodes the flag itself and never calls `start_run`. Without it the
+    worker shares the SERVER's process group, so `Run.cancel()`'s `killpg` would signal the whole
+    server — the opposite of the containment invariant 22 describes.
+
+    Spawns the real `rlm_notebook.worker` with a nonexistent dotted task, so it exits promptly on
+    its own; the session check happens the moment the process exists, before it does anything.
+    """
+
+    async def _go():
+        run = await runner.start_run(
+            "session-check", tmp_path, "rlm_notebook.does_not_exist:Nope", {}
+        )
+        try:
+            assert os.getsid(run.process.pid) != os.getsid(0)
+            # A new session leader's session id IS its own pid — the precise property `killpg(pid)`
+            # relies on to signal the worker's group and nothing else.
+            assert os.getsid(run.process.pid) == run.process.pid
+        finally:
+            run.cancel()
+            await run.process.wait()
+
+    asyncio.run(_go())
+

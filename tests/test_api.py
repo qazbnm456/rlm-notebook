@@ -21,6 +21,9 @@ from typing import ClassVar
 import pytest
 
 fastapi = pytest.importorskip("fastapi")
+# Only the two concurrency tests at the bottom need a real ASGI client (TestClient serialises
+# requests, so it cannot interleave two runs on one notebook). Skipped with fastapi if absent.
+httpx = pytest.importorskip("httpx")
 
 from _pdf_fixtures import make_text_pdf_bytes
 from fastapi.testclient import TestClient
@@ -319,7 +322,9 @@ def test_an_id_outside_the_latin_whitelist_is_a_usable_notebook_not_a_400(
 def test_an_empty_notebook_id_is_still_a_400_on_every_id_taking_endpoint(client, monkeypatch):
     """"You gave me nothing" stays a real client error — only "you gave me a name in your own
     language" stopped being one. Invariant 27's mapping (`ValueError` -> 400, never an unhandled
-    500) is what this pins, and it sweeps EVERY id-taking endpoint rather than a sample: an
+    500) is what this pins, and it sweeps every id-taking endpoint that existed when this was written — NOT `/audio`, `/title`,
+    `/overview`, `/sources/upload` or `/audio/file`, which an independent audit probed live and
+    found correctly returning 400 too. The invariant holds; this list is the stale part rather than a sample: an
     independent review pointed out that rewriting the old test for the new rule had quietly dropped
     `ask`/`guide`/`sources/{id}`/`promote` from the sweep, which is the coverage invariant 27 was
     created by (a review finding four endpoints that had each independently forgotten the arm)."""
@@ -660,10 +665,27 @@ class _FakeTTSProvider:
     def default_voices(self, language):
         return None
 
+    def fallback_voices(self):
+        # Tracks `tts.TTSProvider`: a double that does not implement the whole Protocol lets a real
+        # gap hide (an independent audit found the LAST-RESORT cast had never moved onto the
+        # provider, so an unknown language on kokoro fell through to an edge-tts voice name).
+        return ("fake-voice-a", "fake-voice-b")
 
-    def __init__(self, *, boom: str | None = None, payload: bytes = b"fake-mp3-bytes") -> None:
+
+    def __init__(
+        self,
+        *,
+        boom: str | None = None,
+        payload: bytes = b"fake-mp3-bytes",
+        offsets: list[float] | None = None,
+    ) -> None:
         self.boom = boom
         self.payload = payload
+        #: Per-utterance start offsets, as the real Protocol returns (`tts.TTSProvider.synthesize`
+        #: is `-> list[float]`). This double used to return None, so nothing on the API side could
+        #: carry timing at all — found by an independent review, which then showed by mutation that
+        #: deleting every `offsets=` in `api.py` left the whole suite green.
+        self.offsets = offsets
         self.calls: list[tuple] = []
 
     def synthesize(self, script, voice_map, out_path):
@@ -671,6 +693,9 @@ class _FakeTTSProvider:
         if self.boom:
             raise api.TTSError(self.boom)
         out_path.write_bytes(self.payload)
+        if self.offsets is not None:
+            return self.offsets
+        return [float(i) for i in range(len(script.utterances))]
 
 
 def _fake_tts_provider(monkeypatch, provider: _FakeTTSProvider) -> None:
@@ -717,6 +742,58 @@ def test_audio_runs_isolated_and_returns_base64_encoded_audio(client, monkeypatc
     assert not tmp_path.exists()
 
 
+def test_notebook_response_carries_the_slug_so_client_run_ids_match_the_servers(client):
+    """The client builds its own run ids to open a live ticker on, and `_derive_run_id` prefixes
+    them with `slug(notebook_id)`. Building them from the RAW id left every trace link dead for any
+    id the slug changes — `"my notebook"`, or any non-Latin id, which invariant 10 exists to
+    support (found by an independent audit; the server-side guard had been fixed, the client had
+    not). Returned by the server rather than re-implemented in JS, hash fallback and all."""
+    from rlm_notebook.notebook import slug
+
+    for notebook_id in ("plain", "my notebook", "模型要睡覺"):
+        created = client.post(
+            f"/notebooks/{notebook_id}/notes", json={"text": "seed"}
+        )
+        assert created.status_code == 200, created.text
+        body = created.json()
+        assert body["id"] == notebook_id  # the handle a person typed is unchanged
+        assert body["slug"] == slug(notebook_id)
+        # This is the exact prefix `_derive_run_id` builds, so a client id can match a server one.
+        assert not slug(notebook_id).startswith("-")
+
+
+def test_audio_carries_offsets_through_response_persistence_and_reopen(client, monkeypatch):
+    """The subtitle transcript is only as good as the offsets reaching the client, and there are
+    THREE places they can be dropped: the POST response, the persisted `Podcast`, and the
+    `GET /notebooks/{id}` reopen path. An independent review deleted each in turn and the whole
+    suite stayed green, so all three are pinned here rather than trusting one to imply the others.
+    """
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        _podcast_script_result(
+            [
+                {"speaker": "host_a", "text": "one", "citations": []},
+                {"speaker": "host_b", "text": "two", "citations": []},
+                {"speaker": "host_a", "text": "three", "citations": []},
+            ]
+        ),
+    )
+    _fake_tts_provider(monkeypatch, _FakeTTSProvider(offsets=[0.0, 5.25, 7.5]))
+
+    posted = client.post("/notebooks/mynb/audio")
+    assert posted.status_code == 200, posted.text
+    assert posted.json()["offsets"] == [0.0, 5.25, 7.5]
+
+    reopened = client.get("/notebooks/mynb")
+    assert reopened.status_code == 200
+    podcast = reopened.json()["podcast"]
+    assert podcast["offsets"] == [0.0, 5.25, 7.5]
+    # Parallel to `utterances`, never a field on one — a consumer pairs them by index.
+    assert len(podcast["offsets"]) == len(podcast["utterances"])
+
+
 def test_audio_returns_null_audio_when_script_has_no_utterances(client, monkeypatch):
     """A source with nothing worth discussing is a legitimate output (audio.py's instructions
     allow it) — must not call synthesize() on an empty script (EdgeTTSProvider raises TTSError for
@@ -731,8 +808,43 @@ def test_audio_returns_null_audio_when_script_has_no_utterances(client, monkeypa
 
     assert resp.status_code == 200
     body = resp.json()
-    assert body == {"utterances": [], "audio_base64": None, "audio_suffix": None}
+    assert body == {"utterances": [], "audio_base64": None, "offsets": [], "audio_suffix": None}
     assert provider.calls == []  # synthesize() never called for an empty script
+
+
+def test_audio_with_an_empty_script_clears_the_previously_persisted_episode(client, monkeypatch):
+    """Invariant 42's "replaced on regenerate" has to cover the empty case: an independent audit
+    found this arm returning early with the previous episode untouched, so `GET .../audio/file`
+    kept serving audio for a script the notebook no longer had while the UI said there was none."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(monkeypatch, _podcast_script_result([{"speaker": "host_a", "text": "hi",
+                                                      "citations": []}]))
+    _fake_tts_provider(monkeypatch, _FakeTTSProvider(payload=b"first-episode"))
+    assert client.post("/notebooks/mynb/audio").status_code == 200
+    assert client.get("/notebooks/mynb/audio/file").status_code == 200
+
+    _mock_runner(monkeypatch, _podcast_script_result([]))
+    _fake_tts_provider(monkeypatch, _FakeTTSProvider())
+    resp = client.post("/notebooks/mynb/audio")
+
+    assert resp.status_code == 200
+    assert resp.json()["utterances"] == []
+    assert client.get("/notebooks/mynb/audio/file").status_code == 404
+    assert client.get("/notebooks/mynb").json()["podcast"] is None
+
+
+def test_upload_reports_a_clean_500_when_the_size_cap_env_var_is_malformed(client, monkeypatch):
+    """Invariant 24 claimed every `SystemExit` in `config.py` was reachable only through
+    `from_env()`, so `_config()` covered them all. `max_upload_bytes` has one of its own and is the
+    FIRST statement of this handler — an independent audit reproduced a raw 500 with a traceback."""
+    monkeypatch.setenv("RN_MAX_UPLOAD_BYTES", "not-an-int")
+    resp = client.post(
+        "/notebooks/mynb/sources/upload",
+        files={"file": ("a.txt", b"hello", "text/plain")},
+    )
+    assert resp.status_code == 500
+    assert "server misconfigured" in resp.json()["detail"]
 
 
 def test_audio_reports_a_clean_500_when_tts_provider_misconfigured_before_running_the_model(
@@ -1654,6 +1766,9 @@ def test_the_podcast_persists_and_is_served_as_a_file(client, monkeypatch, tmp_p
         def default_voices(self, language):
             return None
 
+        def fallback_voices(self):
+            return ("fake-voice-a", "fake-voice-b")
+
         def synthesize(self, script, voice_map, out_path):
             out_path.write_bytes(b"ID3fake-mp3-bytes")
 
@@ -1688,6 +1803,9 @@ def test_adding_a_source_marks_the_podcast_stale(client, monkeypatch):
         def default_voices(self, language):
             return None
 
+        def fallback_voices(self):
+            return ("fake-voice-a", "fake-voice-b")
+
         def synthesize(self, script, voice_map, out_path):
             out_path.write_bytes(b"x")
 
@@ -1702,3 +1820,88 @@ def test_adding_a_source_marks_the_podcast_stale(client, monkeypatch):
 def test_the_audio_file_endpoint_404s_and_400s_cleanly(client):
     assert client.get("/notebooks/never-generated/audio/file").status_code == 404
     assert client.get("/notebooks/%20%20/audio/file").status_code == 400
+
+
+# --- the two in-memory run registries -----------------------------------------------------------
+
+
+def test_run_id_is_reserved_in_run_processes_before_the_subprocess_is_spawned(client, monkeypatch):
+    """The user-reported "run ended without a final event" bug: `_run_isolated` used to register in
+    `_RUN_PROCESSES` only AFTER `runner.start_run` returned, leaving the whole spawn `await` as a
+    window in which the trace file existed and nothing was tracked — which `stream_run` reads as
+    "the writer has exited". An independent audit mutation-proved nothing pinned the fix: deleting
+    both writes left the suite green, because the only existing assertion checks the key is absent
+    AFTERWARDS, which an unregistered run also satisfies."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    seen: list = []
+
+    async def _start(run_id, trace_dir, dotted_task, kwargs):
+        # By the time a spawn is even attempted, the id must already be claimed with the "starting"
+        # placeholder — that is what stops the ticker concluding the run is over.
+        seen.append((run_id in api._RUN_PROCESSES, api._RUN_PROCESSES.get(run_id)))
+        return _FakeRun(run_id)
+
+    async def _wait(run, *, timeout=None):
+        return {"text": "a", "citations": []}
+
+    monkeypatch.setattr(api.runner, "start_run", _start)
+    monkeypatch.setattr(api.runner, "wait_result", _wait)
+
+    assert client.post("/notebooks/mynb/ask", json={"question": "q"}).status_code == 200
+    assert seen == [(True, None)]
+
+
+def test_a_finishing_run_never_clears_a_LATER_runs_active_entry(client, monkeypatch):
+    """Invariant 23 claims this was "confirmed with an interleaved-`asyncio` test"; an independent
+    audit found no such test, and the first attempt at one here did not catch the bug either —
+    asserting both entries are gone afterwards is satisfied by a plain `pop` too.
+
+    The property that actually distinguishes them: two runs share one notebook slot (the documented
+    capacity limit), so the SECOND overwrites the FIRST. When the FIRST then finishes while the
+    second is still in flight, its `finally` must leave the slot alone — `_ACTIVE_RUNS.get(id) is
+    run` is false for it. A plain `pop` deletes the second run's entry instead, and `/cancel` for a
+    run that is still going silently reaches nothing.
+    """
+    _live_env(monkeypatch)
+    _add_a_source(client)
+
+    second_registered = asyncio.Event()
+    runs: dict = {}
+    observed: list = []
+
+    async def _start(run_id, trace_dir, dotted_task, kwargs):
+        run = _FakeRun(run_id)
+        runs[run_id] = run
+        return run
+
+    async def _wait(run, *, timeout=None):
+        if run.run_id.endswith("-first"):
+            await second_registered.wait()  # let the second run take the slot first
+        else:
+            second_registered.set()
+            # Yield until the first run has finished AND run its `finally`.
+            for _ in range(20):
+                await asyncio.sleep(0)
+            observed.append(api._ACTIVE_RUNS.get("mynb"))
+        return {"text": "a", "citations": []}
+
+    monkeypatch.setattr(api.runner, "start_run", _start)
+    monkeypatch.setattr(api.runner, "wait_result", _wait)
+
+    async def _go():
+        transport = httpx.ASGITransport(app=api.app)
+        async with httpx.AsyncClient(transport=transport, base_url="http://t") as ac:
+            return await asyncio.gather(
+                ac.post("/notebooks/mynb/ask", json={"question": "q", "run_id": "first"}),
+                ac.post("/notebooks/mynb/ask", json={"question": "q", "run_id": "second"}),
+            )
+
+    responses = asyncio.run(_go())
+
+    assert [r.status_code for r in responses] == [200, 200]
+    # The still-running second run's entry survived the first run's cleanup.
+    assert observed and observed[0] is runs["mynb-second"], observed
+    # And both are cleaned up once they have each finished.
+    assert "mynb" not in api._ACTIVE_RUNS
+    assert not [k for k in api._RUN_PROCESSES if k.startswith("mynb-")]

@@ -5,7 +5,7 @@ and dispatched to a locally-installed OCR backend (RapidOCR primary, Tesseract f
 `dependencies` in pyproject.toml, always installed by a plain `uv sync`, not an opt-in extra).
 `pypdfium2` (BSD-3-Clause/Apache-2.0, wraps Google's PDFium) replaces this project's former
 `pymupdf`/`pymupdf4llm` dependency, which was dual-licensed AGPL-3.0-or-Artifex-commercial — see
-`docs/design/pymupdf-license-replacement.md` for the full account of why that had to go.
+the pymupdf-replacement design record for the full account of why that had to go.
 """
 
 from __future__ import annotations
