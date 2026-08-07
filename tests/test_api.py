@@ -2405,3 +2405,33 @@ def test_follow_ups_are_not_citation_verified():
     # producing chips that claim a grounding they do not have.
     with pytest.raises(ValidationError):
         Answer(text="x", follow_ups=[{"question": "q", "citations": []}])
+
+
+def test_the_podcast_task_really_does_carry_the_longest_instructions():
+    """Invariant 59 explains why a token-cap failure hit the podcast FIRST while every other task
+    survived on the same model, and the explanation rests on a measurement. Pinned so the claim
+    cannot quietly stop being true — and because the numbers in an early draft of it were taken from
+    a report rather than from the code."""
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.guide import (
+        GenerateFAQ,
+        GenerateKeyInsight,
+        GenerateSummary,
+        GenerateTimeline,
+    )
+    from rlm_notebook.task import AnswerQuestion
+
+    others = [
+        len(cls.instructions)
+        for cls in (
+            AnswerQuestion,
+            GenerateSummary,
+            GenerateFAQ,
+            GenerateTimeline,
+            GenerateKeyInsight,
+        )
+    ]
+    assert len(GeneratePodcastScript.instructions) > max(others), (
+        "the podcast no longer has the longest instructions, so invariant 59's account of why the "
+        "token cap bit it first is no longer the explanation"
+    )

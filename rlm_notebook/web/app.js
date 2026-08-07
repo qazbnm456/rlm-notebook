@@ -242,6 +242,9 @@ function noteRunFinished(notebookId) {
 //: has to ask. A model's FIRST response on the Claude-subscription path was measured at four
 //: minutes, which is the case this exists for.
 const WAITING_AFTER_SECONDS = 20;
+//: When "waiting for the model's first response" has itself stopped being news. A user watched that
+//: phrase for seven minutes on a subscription model and reported it as looking like a crash.
+const LONG_WAIT_AFTER_SECONDS = 90;
 
 function runStatus({ notebookId, runIds, label, onCancel }) {
   noteRunStarted(notebookId);
@@ -421,6 +424,14 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
   let lastEventAt = started;
   let currentPhrase = label;
   let stepsSeen = 0;
+  //: Whether we are still waiting on the model's FIRST reply. Separate from `stepsSeen` because
+  //: `setPhase` moves the run to a stage the trace cannot see, where "waiting for the model's first
+  //: response" is simply false — and `paint`'s pre-first-step branch REPLACES the phrase rather
+  //: than appending to it, so a phase set at second 0 was silently gone by second 20. An
+  //: independent review measured it: 26s in, a podcast mid-SYNTHESIS said it was waiting for a
+  //: model, and at 2:02 the long-wait tier told the reader Stop was available while Stop was
+  //: greyed out — reintroducing, in the same diff, the exact complaint that tier was added for.
+  let awaitingFirstReply = true;
 
   function paint() {
     elapsed.textContent = formatTimecode((Date.now() - started) / 1000);
@@ -435,9 +446,21 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
     // waiting. What they cannot see is WHAT it is waiting for, and that the first model response
     // is the slow one. After a step has landed, the elapsed time is the information: it is the
     // difference between a slow step and a stuck one.
-    text.textContent = stepsSeen
-      ? `${currentPhrase} \u00b7 ${t("run.waiting", `waiting ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) })}`
-      : t("run.awaitingModel", `waiting for the model's first response \u00b7 ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) });
+    if (!awaitingFirstReply) {
+      text.textContent = `${currentPhrase} \u00b7 ${t("run.waiting", `waiting ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) })}`;
+    } else if (waiting < LONG_WAIT_AFTER_SECONDS) {
+      text.textContent = t("run.awaitingModel", `waiting for the model's first response \u00b7 ${formatTimecode(waiting)}`, { time: formatTimecode(waiting) });
+    } else {
+      // A SECOND tier, because the first stopped being informative: a user watched "waiting for the
+      // model's first response" for seven minutes and read it as a crash. Nothing more CAN be
+      // observed — no trace event exists until the model replies — so the honest move is to say
+      // that, and point at Stop, rather than repeat a phrase that has already failed to reassure.
+      text.textContent = t(
+        "run.awaitingModelLong",
+        `still waiting for the model's first response \u00b7 ${formatTimecode(waiting)} \u00b7 nothing is reported until it replies; Stop is available`,
+        { time: formatTimecode(waiting) },
+      );
+    }
   }
 
   const timer = setInterval(paint, 1000);
@@ -478,10 +501,27 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 
   return {
     node,
+    //: Rename the phase mid-run, for an action whose later stages the trace cannot see — the
+    //: podcast's synthesis half is the only one today. `stoppable: false` DISABLES Stop rather than
+    //: hiding it, so the control does not vanish out from under a pointer.
+    setPhase(phrase, { stoppable = true } = {}) {
+      if (stopped) return;
+      currentPhrase = phrase;
+      lastEventAt = Date.now();
+      // NOT waiting on a first reply any more: this names a stage the trace cannot see.
+      awaitingFirstReply = false;
+      stop.disabled = !stoppable;
+      // Cleared as well as set — otherwise a later stoppable phase re-enables the button while
+      // leaving "this stage cannot be interrupted" hanging on it.
+      if (stoppable) delete stop.dataset.tip;
+      else stop.dataset.tip = t("run.notStoppable", "This stage cannot be interrupted.");
+      paint();
+    },
     // The whole event, not just its text: the KIND is what the counters are made of, and the
     // summary alone threw it away.
     onEvent(event) {
       if (stopped || !event) return;
+      awaitingFirstReply = false;
       if (counts[event.kind] !== undefined) {
         counts[event.kind] += 1;
         renderMeter();
@@ -506,26 +546,70 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 }
 
 function renderTickerAffordance(runId) {
-  const events = tickerLogs.get(runId) || [];
   const wrapper = document.createElement("div");
   wrapper.className = "ticker-affordance";
 
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "ticker-toggle trace-face";
-  toggle.textContent = t("err.steps", `⌁ ${events.length} step${events.length === 1 ? "" : "s"}`, { n: events.length });
 
   const detail = document.createElement("div");
   detail.className = "ticker-detail trace-face";
   detail.hidden = true;
-  events.forEach((event) => {
-    const row = document.createElement("div");
-    row.className = "ticker-row";
-    row.textContent = event.summary || event.kind || "event";
-    detail.appendChild(row);
-  });
 
-  toggle.addEventListener("click", () => {
+  const fill = (events) => {
+    detail.textContent = "";
+    // A trace collected by retention (invariant 34) comes back as a single `not_found`, which is an
+    // ordinary outcome rather than a fault — a 7-day-old run simply has no record any more.
+    if (events.length === 1 && events[0].kind === "not_found") {
+      toggle.textContent = t("err.stepsGone", "\u2301 no record");
+      const note = document.createElement("div");
+      note.className = "ticker-row";
+      note.textContent = t(
+        "err.stepsGoneNote",
+        "This run's record has been cleared. Records are kept for a limited time.",
+      );
+      detail.appendChild(note);
+      return;
+    }
+    toggle.textContent = t("err.steps", `\u2301 ${events.length} step${events.length === 1 ? "" : "s"}`, {
+      n: events.length,
+    });
+    events.forEach((event) => {
+      const row = document.createElement("div");
+      row.className = `ticker-row kind-${event.kind || "other"}`;
+      row.textContent = event.summary || traceHeadline(event) || "";
+      detail.appendChild(row);
+    });
+  };
+
+  // `cached.length`, not just presence: `openTicker` sets `[]` up front and resolves with `[]` on a
+  // dropped stream, so a live run whose SSE broke leaves an empty array behind — and treating that
+  // as a hit rendered a permanent `0 steps` pill that only ever toggled an empty box.
+  const cached = tickerLogs.get(runId);
+  if (cached && cached.length) {
+    fill(cached);
+  } else {
+    // NOT hidden any more when the page has no log for this run. `tickerLogs` lives for one page
+    // session, so after a reload every "N steps" pill vanished even though the trace file is still
+    // on the server and the stream endpoint replays it from the start. A user asked where the
+    // overview's step count had gone; the answer was that we had the affordance gated on a cache
+    // rather than on whether the record exists.
+    toggle.textContent = t("err.stepsLoad", "\u2301 steps");
+  }
+
+  toggle.addEventListener("click", async () => {
+    if (!(tickerLogs.get(runId) || []).length) {
+      toggle.disabled = true;
+      toggle.textContent = t("cite.loading", "Loading\u2026");
+      // Replays the whole file and terminates: `_tail_trace_events` reads what is already there
+      // before it starts tailing, so a finished run streams its complete log and then ends.
+      await openTicker(state.notebookId, runId, () => {});
+      toggle.disabled = false;
+      fill(tickerLogs.get(runId) || []);
+      detail.hidden = false;
+      return;
+    }
     detail.hidden = !detail.hidden;
   });
 
@@ -534,138 +618,11 @@ function renderTickerAffordance(runId) {
   return wrapper;
 }
 
-// Which trace turn (if any) shows the model reading this citation's source span — a heuristic
-// lookup (blueprint P3.3), never a faithfulness proof. `detailArea` is a shared slot inside the
-// SAME renderAnswerWithCitations() call the clicked span belongs to, so only one detail shows at
-// a time per answer rather than accumulating unboundedly.
-//
-// Staleness guard, added when the source-viewer addendum's own audit found this exact defect
-// already present here: opening the trace view for citation A, then quickly for citation B in the
-// SAME detailArea, could let A's slower response land after B's and overwrite it with the wrong
-// citation's payload. A monotonic token stored directly on `detailArea` — bumped on every call,
-// checked before writing the DOM — discards a stale response rather than an AbortController, since
-// this is a plain GET with no cleanup the browser needs told about.
-async function showCitationTurn(runId, citation, detailArea) {
-  // Clicking the SAME citation again collapses the panel, rather than blanking it to t("cite.loading", "Loading…")
-  // and re-fetching the identical payload — which is what it used to do, and read as a flash with
-  // nothing ever closing. (An earlier version of this comment justified the change by saying the
-  // ticker affordance in this same page "already toggles on re-click". It did not — `.ticker-detail`
-  // carried the same display-vs-hidden defect, fixed alongside this. Both now toggle.)
-  // Keyed on WHICH citation is showing: clicking a DIFFERENT one while open must switch to it, not
-  // close the panel. `quote` is part of the key because `source_id|locator` alone is NOT unique —
-  // text and web sources emit a single block with locator "whole", so every citation into one such
-  // source shares that pair, and an answer citing it three times would have clicking the second
-  // row CLOSE the panel instead of switching. Found by an independent review.
-  const key = `${citation.source_id}|${citation.locator}|${citation.quote}`;
-  if (!detailArea.hidden && detailArea._shownKey === key) {
-    detailArea.hidden = true;
-    detailArea._shownKey = null;
-    // Bump the token on the way out so an in-flight response can't repopulate a panel the user
-    // has just closed (the same staleness guard the fetch below relies on, applied to collapse).
-    detailArea._requestToken = (detailArea._requestToken || 0) + 1;
-    return;
-  }
-
-  const token = (detailArea._requestToken || 0) + 1;
-  detailArea._requestToken = token;
-  detailArea._shownKey = key;
-  detailArea.hidden = false;
-  detailArea.textContent = t("cite.loading", "Loading…");
-  try {
-    const params = new URLSearchParams({ source_id: citation.source_id, locator: citation.locator });
-    const data = await api(
-      `/notebooks/${encodeURIComponent(state.notebookId)}/runs/${encodeURIComponent(runId)}/citation-turn?${params}`
-    );
-    if (detailArea._requestToken !== token) return; // superseded by a newer click
-    detailArea.textContent = "";
-    const note = document.createElement("div");
-    note.className = "citation-detail-note";
-    note.textContent = t("cite.traceHead", "Where the model read this source (not proof the surrounding prose is faithful):");
-    detailArea.appendChild(note);
-    detailArea.appendChild(renderTraceStep(data.payload));
-  } catch (err) {
-    if (detailArea._requestToken !== token) return;
-    detailArea.textContent = "";
-    const note = document.createElement("div");
-    note.className = "citation-detail-note";
-    // A 404 here is the ORDINARY outcome, not a fault: the lookup is a marker search through one
-    // run's trace (invariant 29), and a marker the model only ever handled inside a truncated
-    // sub-call field, or a trace already collected by retention, simply is not findable. Showing
-    // `404: marker for source 's3' locator 'whole' not found in this trace` was reported, fairly,
-    // as unintelligible — it reads as a broken feature rather than as "no record of this".
-    note.textContent = /\b404\b/.test(String(err.message))
-      ? t(
-          "cite.traceMissing",
-          "No step in this run's record shows the model reading that exact passage. The record only covers what it echoed while working, and old records are cleared after a while."
-        )
-      : t("err.generic", `(error) ${err.message}`, { message: err.message });
-    detailArea.appendChild(note);
-  }
-}
-
-// A trace step, in the same visual language as the source viewer: reasoning is prose, code is a
-// code block, output is the source text it read. It used to be `JSON.stringify(payload, null, 2)`
-// in a `<pre>` — a wall containing an entire article, which a user called unreadable, correctly.
-function renderTraceStep(payload) {
-  const wrap = document.createElement("div");
-  wrap.className = "trace-step";
-  const data = payload || {};
-
-  if (data.reasoning || data.final_reasoning) {
-    const prose = document.createElement("p");
-    prose.className = "trace-reasoning";
-    prose.textContent = data.reasoning || data.final_reasoning;
-    wrap.appendChild(prose);
-  }
-
-  if (data.code) {
-    wrap.appendChild(traceBlock(t("trace.code", "Code it ran"), data.code, "trace-code", false));
-  }
-
-  // COLLAPSED: the output is whatever the model printed, which for a read step is a whole source.
-  // That is the part that made the old panel a wall.
-  if (data.output) {
-    const text = typeof data.output === "string" ? data.output : JSON.stringify(data.output, null, 2);
-    wrap.appendChild(traceBlock(t("trace.output", "What came back"), text, "trace-output", true));
-  }
-
-  // Anything this renderer has no shape for, rather than dropping it silently.
-  const known = new Set(["reasoning", "final_reasoning", "code", "output", "turn"]);
-  const rest = Object.fromEntries(Object.entries(data).filter(([k]) => !known.has(k)));
-  if (Object.keys(rest).length) {
-    wrap.appendChild(
-      traceBlock(t("trace.other", "Other fields"), JSON.stringify(rest, null, 2), "trace-code", true)
-    );
-  }
-  return wrap;
-}
-
-function traceBlock(label, text, className, collapsed) {
-  const section = document.createElement("details");
-  section.className = "trace-block";
-  section.open = !collapsed;
-
-  const summary = document.createElement("summary");
-  summary.textContent = `${label} \u00b7 ${text.length.toLocaleString()}`;
-  section.appendChild(summary);
-
-  const pre = document.createElement("pre");
-  pre.className = `${className} trace-face`;
-  pre.textContent = text;
-  section.appendChild(pre);
-  return section;
-}
-
-// --- Source viewer modal ------------------------------------------------------------------------
-//
-// NotebookLM's most basic loop: click a citation, see the highlighted original passage. A modal
-// (the first stacking-context component in this codebase's web/) rather than an inline slot —
-// source text can run to a whole PDF's worth of pages, too long for the trace-detail slot pattern
 // above. Opened from a citation's list row (always) or a Sources-panel list item (no highlight
 // target). Each open aborts any still-in-flight fetch from a PREVIOUS open, so a slower first
-// response can never overwrite a faster second one's render — the same class of defect just found
-// and fixed in showCitationTurn above, guarded against here from the start with an AbortController
-// instead (this fetch, unlike citation-turn's, is worth actually cancelling on the network level).
+// response can never overwrite a faster second one's render — the same class of defect an audit
+// once found in the (since-removed) citation-turn panel, guarded against here from the start with
+// an AbortController instead, this fetch being worth cancelling at the network level.
 let sourceViewerAbort = null;
 
 function closeSourceViewer() {
@@ -1589,7 +1546,7 @@ function initSourcesPanel() {
 // already enforce for exactly this reason (see rlm_notebook/web/DESIGN.md's Do/Don't).
 // `runId` is optional (Phase 1/2 call sites that predate the trace fusion, or a loaded turn saved
 // before `ChatTurn.run_id` existed, pass nothing) — when given, each citation span becomes
-// clickable, calling `showCitationTurn` against a shared detail slot appended once per answer.
+// clickable and opens the References view at that entry (`focusReference`).
 // The "+ Save as note" affordance, as a factory rather than a line inside
 // `renderAnswerWithCitations`. NotebookLM's own model is that generated artifacts BECOME notes, and
 // this project already has the whole mechanism (Note -> promote_note -> a real citable Source) —
@@ -2013,15 +1970,17 @@ function renderMdList(root, lines, start, text, emit, indent) {
 function renderAnswerWithCitations(text, citations, runId) {
   const container = document.createElement("div");
 
-  // One number per distinct source span, shared by the inline strokes and the reference list, so
-  // "this sentence" and "reference 2" are visibly the same thing.
-  const numbers = new Map();
-  citations.forEach((citation) => {
-    const key = referenceKey(citation);
-    if (!numbers.has(key)) numbers.set(key, numbers.size + 1);
-  });
-  const referenceNumberFor = (citation) =>
-    numbers.get(referenceKey(citation)) || 0;
+  // Numbered from the NOTEBOOK-WIDE reference list, not per artifact. This comment used to claim
+  // that "this sentence" and "reference 2" are visibly the same thing while the code counted 1..n
+  // within each artifact separately: an overview citing two sources numbered them 1 and 2, the next
+  // chat answer numbered ITS first citation 1 again, and the References panel — which numbers the
+  // deduped whole — called that one 3. Every artifact after the first disagreed with the panel it
+  // points into. `collectReferences` is the single ordering both ends now read.
+  const order = new Map(collectReferences().map((ref, i) => [referenceKey(ref), i + 1]));
+  // Fallback for a citation not yet in `state` (an artifact rendered before its state assignment).
+  // 0 renders no number at all, which is the honest outcome — better than a number that points at
+  // the wrong row.
+  const referenceNumberFor = (citation) => order.get(referenceKey(citation)) || 0;
 
   // Locate each citation's quote as a literal substring of the RAW answer text (never
   // pre-escaped — a DOM text node needs no escaping, only innerHTML does). The model may
@@ -2117,7 +2076,10 @@ function renderAnswerWithCitations(text, citations, runId) {
   // Exactly one number per citation, on its last fragment — decided here, where every fragment is
   // known, rather than guessed at while emitting.
   fragments.forEach((spans, match) => {
-    spans[spans.length - 1].dataset.reference = String(referenceNumberFor(match.citation));
+    const n = referenceNumberFor(match.citation);
+    // Absent, not "0": `content: attr(data-reference)` renders the literal character, so a 0 puts a
+    // superscript zero next to the prose instead of the "no number at all" this fallback claims.
+    if (n) spans[spans.length - 1].dataset.reference = String(n);
   });
 
   if (citations.length) {
@@ -2177,7 +2139,7 @@ function renderTurn(turn) {
     answer.appendChild(renderAnswerWithCitations(turn.answer, turn.citations || [], turn.run_id));
     // `turn.run_id` is `None`/absent for any turn saved before this field existed — degrades
     // gracefully to no affordance rather than a broken link (schema.ChatTurn.run_id's own doc).
-    if (turn.run_id && tickerLogs.has(turn.run_id)) {
+    if (turn.run_id) {
       answer.appendChild(renderTickerAffordance(turn.run_id));
     }
     // Appended HERE, by renderTurn itself — NOT inside renderAnswerWithCitations, which five OTHER
@@ -2192,11 +2154,23 @@ function renderTurn(turn) {
     // deliberately NOT unified, because the overview's appears before any conversation exists, and
     // "ask next" there would be asking the reader to continue something they have not begun.
     if (turn.follow_ups && turn.follow_ups.length) {
+      // Wrapped so the stylesheet can show it on the LAST turn only. Every turn carries its own
+      // suggestions (they are persisted per answer), and rendering all of them put a row of chips
+      // under every answer in the thread — ten rows in a ten-turn conversation, nine of them
+      // offering to continue a conversation that has already continued past them.
+      //
+      // `:last-child` rather than a flag passed in: turns reach the DOM through TWO paths
+      // (`rebuildHistory` and the `chat:turnAdded` replay), and a rule that reads the DOM is right
+      // for both without either having to remember. It also handles the pending row for free — a
+      // question already in flight is not a moment to suggest another one.
+      const block = document.createElement("div");
+      block.className = "turn-followups";
       const label = document.createElement("div");
       label.className = "chat-overview-head";
       label.textContent = t("chat.askNext", "Ask next");
-      answer.appendChild(label);
-      answer.appendChild(starterQuestionRow(turn.follow_ups));
+      block.appendChild(label);
+      block.appendChild(starterQuestionRow(turn.follow_ups));
+      answer.appendChild(block);
     }
   }
   wrapper.appendChild(answer);
@@ -2249,22 +2223,52 @@ function renderChatOverview() {
   el.appendChild(head);
 
   el.appendChild(renderAnswerWithCitations(overview.text, overview.citations || [], overview.run_id));
-  // Guarded, as `renderTurn` already guards its own: on a fresh page load `tickerLogs` is empty, so
-  // an unconditional call would render a dead "0 steps" pill for every reloaded overview.
-  if (overview.run_id && tickerLogs.has(overview.run_id)) {
+  // No cache guard: the affordance loads the record from the server when this page has none, which
+  // is every run after a reload.
+  if (overview.run_id) {
     el.appendChild(renderTickerAffordance(overview.run_id));
   }
   el.appendChild(saveAsNoteButton(overview.text));
 
-  if (overview.starter_questions && overview.starter_questions.length) {
+  // FOUR states, not three. Invariant 38 named "never generated / current / stale"; an overview
+  // that is current but arrived INCOMPLETE is a fourth, because `/overview` runs Summary and FAQ
+  // concurrently and persists the summary even when the FAQ half dies. It rendered as nothing, then
+  // (worse) as a note telling the reader to regenerate while the regenerate button was still gated
+  // behind `stale` — a message naming an action the page did not offer.
+  let offerRegenerate = overview.stale;
+
+  // Only before the conversation starts. These are an invitation to BEGIN — that is the whole
+  // reason this row says "Start with" while an answer's says "Ask next" (invariant 56) — and once
+  // there are turns the live suggestion is the latest answer's, at the bottom of the thread where
+  // the reader actually is. Leaving both on screen put two competing rows a scroll apart.
+  if (state.turns && state.turns.length) {
+    // nothing: the thread's own latest answer carries the suggestions now
+  } else if (overview.starter_questions && overview.starter_questions.length) {
     const label = document.createElement("div");
     label.className = "chat-overview-head";
     label.textContent = t("chat.startWith", "Start with");
     el.appendChild(label);
     el.appendChild(starterQuestionRow(overview.starter_questions));
+  } else {
+    // An overview with NO starter questions is a half-failure, not an empty result: `/overview`
+    // fires a Summary and an FAQ concurrently and persists the summary even when the FAQ half dies
+    // (invariant 38). It rendered as nothing at all, so a user whose FAQ half had timed out reported
+    // the suggestions as having disappeared from the product — the same "a superseded generation
+    // says so" lesson invariant 47 records, on a different path. Saying it, with the button that
+    // fixes it, costs one line.
+    const note = document.createElement("div");
+    note.className = "chat-overview-note";
+    note.textContent = t(
+      "chat.noStarters",
+      "No suggested questions came back with this overview \u2014 regenerate to try again.",
+    );
+    el.appendChild(note);
+    offerRegenerate = true;
   }
 
-  if (overview.stale) {
+  // ONE button, whichever state asked for it — a stale overview and an incomplete one both want
+  // the same action, and appending it per-branch would have produced two on a notebook that is both.
+  if (offerRegenerate) {
     el.appendChild(overviewStarter(t("chat.regenerateOverview", "\u21bb Regenerate overview"), ""));
   }
 }
@@ -2366,6 +2370,11 @@ async function generateOverview() {
     state.overview = notebook.overview;
     refreshReferenceView();
     renderChatOverview();
+    // The thread too: a regenerated overview changes which coordinates come FIRST in the
+    // notebook-wide reference order, so every stroke already on screen would keep a number that no
+    // longer matches the row it points at. Cheap, and the alternative is a page that is internally
+    // inconsistent until the next reload.
+    store.emit("chat:rerender", {});
   } catch (err) {
     status.finish();
     if (cancelled) return;
@@ -2400,11 +2409,25 @@ function initChatPanel() {
   // ONE rebuild, used by every path that redraws the thread. The overview is the thread's first
   // entry now, so a `history.innerHTML = ""` that forgot to put it back would silently delete it —
   // which is exactly what the old sibling layout was avoiding.
+  // The placeholder reads "Ask a question once you've added a source" — which is only TRUE while
+  // there is no source. It used to be gated on turns alone, so a notebook with eight sources and no
+  // conversation still told the reader to add one; a user reported it as confusing, and it is: the
+  // sentence describes a precondition they have already met. Once a source exists the invitation is
+  // the overview's own button (or its starter questions), a few lines above.
+  const syncEmptyNote = (turns, pending) =>
+    (empty.hidden = turns.length > 0 || Boolean(pending) || (state.sources || []).length > 0);
+
+  //: The question currently in flight, if any. `chat:rerender` has to put it back: an independent
+  //: review reproduced regenerating the overview mid-question deleting the pending row, its status
+  //: and its Stop, leaving a disabled composer with no way to cancel until the answer landed
+  //: minutes later — invariant 47's rule broken by a repaint.
+  let pendingTurn = null;
+
   const rebuildHistory = (turns, pending) => {
     history.textContent = "";
     history.appendChild(overviewEl);
     history.appendChild(empty);
-    empty.hidden = turns.length > 0 || Boolean(pending);
+    syncEmptyNote(turns, pending);
     turns.forEach((turn) => history.appendChild(renderTurn(turn)));
     if (pending) history.appendChild(renderTurn(pending));
   };
@@ -2447,7 +2470,12 @@ function initChatPanel() {
   // the button after paying for two RLM runs sitting on disk (adding a source while the model works
   // is the exact behaviour invariant 34 documents as real). The re-render flips the overview to
   // stale on its own, because the server's `source_ids` no longer match.
-  store.on("sources:changed", () => renderChatOverview());
+  store.on("sources:changed", () => {
+    renderChatOverview();
+    // Adding the FIRST source has to retire the placeholder immediately — it is the moment its
+    // sentence stops being true, and nothing else redraws the thread at that point.
+    syncEmptyNote(state.turns || [], pendingTurn);
+  });
   renderChatOverview();
 
   store.on("chat:turnAdded", ({ turn, restoring }) => {
@@ -2460,6 +2488,10 @@ function initChatPanel() {
     // there is a different thing.
     if (!restoring) history.scrollTop = history.scrollHeight;
   });
+
+  // Something outside the thread changed the notebook-wide reference order (regenerating the
+  // overview is the one that does it today), so every turn's stroke numbers have to be recomputed.
+  store.on("chat:rerender", () => rebuildHistory(state.turns || [], pendingTurn));
 
   store.on("chat:pending", ({ pending }) => {
     submitBtn.disabled = pending;
@@ -2483,7 +2515,7 @@ function initChatPanel() {
     const runId = `${state.notebookSlug || state.notebookId}-${token}`;
 
     ensureTitle();
-    const pendingTurn = { question, pending: true, run_id: runId };
+    pendingTurn = { question, pending: true, run_id: runId };
     store.emit("chat:turnAdded", { turn: pendingTurn });
     store.emit("chat:pending", { pending: true });
     input.value = "";
@@ -2500,6 +2532,8 @@ function initChatPanel() {
       label: t("chat.thinking", "Thinking\u2026"),
       onCancel: () => {
         cancelled = true;
+        // Nothing is in flight any more; a rebuild must not resurrect the row.
+        pendingTurn = null;
         store.emit("chat:pending", { pending: false });
         const row = history.querySelector(`.turn-answer[data-run-id="${CSS.escape(runId)}"]`);
         if (row) {
@@ -2531,6 +2565,9 @@ function initChatPanel() {
       const notebook = await api(`/notebooks/${encodeURIComponent(askedNotebookId)}`);
       if (generation !== notebookGeneration) return;
       state.turns = notebook.turns;
+      // CLEARED before the rebuild: the turn is in `state.turns` now, so a later `chat:rerender`
+      // that still held this object would render the same question twice.
+      pendingTurn = null;
       refreshReferenceView();
       rebuildHistory(state.turns);
       void result; // already folded into notebook.turns above
@@ -2638,6 +2675,12 @@ function initStudioPanel() {
     get: (kind) => state.guides[kind],
     set: (kind, value) => {
       state.guides[kind] = value;
+    },
+    // `delete` was lost when this moved from a `Map` onto `state`, and `regenerateBtn` calls it —
+    // so Studio's ↻ Regenerate threw `TypeError: cache.delete is not a function` and did nothing.
+
+    delete: (kind) => {
+      delete state.guides[kind];
     },
     clear: () => {
       state.guides = {};
@@ -2865,7 +2908,7 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
     : t("podcast.downloadPlain", "\u2913 Download audio");
   body.appendChild(download);
 
-  if (runId && tickerLogs.has(runId)) body.appendChild(renderTickerAffordance(runId));
+  if (runId) body.appendChild(renderTickerAffordance(runId));
 
   const transcript = document.createElement("div");
   transcript.className = "podcast-transcript";
@@ -2986,7 +3029,21 @@ function initPodcastPlayer() {
       },
     });
     body.appendChild(status.node);
-    openTicker(state.notebookId, runId, (evt) => status.onEvent(evt));
+    // TWO phases, and only the FIRST is a traced, cancellable subprocess run. When the script run
+    // ends the server starts synthesizing in-process (invariant 29) — no trace events, no way to
+    // stop it, and up to fifteen minutes on the local provider (invariant 43). The label said
+    // "Writing the script" for that whole second stretch, which is not what was happening.
+    openTicker(state.notebookId, runId, (evt) => {
+      status.onEvent(evt);
+      // `done` ONLY, not every terminal kind: announcing a stage that will never start — and
+      // greying out Stop — is worse than saying nothing while the HTTP error lands.
+      if (evt.kind === "done") {
+        status.setPhase(
+          t("podcast.synthesizing", "Synthesizing the audio\u2026 (this stage cannot be stopped)"),
+          { stoppable: false },
+        );
+      }
+    });
     try {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
@@ -3346,9 +3403,29 @@ function collectReferences() {
 
 // The References view is built from a snapshot of `state`, so anything that ADDS a citation has to
 // ask for a rebuild. Cheap and idempotent; a no-op when the reader is looking at another view.
+// Re-stamp every stroke ON THE PAGE from the current notebook-wide order. `collectReferences`
+// orders overview -> turns -> podcast -> guides, so adding one chat turn shifts the number of every
+// podcast and guide coordinate — and those panels do not re-render. An independent review measured
+// a podcast stroke still saying 1 while the panel called that coordinate 2.
+//
+// Re-stamping rather than re-rendering, deliberately: re-rendering the podcast rebuilds its
+// `<audio>` and would interrupt playback, and it is the NUMBER that went stale, nothing else.
+function renumberStrokes() {
+  const order = new Map(collectReferences().map((ref, i) => [referenceKey(ref), i + 1]));
+  document.querySelectorAll(".citation[data-ref-key]").forEach((span) => {
+    const n = order.get(span.dataset.refKey);
+    // No attribute rather than "0": `content: attr(data-reference)` renders a literal 0, which is
+    // the opposite of the "no number at all" the fallback claims.
+    if (n) span.dataset.reference = String(n);
+    else delete span.dataset.reference;
+  });
+}
+
 function refreshReferenceView() {
   const host = document.getElementById("reference-view");
   if (host && !host.closest("[data-view-body]")?.hidden) renderReferenceView();
+  // Every OTHER surface's strokes are numbered from the same order, and none of them re-renders.
+  renumberStrokes();
 }
 
 //: The coordinate key, and the SEPARATOR is load-bearing. It used to be U+0000, which meant every

@@ -19,6 +19,10 @@ import importlib
 import json
 import sys
 
+# rlm-harness's own head+tail elider. Private, and deliberately borrowed rather than re-spelled:
+# it already encodes WHERE an AdapterParseError keeps its diagnostics, which a slice gets wrong.
+from rlm_harness._retry import _short_error
+
 from .config import NotebookConfig, setup
 
 
@@ -45,6 +49,65 @@ def _default(obj):
 
 async def _run(task_cls: type, kwargs: dict) -> object:
     return await task_cls().arun(**kwargs)
+
+
+#: How much of each half of the message survives. Bounded because this ends up in an HTTP error
+#: body and on screen, and an `AdapterParseError` embeds the model's ENTIRE completion.
+_ERROR_CHARS = 600
+
+
+def _describe(exc: BaseException) -> str:
+    """`TypeName: message`, plus the ROOT cause when there is one, both head+tail elided.
+
+    `RLMTaskError: Failed to produce a valid 'script' after N attempts` is what a user was shown for
+    a run whose real fault was the model returning a schema fragment instead of the
+    `reasoning`/`code` fields the adapter asked for. The wrapper names the symptom; the chain names
+    the cause, and it was being discarded at exactly the boundary where a person starts reading.
+
+    **Elision is rlm-harness's own `_short_error`, not a `[:600]` slice.** dspy orders
+    `AdapterParseError.__str__` as adapter-name, then the WHOLE LM completion, then the
+    expected/actual field summary — so a head truncation deletes precisely the two lines worth
+    having. An independent review measured the cutoff: past a ~534-character completion, a head
+    slice ends in a wall of raw model output with `Actual: []` gone, i.e. it failed on the exact bug
+    this function was added for. `_short_error` keeps both ends and says how much it dropped; using
+    it rather than re-implementing it is also why the numbers cannot drift apart.
+    """
+    root = exc
+    seen = {id(exc)}
+    while True:
+        # `is not None`, not truthiness: an exception class with a falsy `__bool__`/`__len__` would
+        # otherwise have its cause skipped. And `__suppress_context__` is honoured — `raise X from
+        # None` is an explicit statement that the context is not to be shown, and resurfacing it
+        # here would leak what someone deliberately suppressed.
+        nxt = root.__cause__
+        if nxt is None and not root.__suppress_context__:
+            nxt = root.__context__
+        # An ExceptionGroup hides the real fault in `.exceptions`; the subscription path's SDK runs
+        # on anyio task groups, and this project has already been bitten by one (invariant 34).
+        if nxt is None and not root.__suppress_context__:
+            group = getattr(root, "exceptions", None)
+            if isinstance(group, (list, tuple)) and group:
+                nxt = group[0]
+        if nxt is None or id(nxt) in seen:
+            break
+        seen.add(id(nxt))
+        root = nxt
+
+    head = _render(exc)
+    if root is exc:
+        return head
+    return f"{head} \u2014 caused by {_render(root)}"
+
+
+def _render(exc: BaseException) -> str:
+    """One exception as a bounded single line. Never raises: `str(exc)` is arbitrary third-party
+    code, and a raise HERE happens inside the handler that was about to emit the only JSON line the
+    parent will ever see — the worker would die silently and `runner` would report "failed with no
+    error message", losing even the wrapper."""
+    try:
+        return " ".join(_short_error(exc, _ERROR_CHARS).split())
+    except Exception:  # noqa: BLE001 — a broken __str__ must not cost us the whole report
+        return f"{type(exc).__name__}: <unprintable>"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
         with TraceRecorder(trace_path, run_id=run_id, meta={"task": dotted}):
             result = asyncio.run(_run(task_cls, kwargs))
     except Exception as exc:  # noqa: BLE001 — surfaced as a JSON error line, this is a process boundary
-        _emit({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+        _emit({"ok": False, "error": _describe(exc)})
         return 1
 
     _emit({"ok": True, "result": result})

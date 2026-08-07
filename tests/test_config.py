@@ -222,3 +222,83 @@ def test_the_step_budget_is_this_projects_own_choice_not_the_harness_default(mon
     monkeypatch.delenv("RN_MAX_ITERATIONS", raising=False)
     monkeypatch.delenv("RN_INTERPRETER", raising=False)
     assert NotebookConfig.from_env().max_iterations == 25
+
+
+def test_the_retry_budget_stays_at_one_but_is_readable(monkeypatch):
+    """PINNED at 1, matching every sibling: a whole-run retry rarely fixes a persistent coercion
+    failure, and re-running burns the budget again while writing a second copy of the same failure
+    into the trace. It moved to a field only so an operator can raise it deliberately — the default
+    does not move, and the first-turn parse failure that prompted the question is a `max_tokens`
+    problem, not a retry one."""
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    monkeypatch.delenv("RN_MAX_RETRIES", raising=False)
+    assert NotebookConfig.from_env().max_retries == 1
+
+    monkeypatch.setenv("RN_MAX_RETRIES", "5")
+    assert NotebookConfig.from_env().max_retries == 5
+
+
+def test_setup_forwards_every_budget_to_the_harness(monkeypatch):
+    """BEHAVIOURAL, not a source-string search. A value has to REACH rlm-harness: an env var read
+    into a field nothing forwards is the shape `RN_OCR_PROVIDER` already has (invariant 7) and looks
+    identical from outside.
+
+    The first version of this test grepped `config.setup`'s source for `max_retries=config.…`, which
+    an independent review found wrong twice over — it covered only the PINNED knob while both
+    `RN_MAX_TOKENS` mutations (hardcoding the default, and deleting the forwarding line entirely)
+    survived the whole suite, and its negative assertion would have fired on a docstring sentence
+    containing the literal, which is exactly the phrasing a sibling's config already uses.
+    """
+    import rlm_harness
+
+    from rlm_notebook import config as config_module
+
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    monkeypatch.setenv("RN_MAX_TOKENS", "31337")
+    monkeypatch.setenv("RN_MAX_RETRIES", "7")
+    monkeypatch.setenv("RN_MAX_ITERATIONS", "13")
+    monkeypatch.setenv("RN_MAX_LLM_CALLS", "17")
+    monkeypatch.setenv("RN_MAX_OUTPUT_CHARS", "12345")
+
+    seen = {}
+    monkeypatch.setattr(rlm_harness, "configure", lambda cfg, **kw: seen.setdefault("cfg", cfg))
+    config_module.setup(NotebookConfig.from_env())
+
+    forwarded = seen["cfg"]
+    assert forwarded.max_tokens == 31337, "RN_MAX_TOKENS never reaches the run"
+    assert forwarded.max_retries == 7, "RN_MAX_RETRIES never reaches the run"
+    assert forwarded.max_iterations == 13
+    assert forwarded.max_llm_calls == 17
+    assert forwarded.max_output_chars == 12345
+
+
+def test_the_planner_token_cap_is_this_projects_own_choice(monkeypatch):
+    """16384, not `RLMConfig`'s own 8192. dspy reads `content` and DISCARDS `reasoning_content`, so
+    a reasoning model's chain-of-thought is billed against a cap it never appears in — the reply
+    comes back empty or cut mid-JSON, and `max_retries=1` makes that terminal.
+
+    Pinned because it looks like a value someone drifted, and because it is invisible until a model
+    switch: verified as a single-variable change on a real run, where 8192 killed
+    `GeneratePodcastScript` at turn 0 and 16384 produced a full script from the same corpus.
+    `ctx-distillery` documents the same trap and recommends the same number.
+    """
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    monkeypatch.delenv("RN_MAX_TOKENS", raising=False)
+    assert NotebookConfig.from_env().max_tokens == 16384
+    assert NotebookConfig().max_tokens == 16384
+
+
+def test_the_repl_output_cap_is_this_projects_own_choice(monkeypatch):
+    """The LAST field of the same shape as `max_tokens`, and the audit that raised that one stopped
+    short of it. It bounds how much of a REPL OUTPUT reaches the planner's prompt — which matters
+    here for invariant 8's reason: every task explores the corpus by `.find()`/slicing and PRINTS
+    the spans, so a truncated output is a span that has to be fetched again, costing an iteration
+    against a budget this project has already had to raise once."""
+    monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    monkeypatch.delenv("RN_MAX_OUTPUT_CHARS", raising=False)
+    assert NotebookConfig.from_env().max_output_chars == 40_000
+    assert NotebookConfig().max_output_chars == 40_000

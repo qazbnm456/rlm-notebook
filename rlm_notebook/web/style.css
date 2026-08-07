@@ -117,9 +117,9 @@ body {
 }
 
 /* JetBrains Mono — the one deliberate callback to the sibling studios' technical identity, used by
-   Phase 3's reasoning-trace ticker (.ticker-toggle/.ticker-detail) and the citation-turn detail
-   payload (.citation-detail-payload), which all extend this class rather than each repeating the
-   font stack. */
+   the reasoning-trace ticker (.ticker-toggle/.ticker-detail), which extends this class rather than
+   repeating the font stack. (It also styled the citation-turn detail payload, until the References
+   view replaced that panel.) */
 .trace-face {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -183,6 +183,14 @@ input:focus {
 .btn-primary:hover {
   background: var(--accent-dim);
   border-color: var(--accent-dim);
+}
+
+/* EVERY disabled button, not just the primary one. `setPhase({stoppable:false})` produced a Stop
+   that was pixel-identical to a live one — same colour, same background, same pointer cursor — so
+   the page invited a click it then swallowed. Measured by an independent review. */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: default;
 }
 
 .btn-primary:disabled {
@@ -670,29 +678,6 @@ body.is-resizing .cols {
    faithfulness proof (see CLAUDE.md invariant 5 and the citation-turn endpoint's own docstring).
    One shared slot per answer, not one per citation, so clicking a different citation replaces the
    previous detail rather than accumulating unboundedly. */
-.citation-detail {
-  margin-top: 0.5rem;
-  border: 1px solid var(--border);
-  background: var(--surface-3);
-  border-radius: var(--radius);
-  padding: 0.5em 0.7em;
-  font-size: 0.78rem;
-}
-
-.citation-detail-note {
-  color: var(--text-faint);
-  margin-bottom: 0.4rem;
-}
-
-.citation-detail-payload {
-  font-size: 0.72rem;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-  max-height: 240px;
-  overflow-y: auto;
-  margin: 0;
-}
-
 .citation-list {
   margin-top: 0.5rem;
   display: flex;
@@ -3052,3 +3037,41 @@ body.is-resizing .studio-grip {
   }
 }
 
+/* An overview that came back without starter questions says so, rather than rendering nothing —
+   which read as the feature having been removed. */
+.chat-overview-note {
+  color: var(--text-faint);
+  font-size: 0.76rem;
+}
+
+/* Suggestions belong to the LATEST answer only. Every turn persists its own, so without this a
+   ten-turn conversation showed ten rows of chips, nine of them offering to continue from a point
+   the reader had already moved past. `:last-child` reads the DOM instead of asking both render
+   paths to agree on which turn is newest — and it hides them under a pending row for free. */
+.turn:not(:last-child) .turn-followups {
+  display: none;
+}
+
+/* --- The end of an answer ----------------------------------------------------------------------
+   The reference link, the steps pill and the follow-up chips were three block siblings with almost
+   no space between them, so every answer ended in a crowded stack — reported from a screenshot. The
+   two small meta affordances stay together; the suggestions are a different KIND of thing and get a
+   rule of their own to sit under. */
+
+.turn-answer .ticker-affordance {
+  margin-top: 0.35rem;
+}
+
+.turn-followups {
+  margin-top: 1rem;
+  padding-top: 0.8rem;
+  border-top: 1px solid var(--border);
+}
+
+.turn-followups .chat-overview-head {
+  margin-bottom: 0.5rem;
+}
+
+.starter-questions {
+  gap: 0.45rem;
+}

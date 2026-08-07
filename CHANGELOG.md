@@ -1730,5 +1730,84 @@ questions with verifiable citations, and get a distilled research artifact out.
   300s for a direct API model. The step budget went from rlm-harness's own 10 to 25 because the
   failure modes are not symmetric: exhausting it loses a run already paid for, unused headroom costs
   nothing, and a runaway is bounded by the wall-clock timeout instead. A judgement, not a
-  measurement — the traces to hand show a Summary and an FAQ finishing in 3 steps each, on a small
-  corpus. The timeout error names the variable now.
+  measurement about the ceiling — but what IS measured is that 10 was about to bind: an 8-source
+  notebook's Summary took NINE main steps, one short of the old limit, having already spent three
+  minutes of model time. The same overview's FAQ half died on the 300s timeout, which is why that
+  notebook has a summary and no starter questions at all. The timeout error names the variable now,
+  and an overview that comes back without suggested questions says so instead of rendering nothing —
+  it read as the feature having been removed.
+
+- **A model switch turned three budget defaults into real failures, and one of them was already
+  written down in a sibling.** Pointing `RN_MAIN_MODEL` at a Qwen3 MoE behind a proxy made
+  `GeneratePodcastScript` fail instantly with `RLMTaskError: Failed to produce a valid 'script'
+  after 1 attempts` — a two-event trace, nothing to read, while Summary, FAQ and chat all worked on
+  the same model.
+
+  The cause was `max_tokens`, not the podcast. dspy reads `content` and DISCARDS
+  `reasoning_content`, so a reasoning model's chain-of-thought is billed against a cap it never
+  appears in; `ctx-distillery` documents that trap and recommends 16384, having watched a sibling
+  hit it on its first live turn. Verified as a single-variable change here: same notebook, same
+  model, same 146,284-character corpus, `max_retries` untouched — 8192 died at turn 0, 16384
+  produced 8 utterances and 11 citations in 121.5s. The podcast went first because its instructions
+  are the longest and its output schema the deepest.
+
+  `max_retries` stays PINNED at 1. It was briefly raised on the argument that a turn-0 parse failure
+  is transient and cheap to re-run; that is wrong, because the second attempt hits the same ceiling
+  and fails identically — and every sibling pins 1 for the reason that a re-run also writes a second
+  copy of the same failure into the trace. It is readable from `RN_MAX_RETRIES` now, so raising it
+  is a deliberate act rather than a code edit.
+
+  `worker.py` now carries the ROOT CAUSE across the process boundary. The wrapper named the symptom
+  and the `AdapterParseError` underneath named the cause; diagnosing this took a trace dump and an
+  in-process re-run when it should have taken reading the error.
+
+- **Podcast generation says which of its two phases it is in, and a long wait says something new.**
+  Only the script half is a traced, cancellable subprocess run; synthesis then happens in-process
+  with no trace and no way to stop it, and the label said "Writing the script" throughout. A user
+  also watched "waiting for the model's first response" for seven minutes and read it as a crash —
+  nothing more CAN be observed before the model replies, so after 90 seconds the status says that,
+  and points at Stop, instead of repeating a phrase that has already failed to reassure.
+
+  The steps affordance survives a reload: `tickerLogs` lives for one page session, so every "N
+  steps" pill vanished on refresh even though the trace file is still on the server and the stream
+  endpoint replays it from the start. It loads on demand now, and says so honestly when retention
+  has already collected the record.
+
+- **What two more independent reviews found, both by running the code rather than reading it.** One
+  monkeypatched `rlm_harness.configure` and drove a real worker subprocess; the other drove the page
+  in headless Chrome and in jsdom.
+
+  **The error-cause change deleted the diagnostic it existed to surface.** dspy orders
+  `AdapterParseError.__str__` as adapter-name, then the WHOLE LM completion, then the
+  expected/actual summary — so a head truncation drops the only two useful lines. Measured cutoff: a
+  completion over ~534 characters. rlm-harness already ships `_short_error`, which head+tail elides
+  with the same constant and whose docstring names this exact case; it is used now instead of a
+  worse re-implementation. The output is bounded on BOTH halves too — an unwrapped
+  `AdapterParseError` was producing a 20,000-character HTTP body.
+
+  **The guards were on the wrong knob.** Both `RN_MAX_TOKENS` mutations — hardcoding the default,
+  and deleting the forwarding line — survived the whole suite, while the pinned `max_retries` had
+  two guards. The forwarding test is behavioural now and covers all five budgets.
+
+  **`max_output_chars` was the fourth field of the same shape**, left at rlm-harness's 10000 while
+  `ctx-distillery`'s own audit (which names exactly these two fields) had raised its own to 40000.
+  It bounds how much of a REPL output reaches the planner's prompt, and every task here explores the
+  corpus by `.find()`/slicing and prints spans — a truncated one costs an iteration to re-fetch.
+
+  **Front end**: the podcast's new synthesis label was silently overwritten 20 seconds later by
+  "waiting for the model's first response", and the 90-second tier then offered a Stop that was
+  greyed out — reintroducing, in the same diff, the complaint that tier was added to fix. A disabled
+  Stop was pixel-identical to a live one. Regenerating the overview mid-question deleted the
+  question, its status and its Stop. And the stroke-numbering fix covered the chat thread only, so
+  adding a turn left every podcast and guide stroke pointing at the wrong row.
+
+  Also fixed: the guide cache lost `delete` when it moved onto `state`, so Studio's ↻ Regenerate
+  threw `TypeError` and did nothing; an empty cached trace log counted as a cache hit, so a dropped
+  stream left a permanent `0 steps` pill; `data-reference="0"` rendered a literal superscript zero;
+  `raise X from None` had its suppressed context resurfaced; a falsy exception had its cause
+  skipped; an `ExceptionGroup` swallowed the real fault; and an exception whose `__str__` raises
+  would have killed the worker's only JSON line.
+
+  **Six of twelve front-end mutations walked past the tests** — including `i + 1` → `i`, the exact
+  off-by-one the numbering change exists to fix — because every assertion checked that a token
+  appeared somewhere rather than what it did. They assert structure now.

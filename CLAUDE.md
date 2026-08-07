@@ -1996,4 +1996,126 @@ them exist because an earlier design discussion mentioned them.
     response, which is the slow one. `finish()` clears `is-current`, or the last step kept pulsing
     and stayed expanded while the header already said Finished.
 
+59. **The four budget defaults are each a decision, and `max_tokens` is the one that silently kills
+    a run.** `RLMConfig`'s own defaults are `max_iterations=10`, `max_tokens=8192`,
+    `max_output_chars=10_000`, `max_retries=1`; this project ships 25 / 16384 / 40000 / 1, and the
+    divergences are not taste.
+
+    **`max_tokens: 16384` — a per-call GENERATION cap, and a trap for a reasoning model.** A
+    reasoning model's chain-of-thought is billed against a cap it never appears in, so the reply
+    arrives cut mid-JSON and fails to parse; `max_retries=1` then makes that terminal, since the
+    second attempt would hit the same ceiling. `ctx-distillery`'s `config.py` documents this exact
+    trap and recommends 16384, having watched a sibling hit it on its first live turn
+    (`AdapterParseError: Expected [reasoning, code], actual [code]`). This project then hit the same
+    class on a Qwen3 MoE behind a proxy: `GeneratePodcastScript` died at turn 0 with a two-event
+    trace and `Expected to find output fields: [reasoning, code]. Actual: []`, the LM response being
+    a fragment of the schema out of its own prompt.
+
+    **Three corrections an independent review made to the paragraph above, all worth keeping.**
+    (a) It is NOT only the planner's: `runtime.configure` builds ONE `lm_kwargs` and hands it to
+    both `dspy.LM(cfg.main_model)` and `dspy.LM(cfg.sub_model)`, so it caps sub-LM escalations too.
+    (b) The mechanism sentence was one step out of date — dspy proper discards `reasoning_content`,
+    but rlm-harness's `_LenientJSONAdapter._call_postprocess` deliberately PROMOTES it when
+    `content` is empty ("what lets a reasoning model be the RLM ROOT at all"), so the empty-content
+    death does not occur on this harness; it collapses into the truncated one, which is exactly what
+    was observed. (c) On the `claude-agent-sdk/` subscription path (invariant 35) this value is
+    ENTIRELY INERT — `ClaudeAgentLM` tolerates and ignores sampling kwargs — so it is visible in the
+    trace and applied to nothing, the same shape invariant 7 records for `ocr_provider`.
+
+    **`max_output_chars: 40000`** is the LAST field of the same shape, and the audit that raised
+    `max_tokens` stopped one short of it. It bounds how much of a REPL OUTPUT reaches the planner's
+    prompt, which matters here for invariant 8's reason: every task explores a corpus blob by
+    `.find()`/slicing and prints the spans, so a truncated output is a span that has to be fetched
+    again — a wasted iteration. `ctx-distillery`'s own audit names exactly these two fields and
+    raised its own to the same number.
+
+    **Verified as a single-variable change**: same notebook, same model, same 146,284-character
+    corpus, `max_retries` untouched at 1 — 8192 died at turn 0, 16384 produced 8 utterances with 11
+    citations in 121.5s. It failed on the podcast first because that task has the longest
+    instructions (6196 characters, against 3426-4739 for the other five) and the deepest output
+    schema, so it sits closest to the
+    ceiling; Summary, FAQ and chat all survived on the same model, which is exactly what made it
+    look like a podcast bug.
+
+    **`max_retries: 1` is PINNED, and stays pinned — every sibling pins it with the same
+    reasoning.** A whole-run retry rarely fixes a PERSISTENT coercion failure, and it burns the
+    budget a second time while writing a second copy of the same failure into the trace. It was
+    briefly raised here on the argument that a turn-0 parse failure is transient and cheap to
+    re-run; that argument is wrong in a way worth recording, because the second attempt hits the
+    same token ceiling and fails identically — the user who pushed back on the change was right, and
+    for the additional reason that a retry loop dirties the log.
+
+    **One DIVERGENCE from the siblings, stated rather than hidden by "like every sibling": they
+    hardcode the 1; this project reads `RN_MAX_RETRIES`.** The default does not move, so an operator
+    raising it is making a deliberate choice — and they need to know the budgets MULTIPLY.
+    rlm-harness's own comment warns that a retry silently multiplies `max_iterations` (3 retries =>
+    up to 3x the turns), so `RN_MAX_RETRIES=5` against `max_iterations=25` is up to 125 iterations.
+    The API path has `run_timeout_seconds` as a wall-clock backstop; **the CLI path has none at
+    all**.
+
+    **`max_iterations: 25`, and 10 was about to bind.** Measured, not assumed: an 8-source
+    notebook's Summary took NINE main steps against the old limit of 10, having already spent three
+    minutes of model time. The failure modes are not symmetric — exhausting the budget loses a run
+    already paid for, unused headroom costs nothing since the loop ends when the model submits, and
+    a runaway is bounded by `run_timeout_seconds`, which is a wall-clock bound the step budget
+    cannot be. Every task here explores a whole corpus blob by `.find()`/slicing (invariant 8), so a
+    step per probe is the normal shape.
+
+    **`worker._describe` carries the ROOT CAUSE across the process boundary.** `RLMTaskError: Failed
+    to produce a valid 'script' after 1 attempts` is what a user was shown for all of the above: the
+    wrapper names the symptom, the chain names the cause, and the cause was being discarded at
+    exactly the boundary where a person starts reading. Diagnosing it took a trace dump and an
+    in-process re-run; it should have taken reading the error.
+
+60. **A status line may not claim something the page is not doing, and a repaint may not delete a
+    run.** Four defects of one shape, all found by an independent review driving the real page in a
+    browser rather than reading it.
+
+    **`runStatus` tracks `awaitingFirstReply` separately from `stepsSeen`.** `setPhase` names a
+    stage the TRACE CANNOT SEE — the podcast's synthesis half, which runs in-process on the server
+    with no events (invariant 29) — so "waiting for the model's first response" is simply false
+    there. `paint`'s pre-first-step branch REPLACES the phrase rather than appending to it, so a
+    phase set at second 0 was silently gone by second 20; measured mid-synthesis at 26s the panel
+    claimed to be waiting on a model, and at 2:02 the long-wait tier told the reader Stop was
+    available while Stop was greyed out. Chatterbox synthesis runs up to fifteen minutes (invariant
+    43), so that was the whole second half — **the exact "watched it for seven minutes and read it
+    as a crash" complaint that tier was added to fix, reintroduced by its sibling change in the same
+    diff.**
+
+    **`.btn:disabled` is styled, not just `.btn-primary:disabled`.** A disabled Stop was
+    pixel-identical to a live one — same colour, same background, same pointer cursor — so
+    `stoppable: false` produced a control that looked operable and swallowed the click. Disabling
+    rather than hiding is still right (a control must not vanish out from under a pointer), but only
+    if disabled LOOKS disabled.
+
+    **Only a SUCCESSFUL script run leads to synthesis.** Flipping the phase on any terminal kind
+    announced a stage that would never start, and greyed out Stop, for the seconds until the HTTP
+    error landed.
+
+    **A repaint carries the run in flight with it.** `chat:rerender` rebuilt the thread from
+    `state.turns` alone, so regenerating the overview while a question was running deleted the
+    question, its status and its Stop — leaving a disabled composer with no way to cancel until the
+    answer landed minutes later, which is invariant 47's rule broken by a repaint. The pending turn
+    is a closure variable now, cleared on completion and on cancel (a stale one would render the
+    same question twice).
+
+    **Stroke numbers are re-stamped across the WHOLE PAGE, not just the surface that changed.**
+    `collectReferences` orders overview -> turns -> podcast -> guides, so adding one chat turn
+    shifts the number of every podcast and guide coordinate — and those panels do not re-render.
+    `renumberStrokes` walks every `.citation[data-ref-key]` and re-stamps from the current order,
+    deliberately instead of re-rendering: re-rendering the podcast rebuilds its `<audio>` and would
+    interrupt playback, and it is the NUMBER that went stale, nothing else. A number that resolves
+    to nothing leaves the attribute ABSENT rather than setting `"0"`, because
+    `content: attr(data-reference)` renders the literal character.
+
+    **The lesson the tests had to learn from this round: a substring assertion is not a behavioural
+    one.** Six of twelve mutations walked past `test_web_assets.py` — including changing `i + 1` to
+    `i`, the exact off-by-one the numbering change exists to fix — because every assertion checked
+    that a token appeared somewhere rather than what it did. They assert structure now: a rule's
+    SUBJECT (its last compound), the ORDER of two branches, the DIRECTION of a comparison, and the
+    literal mapping expression. A duck-typed stand-in gets the same treatment: the guide cache lost
+    `delete` when it moved from a `Map` onto `state`, so Studio's regenerate button threw
+    `TypeError` and did nothing, and nothing caught it — every method called on that object is now
+    checked against the ones it defines.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

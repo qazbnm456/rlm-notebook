@@ -127,14 +127,43 @@ class NotebookConfig:
     #: while every task here explores a whole notebook's corpus blob by `.find()` and slicing, which
     #: is the mechanic invariant 8 describes and it costs a step per probe.
     #:
-    #: **A judgement, not a measurement**, and worth saying so: the traces available when this was
-    #: raised show a Summary and an FAQ finishing in 3 steps each — on a SMALL corpus, which says
-    #: nothing about a large one. 25 is chosen to sit clearly past where a plausible run ends, not
-    #: because anything was observed needing it.
+    #: **Measured, and closer to the old ceiling than anyone expected.** An 8-source notebook's
+    #: Summary took NINE main steps — one short of the previous limit of 10 — while a 4-source one
+    #: took three. So the old default was not merely tight in theory: a slightly larger notebook
+    #: would have failed a run that had already spent three minutes of model time. 25 is still a
+    #: judgement about headroom rather than a measured ceiling; what is measured is that 10 was
+    #: about to bind on an ordinary notebook.
     max_iterations: int = 25
     max_llm_calls: int = 30
-    max_tokens: int = 8192
-    max_output_chars: int = 10_000
+    #: PINNED at 1, the same value every sibling pins with the same reasoning: a whole-run retry
+    #: rarely fixes a PERSISTENT coercion failure, and re-running a failed episode burns the budget
+    #: again while filling the trace with a second copy of the same failure. Kept as a field, and
+    #: readable from `RN_MAX_RETRIES`, so an operator can raise it deliberately — but the default
+    #: does not move. A transient first-turn parse failure is NOT the case to fix here: see
+    #: `max_tokens` below, which is what actually caused the one that prompted this.
+    max_retries: int = 1
+    #: The PLANNER's per-call generation cap, and the knob that actually killed the run this was
+    #: raised for. 8192 is `RLMConfig`'s own default and is fine for an instruct model; it is a TRAP
+    #: for a reasoning one, because dspy reads `content` and DISCARDS `reasoning_content`, so the
+    #: chain-of-thought is billed against a cap it never appears in. Two deaths follow — the
+    #: reasoning exhausts the cap (empty `content`) or the reply is cut mid-JSON — and both are
+    #: TERMINAL, because `max_retries` above refuses a whole-run retry on purpose.
+    #:
+    #: `ctx-distillery` documents this exact trap and recommends 16384; a sibling had already hit it
+    #: on its first live turn with `AdapterParseError: Expected [reasoning, code], actual [code]`.
+    #: This project then hit the same class on a Qwen3 MoE: `GeneratePodcastScript` died at turn 0
+    #: with two trace events and `Expected to find output fields: [reasoning, code]. Actual: []`,
+    #: the LM response being a fragment of the schema from its own prompt. Raising the cap is the
+    #: fix; retrying is not, because the second attempt hits the same ceiling.
+    max_tokens: int = 16384
+    #: How much of a REPL OUTPUT reaches the planner's prompt — dspy head+tail-truncates past this.
+    #: The LAST field of the same shape as `max_tokens`, and `ctx-distillery`'s own audit says a full
+    #: sweep of `RLMConfig` found exactly those two. It raised its own to 40000; this project sat at
+    #: rlm-harness's 10000 until an independent review noticed the audit had stopped one field short.
+    #: It matters here for the reason invariant 8 describes: every task explores a whole corpus blob
+    #: by `.find()`/slicing and PRINTS the spans it finds, so a truncated output is a span the model
+    #: has to go back and fetch again — a wasted iteration against the budget above.
+    max_output_chars: int = 40_000
     adapter: str = "json"
 
     #: rlm-notebook-specific: the size cap on the assembled corpus blob (CLAUDE.md invariant 8).
@@ -193,8 +222,9 @@ class NotebookConfig:
             interpreter=interpreter,
             max_iterations=_env_int("RN_MAX_ITERATIONS", 25),
             max_llm_calls=_env_int("RN_MAX_LLM_CALLS", 30),
-            max_tokens=_env_int("RN_MAX_TOKENS", 8192),
-            max_output_chars=_env_int("RN_MAX_OUTPUT_CHARS", 10_000),
+            max_retries=_env_int("RN_MAX_RETRIES", 1),
+            max_tokens=_env_int("RN_MAX_TOKENS", 16384),
+            max_output_chars=_env_int("RN_MAX_OUTPUT_CHARS", 40_000),
             adapter=(os.getenv("RN_ADAPTER") or "json").strip(),
             max_corpus_chars=_env_int("RN_MAX_CORPUS_CHARS", _DEFAULT_MAX_CORPUS_CHARS),
             ocr_provider=_ocr_provider_from_env(),
@@ -552,7 +582,7 @@ def setup(config: NotebookConfig) -> NotebookConfig:
             max_tokens=config.max_tokens,
             max_output_chars=config.max_output_chars,
             adapter=config.adapter,
-            max_retries=1,
+            max_retries=config.max_retries,
         ),
         main_lm=main_lm,
         sub_lm=sub_lm,

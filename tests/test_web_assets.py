@@ -575,3 +575,185 @@ def test_the_chat_overview_lives_inside_the_thread_and_is_always_put_back():
         f"{len(clears)} places clear the chat history; exactly one (`rebuildHistory`) may, because "
         f"it is the only one that puts the overview node back"
     )
+
+
+def test_only_the_latest_answer_offers_follow_up_questions():
+    """Every turn PERSISTS its own `follow_ups`, so rendering all of them put a row of chips under
+    every answer in the thread — nine of ten offering to continue from a point the reader had
+    already moved past. A user asked whether it would be "the last, newest one", which is what it
+    should have been.
+
+    The rule is CSS, deliberately: turns reach the DOM through TWO paths (`rebuildHistory` and the
+    `chat:turnAdded` replay), and a rule that reads the DOM is correct for both without either
+    having to remember which turn is newest. It also covers the pending row for free.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+
+    assert 'className = "turn-followups"' in script, (
+        "the follow-up block lost its wrapper class, so the stylesheet rule below selects nothing"
+    )
+    # The rule's SUBJECT — its LAST compound — has to be `.turn-followups`. Checking only that the
+    # token appears somewhere in the selector passed with the subject renamed to a class that
+    # selects nothing, which is the mutation an independent review walked straight through.
+    hides = []
+    for selector, body in _rules(css):
+        if "display: none" not in body or "not(:last-child)" not in selector:
+            continue
+        for part in selector.split(","):
+            subject = re.split(r"::", part.strip().split()[-1])[0]
+            if "turn-followups" in _class_tokens(subject):
+                hides.append(part.strip())
+    assert hides, (
+        "nothing hides follow-up chips on a turn that is no longer the latest — check the rule's "
+        "SUBJECT, not just that the class name appears in it somewhere"
+    )
+
+
+def test_the_overview_stops_offering_starters_once_the_conversation_has_begun():
+    """"Start with" is an invitation to BEGIN — which is exactly why it is not unified with an
+    answer's "Ask next" (invariant 56). Once turns exist the live suggestion is the latest answer's,
+    at the bottom of the thread where the reader is; both on screen was two competing rows a scroll
+    apart."""
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function renderChatOverview()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+    assert "starter_questions" in body, "the extraction broke; this would pass vacuously"
+    # The ORDER of the branches is the behaviour: turns-exist must come FIRST and be the empty one,
+    # with the starter row built in the `else if`. Asserting only that the condition appears
+    # somewhere passed with the two branches swapped — i.e. with starters shown ONLY once a
+    # conversation exists, the exact inverse — which an independent review demonstrated.
+    gate = body.index("if (state.turns && state.turns.length)")
+    starters = body.index("starterQuestionRow(overview.starter_questions)")
+    assert gate < starters, "the starter row is not behind the has-a-conversation gate"
+    between = body[gate:starters]
+    assert "else if" in between, (
+        "the starter row is no longer the ELSE of the turns-exist gate, so the two can both render"
+    )
+    assert "starterQuestionRow" not in body[gate : gate + between.index("else if")], (
+        "the turns-exist branch itself renders starters, which is the inverse of the rule"
+    )
+
+
+def test_a_message_naming_an_action_ships_with_that_action():
+    """The overview's "regenerate to try again" note was gated on nothing, while the regenerate
+    BUTTON was gated on `overview.stale` — so a reader whose FAQ half had timed out got told to do
+    something the page did not offer. A user found it immediately.
+
+    Pinned as the general rule rather than the instance: both the note and the control are set from
+    the same `offerRegenerate` flag, so a future state that shows one shows the other.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function renderChatOverview()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+    assert "chat.noStarters" in body, "the extraction broke; this would pass vacuously"
+
+    # SEEDED from `overview.stale`, not just declared: `= false` keeps the declaration and silently
+    # stops a stale overview from offering the button, which is the state the control was built for.
+    assert re.search(r"let offerRegenerate\s*=\s*overview\.stale", body), (
+        "the regenerate flag is no longer seeded from `overview.stale`, so a stale overview stops "
+        "offering the button that exists for it"
+    )
+    # The note's branch must set it, and the button must be the flag's only consumer.
+    note_at = body.index("chat.noStarters")
+    assert "offerRegenerate = true;" in body[note_at : note_at + 400]
+    assert body.count("chat.regenerateOverview") == 1
+    button_at = body.index("chat.regenerateOverview")
+    assert "if (offerRegenerate)" in body[button_at - 300 : button_at]
+
+
+def test_the_chat_placeholder_only_appears_while_its_sentence_is_true():
+    """"Ask a question once you've added a source" is a precondition, and it was gated on TURNS
+    alone — so a notebook with eight sources and no conversation still told the reader to add one.
+    A user reported it as confusing, which it is: the page was describing a step they had already
+    taken."""
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function initChatPanel()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+    assert "syncEmptyNote" in body, "the extraction broke; this would pass vacuously"
+
+    gate = body[body.index("const syncEmptyNote") : body.index("const rebuildHistory")]
+    # The DIRECTION matters: `< 0` keeps the token and inverts the rule, and is never true, so the
+    # placeholder would be shown forever. An independent review got that past the first version.
+    assert re.search(r"\(state\.sources \|\| \[\]\)\.length > 0", gate), (
+        "the chat placeholder does not hide itself once a source exists — check the comparison's "
+        "direction, not just that `state.sources` is mentioned"
+    )
+    # And adding the first source must retire it immediately: nothing else redraws at that moment.
+    changed_at = body.index('store.on("sources:changed"')
+    assert "syncEmptyNote" in body[changed_at : changed_at + 400]
+
+
+def test_a_citations_number_comes_from_the_notebook_wide_reference_order():
+    """A stroke labelled "2" and the References row labelled "2" have to be the same thing — the
+    renderer's own comment claimed exactly that while numbering 1..n WITHIN each artifact, so an
+    overview citing two sources numbered them 1 and 2, the next answer numbered its first citation
+    1 again, and the panel called that one 3. Every artifact after the first disagreed with the
+    panel it points into.
+
+    A user noticed the symptom from the other end — regenerating the overview and not being able to
+    tell whether the References panel was still in sync.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function renderAnswerWithCitations")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+    assert "referenceNumberFor" in body, "the extraction broke; this would pass vacuously"
+    # The exact MAPPING. `collectReferences()` appearing somewhere is not enough — a mutation that
+    # kept a `void collectReferences();` and went back to per-artifact numbering passed, and so did
+    # an off-by-one (`i` instead of `i + 1`), which is the precise bug this change is about.
+    assert re.search(
+        r"new Map\(\s*collectReferences\(\)\.map\(\(ref, i\) => \[referenceKey\(ref\), i \+ 1\]\)\s*\)",
+        body,
+    ), (
+        "stroke numbers no longer come from `collectReferences()` position + 1, so they disagree "
+        "with the References panel — which numbers `index + 1` over the same list"
+    )
+    # And no SECOND numbering map built from this artifact's own `citations`: the surviving mutation
+    # left `void collectReferences();` in place and numbered per artifact next to it.
+    assert not re.search(r"new Map\(\s*citations\.", body), (
+        "a per-artifact numbering map survives; strokes numbered from it disagree with the panel"
+    )
+    # `renderReferenceView` numbers by position in that same list — the two must read one ordering.
+    view = script[script.index("function renderReferenceView") :]
+    assert "String(index + 1)" in view[:3000]
+
+
+def test_regenerating_the_overview_renumbers_the_thread():
+    """A new overview changes which coordinates come FIRST in the notebook-wide order, so strokes
+    already on screen would keep numbers pointing at the wrong rows until the next reload."""
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    assert script.count('store.emit("chat:rerender"') == 1
+    assert script.count('store.on("chat:rerender"') == 1
+    gen = script[script.index("async function generateOverview") :]
+    gen = gen[: gen.index("\nfunction ")]
+    assert 'store.emit("chat:rerender"' in gen
+
+
+def test_the_guide_cache_defines_every_method_its_callers_use():
+    """It was a `Map`; moving the guide results onto `state` (so the References view could collect
+    their citations) replaced it with an object literal that lost `delete` — and `regenerateBtn`
+    calls exactly that, so Studio's ↻ Regenerate threw `TypeError: cache.delete is not a function`
+    and did nothing. Shipped, and found by an independent review rather than by anything here.
+
+    A duck-typed stand-in for a built-in is the general hazard: the compiler cannot see it, and the
+    call site only fails when a user presses the button.
+    """
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+    start = script.index("function initStudioPanel()")
+    end = script.index("\nfunction ", start + 1)
+    body = script[start:end]
+
+    literal_at = body.index("const cache = {")
+    literal = body[literal_at : body.index("\n  };", literal_at)]
+    defined = set(re.findall(r"^\s{4}(\w+):", literal, re.MULTILINE))
+    assert {"has", "get", "set"} <= defined, (
+        f"the extraction no longer sees the cache literal, so this would pass vacuously: {defined}"
+    )
+
+    used = set(re.findall(r"\bcache\.(\w+)\(", body))
+    missing = used - defined
+    assert not missing, f"`cache` is called with methods it does not define: {sorted(missing)}"
