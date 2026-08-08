@@ -1404,7 +1404,9 @@ body.is-resizing .cols {
 
 .run-status {
   display: flex;
-  align-items: center;
+  /* Top, not centre: once `.run-text` wraps to two lines, centring floats the dot and the Stop
+     button into the middle of a tall row instead of lining them up with the first line. */
+  align-items: flex-start;
   gap: 0.6rem;
   padding: 0.7rem 0.85rem;
   border: 1px solid var(--border);
@@ -1437,9 +1439,11 @@ body.is-resizing .cols {
   flex: 1 1 auto;
   min-width: 0;
   color: var(--text-dim);
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  /* WRAPS. It was `nowrap` + ellipsis, which truncated the end of the line — and the end is where
+     the elapsed time lives, so the one part that changes was the part being cut. A user hit it on
+     "正在合成語音…（此階段無法中止）· 已…". `.run-status` already wraps its children, so a
+     two-line status costs nothing; the phrase is bounded by the column either way. */
+  overflow-wrap: anywhere;
 }
 
 .run-elapsed {
@@ -3145,5 +3149,50 @@ body.is-resizing .studio-grip {
 
 .podcast-body > audio {
   flex: 0 0 auto;
+}
+
+/* --- Episode length, a segmented control -------------------------------------------------------
+   Asked at generation time because that is when a reader has an opinion, and because changing your
+   mind afterwards costs a full model run plus synthesis. */
+
+.podcast-length {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+  flex: 0 0 auto;
+  margin-bottom: 0.5rem;
+  font-size: 0.74rem;
+}
+
+.podcast-length-label {
+  color: var(--text-faint);
+  margin-right: 0.15rem;
+}
+
+.length-opt {
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  transition: color 120ms ease, border-color 120ms ease, background 120ms ease;
+}
+
+/* Hover and active own DISJOINT properties: hover takes the border, active takes the fill, so
+   pointing at the option already chosen still gives feedback (invariant 44's collision). */
+.length-opt:hover {
+  border-color: var(--accent);
+}
+
+.length-opt.is-active {
+  background: var(--surface-2);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* The dot has no text box of its own, so top-alignment puts it above the first line's x-height. */
+.run-status .run-dot {
+  margin-top: 0.42em;
 }
 

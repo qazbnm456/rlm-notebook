@@ -41,7 +41,7 @@ from .notebook import (
 from .parsers.web import FetchError
 from .schema import ChatTurn, Citation, Notebook
 from .task import AnswerQuestion
-from .tts import TTSError, get_tts_provider
+from .tts import TTSError, get_tts_provider, spoken_script
 
 _SPEAKER_LABELS = {"host_a": "Host A", "host_b": "Host B"}
 
@@ -302,7 +302,9 @@ def _cmd_audio(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    script = GeneratePodcastScript().run(sources=blob, output_language=language)
+    script = GeneratePodcastScript().run(
+        sources=blob, output_language=language, target_length=args.length
+    )
 
     if not script.utterances:
         # A source with nothing worth discussing is a legitimate answer (audio.py's instructions
@@ -322,7 +324,7 @@ def _cmd_audio(args) -> int:
         if args.out == _DEFAULT_AUDIO_OUT and out_path.suffix != provider.suffix:
             out_path = out_path.with_suffix(provider.suffix)
         try:
-            provider.synthesize(script, voice_map, out_path, language)
+            provider.synthesize(spoken_script(script), voice_map, out_path, language)
         except TTSError as exc:
             # The transcript above already printed successfully — a synthesis failure (network,
             # bad voice config, an --out path whose parent doesn't exist — see tts.py's own fix)
@@ -372,6 +374,11 @@ def build_parser() -> argparse.ArgumentParser:
         "audio", help="generate a two-host podcast script + synthesized audio (Audio Overview)"
     )
     _add_source_and_notebook_args(au)
+    au.add_argument(
+        "--length", choices=("short", "default", "long"), default="default",
+        help="how long an episode to aim for: short (~3-5 min), default (~8-12), long (~18-25). "
+             "The web UI offers the same three; both feed the task's `target_length` field",
+    )
     au.add_argument(
         "--out", default=_DEFAULT_AUDIO_OUT,
         help="output audio file path (default: podcast.mp3). Only written if the script is "

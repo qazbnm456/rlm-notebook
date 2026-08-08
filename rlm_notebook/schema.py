@@ -150,6 +150,15 @@ class KeyInsight(BaseModel):
     citations: list[Citation] = Field(default_factory=list)
 
 
+#: How long an episode should aim to be. Three tiers, the same shape NotebookLM offers (Shorter /
+#: Default / Longer), chosen after MEASURING that this project's own episodes all landed at roughly
+#: three minutes regardless of what was in the notebook: the instructions asked for "a natural
+#: episode length" and never named a number, and the notebook with the MOST sources produced the
+#: SHORTEST of the four measured — so "let the sources decide" demonstrably was not happening.
+#: (The notebooks that measurement came from were cleared at the owner's request, so it is not
+#: reproducible from what is on disk — and `notebooks/` cannot confirm or refute it either way.)
+PodcastLength = Literal["short", "default", "long"]
+
 Speaker = Literal["host_a", "host_b"]
 
 

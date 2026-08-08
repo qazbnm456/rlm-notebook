@@ -124,13 +124,14 @@ from .schema import (
     Notebook,
     Overview,
     Podcast,
+    PodcastLength,
     PodcastScript,
     Summary,
     Timeline,
 )
 from .task import AnswerQuestion
 from .traces import prune_traces
-from .tts import TTSError, get_tts_provider
+from .tts import TTSError, get_tts_provider, spoken_script
 
 #: Same registry `cli.py` keeps (`_GUIDE_TASKS`) — kept as a SEPARATE copy rather than imported
 #: from `cli.py`, since `api.py` must not depend on `cli.py` (see `ingest.py`'s docstring for why
@@ -970,6 +971,25 @@ class AskResponse(BaseModel):
     follow_ups: list[str] = []
 
 
+class AudioOptions(RunOptions):
+    """`RunOptions` plus the episode LENGTH. A separate model rather than a field on `RunOptions`
+    because only `/audio` has a length — putting it on the shared body would offer `ask` and
+    `guide` a knob they silently ignore, which is the `RN_OCR_PROVIDER` shape invariant 7 records.
+
+    `extra="forbid"`, like `SettingsRequest` and `RenameRequest`: pydantic DROPS unknown keys by
+    default, so a client sending `{"len": "long"}` would get a `default` episode and no indication
+    that its request was misspelt.
+    """
+
+    model_config = {"extra": "forbid"}
+
+    length: PodcastLength = "default"
+
+
+#: `/audio`'s default body: no client run id, `default` length.
+_NO_AUDIO_OPTIONS = AudioOptions()
+
+
 @contextlib.contextmanager
 def _announced(*run_ids: str):
     """Mark run ids as COMING before any pre-work, so a client that opened its ticker first keeps
@@ -1476,7 +1496,7 @@ class AudioResponse(BaseModel):
 
 @app.post("/notebooks/{notebook_id}/audio", response_model=AudioResponse)
 async def audio(
-    notebook_id: str, request: Request, body: RunOptions = _NO_RUN_OPTIONS
+    notebook_id: str, request: Request, body: AudioOptions = _NO_AUDIO_OPTIONS
 ) -> AudioResponse:
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
     audio. Two host-side steps, not one (the web-UI blueprint's Phase 2 addendum):
@@ -1535,7 +1555,11 @@ async def audio(
     result = await _run_isolated(
         notebook_id,
         _dotted(GeneratePodcastScript),
-        {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE},
+        {
+            "sources": blob,
+            "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE,
+            "target_length": body.length,
+        },
         config,
         run_id,
     )
@@ -1569,7 +1593,7 @@ async def audio(
     tmp_path = Path(tmp_name)
     try:
         offsets = await asyncio.to_thread(
-            provider.synthesize, script, voice_map, tmp_path, language
+            provider.synthesize, spoken_script(script), voice_map, tmp_path, language
         )
         audio_bytes = tmp_path.read_bytes()
     except TTSError as exc:

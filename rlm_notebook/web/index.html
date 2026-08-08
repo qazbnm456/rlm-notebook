@@ -147,6 +147,16 @@
       <div class="podcast-section">
         <div class="panel-head" data-i18n="podcast.head">Podcast</div>
         <p class="panel-sub" data-i18n="podcast.sub">Two hosts discuss your sources, as an episode you can play or download.</p>
+        <!-- Chosen AT generation time, not in Settings: this is the moment a reader has an opinion
+             about how long they want to listen, and it costs a full model run plus synthesis to
+             change your mind afterwards. NotebookLM asks at the same point. -->
+        <div class="podcast-length" role="group" data-i18n-tip="podcast.lengthTip"
+             data-tip="How long an episode to aim for. Longer costs a longer model run and a longer synthesis.">
+          <span class="podcast-length-label" data-i18n="podcast.length">Length</span>
+          <button type="button" class="length-opt" data-length="short" data-i18n="podcast.lenShort">Short</button>
+          <button type="button" class="length-opt is-active" data-length="default" data-i18n="podcast.lenDefault">Default</button>
+          <button type="button" class="length-opt" data-length="long" data-i18n="podcast.lenLong">Long</button>
+        </div>
         <button type="button" class="btn btn-primary btn-block" id="podcast-generate"
                 data-i18n-tip="podcast.generateTip"
                 data-tip="Writes a two-host script grounded in your sources, then synthesizes it. This is the slowest operation here."

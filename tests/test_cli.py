@@ -551,3 +551,57 @@ def test_cmd_guide_does_not_write_a_second_time(tmp_path, monkeypatch, capsys):
 
     saved = load_notebook("mynb")
     assert [n.text for n in saved.notes] == ["written during the guide run"]
+
+
+def test_the_audio_command_offers_the_same_three_lengths_as_the_web_ui():
+    """Both entry points feed the same `target_length` field. A flag the CLI cannot pass is a
+    capability that exists only in the browser — the entry-point divergence invariant 20 guards
+    against one level down (it requires the two to SHARE code, not to have the same features).
+
+    Reads the accepted CHOICES off the parser, not the help STRING: an independent review renamed
+    them to ("s", "default", "l") and the first version of this test still passed, because every
+    tier name also appears in the flag's own help sentence.
+    """
+    parser = build_parser()
+    action = next(
+        a
+        for a in parser._subparsers._group_actions[0].choices["audio"]._actions
+        if a.dest == "length"
+    )
+    assert tuple(action.choices) == ("short", "default", "long")
+    assert action.default == "default"
+
+
+def test_the_audio_command_passes_the_chosen_length_to_the_task(monkeypatch, tmp_path):
+    """The CLI half of invariant 63. An independent review hardcoded `target_length="default"` at
+    the call site and the WHOLE suite stayed green: the flag became inert — the `RN_OCR_PROVIDER`
+    shape (invariant 7) on the entry point no test covered. The API half was pinned; this was not.
+    """
+    import argparse
+
+    from rlm_notebook import cli
+    from rlm_notebook.schema import PodcastScript, Source, SourceBlock
+
+    source = Source(
+        id="s1", kind="text", origin="o",
+        blocks=[SourceBlock(locator="whole", text="content")],
+    )
+    seen: dict = {}
+
+    class _FakeTask:
+        def run(self, **kwargs):
+            seen.update(kwargs)
+            return PodcastScript(utterances=[])
+
+    monkeypatch.setattr(cli, "_prepare", lambda args: (None, Corpus([source])))
+    monkeypatch.setattr(cli, "GeneratePodcastScript", lambda *a, **kw: _FakeTask())
+    monkeypatch.setenv("RN_MAIN_MODEL", "test/model")
+    monkeypatch.setenv("RN_OUTPUT_LANGUAGE", "English")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+
+    for tier in ("short", "long"):
+        seen.clear()
+        cli._cmd_audio(argparse.Namespace(length=tier, out=str(tmp_path / "a.mp3")))
+        assert seen.get("target_length") == tier, (
+            f"--length {tier} never reached the task; the flag is inert"
+        )

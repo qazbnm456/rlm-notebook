@@ -2984,9 +2984,33 @@ function renderPodcast(body, { utterances, runId, audioSrc, stale, suffix, offse
   });
 }
 
+//: The reader's last choice, remembered across reloads. `localStorage` rather than a server
+//: setting: it is a per-listen preference, not a property of the notebook, and the settings page is
+//: deliberately narrow (invariant 41).
+const PODCAST_LENGTH_KEY = "rlmnb-podcast-length";
+const PODCAST_LENGTHS = new Set(["short", "default", "long"]);
+
+function podcastLength() {
+  const stored = localStorage.getItem(PODCAST_LENGTH_KEY);
+  return PODCAST_LENGTHS.has(stored) ? stored : "default";
+}
+
 function initPodcastPlayer() {
   const generateBtn = document.getElementById("podcast-generate");
   const body = document.getElementById("podcast-body");
+
+  const lengthOpts = [...document.querySelectorAll(".podcast-length .length-opt")];
+  const paintLength = () => {
+    const current = podcastLength();
+    lengthOpts.forEach((opt) => opt.classList.toggle("is-active", opt.dataset.length === current));
+  };
+  lengthOpts.forEach((opt) => {
+    opt.addEventListener("click", () => {
+      localStorage.setItem(PODCAST_LENGTH_KEY, opt.dataset.length);
+      paintLength();
+    });
+  });
+  paintLength();
 
   // No object-URL bookkeeping any more: the audio is a real URL on this server, so there is nothing
   // to revoke and no revocation ORDER to get right (blueprint P2.6's fix is moot rather than wrong).
@@ -3081,7 +3105,7 @@ function initPodcastPlayer() {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: token }),
+        body: JSON.stringify({ run_id: token, length: podcastLength() }),
       });
       status.finish();
       if (cancelled) return;
