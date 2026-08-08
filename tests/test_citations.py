@@ -157,3 +157,21 @@ def test_a_span_carrying_a_marker_still_matches_the_stripped_prose():
         prose,
     )
     assert located[0].answer_span == "Voyager left in 2012."
+
+
+def test_the_punctuation_tidy_only_touches_where_a_marker_was():
+    """A GLOBAL space-before-punctuation rule normalises text that never had a marker — French
+    typographic spacing is the case an independent review found — and because `strip_markers`
+    early-returns on a marker-free string, the prose and the `answer_span` would then get DIFFERENT
+    normalisation and the span would stop matching. That is invariant 49's failure mode one layer
+    down: the highlighter stroke silently disappears."""
+    from rlm_notebook.citations import locate_answer_spans, strip_markers
+    from rlm_notebook.schema import Citation
+
+    prose = strip_markers("C'est vrai ! Voir [[SRC:s1|whole]].")
+    assert prose == "C'est vrai ! Voir.", f"spacing outside the marker's hole was altered: {prose!r}"
+
+    located = locate_answer_spans(
+        [Citation(source_id="s1", locator="whole", quote="q", answer_span="C'est vrai !")], prose
+    )
+    assert located[0].answer_span == "C'est vrai !", "the stroke was dropped by an over-broad tidy"

@@ -2494,3 +2494,226 @@ def test_every_artifact_text_in_a_response_goes_through_the_same_stripper():
             f"_citation_responses({call}) is given prose that has not been stripped of corpus "
             f"markers, while the text beside it has"
         )
+
+
+def test_the_podcast_length_reaches_the_task(client, monkeypatch):
+    """A tier the request carries but the task never receives is the `RN_OCR_PROVIDER` shape
+    (invariant 7): validated on the way in, then ignored. And invariant 39 records the asymmetry
+    that makes it invisible — a MISSING required input surfaces only as an opaque
+    `RLMTaskError`, while an UNDECLARED extra kwarg is silently accepted."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    seen: list[dict] = []
+
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+        seen.append(kwargs)
+        return _FakeRun(run_id)
+
+    async def _fake_wait_result(run, *, timeout=None):
+        return {"utterances": []}
+
+    monkeypatch.setattr(api.runner, "start_run", _fake_start_run)
+    monkeypatch.setattr(api.runner, "wait_result", _fake_wait_result)
+
+    client.post("/notebooks/mynb/audio", json={"length": "long"})
+    assert seen and seen[-1]["target_length"] == "long"
+
+    seen.clear()
+    client.post("/notebooks/mynb/audio", json={})
+    assert seen[-1]["target_length"] == "default", "an absent length must not become empty"
+
+
+def test_the_podcast_length_refuses_an_unknown_tier_and_a_typo(client, monkeypatch):
+    """`extra="forbid"` for the same reason `SettingsRequest` has it (invariant 41): pydantic DROPS
+    unknown keys, so `{"len": "long"}` would quietly produce a default-length episode after a real
+    model run."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    assert client.post("/notebooks/mynb/audio", json={"length": "epic"}).status_code == 422
+    assert client.post("/notebooks/mynb/audio", json={"len": "long"}).status_code == 422
+
+
+def test_the_podcast_task_declares_the_length_it_is_given():
+    """The signature is a class-level string composed at import time, so a per-request value can
+    only reach the model as a FIELD. Declared but never passed, or passed but never declared, both
+    fail silently in the directions invariant 39 documents."""
+    from rlm_notebook.audio import GeneratePodcastScript
+
+    assert "target_length: str" in GeneratePodcastScript.signature
+    for tier in ("short", "default", "long"):
+        assert f"`{tier}`" in GeneratePodcastScript.instructions, (
+            f"the prompt does not say what `{tier}` means, so the field is a word with no effect"
+        )
+
+
+def test_every_rlm_task_gets_the_skills_by_injection():
+    """One helper, six tasks. The wiring lived in `audio.py` first and was hand-rolled there; six
+    copies of it is exactly the drift invariant 13 factors `CITATION_RULES` out to prevent.
+
+    `read_skill` and NOT `list_skills`: the catalog is already in the prompt, so a discovery
+    round-trip would spend a planner turn learning what it was told at startup.
+    """
+    from rlm_harness import RLMConfig
+    from rlm_harness import runtime as rt
+
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.guide import (
+        GenerateFAQ,
+        GenerateKeyInsight,
+        GenerateSummary,
+        GenerateTimeline,
+    )
+    from rlm_notebook.task import AnswerQuestion
+
+    # Instantiating an RLMTask needs the harness configured; nothing here runs a model. Snapshot and
+    # RESTORE, because `configure` is global: leaving a dummy config behind makes every test that
+    # follows depend on this one having run, which is the ordering coupling a suite is least able to
+    # see. Found by this test's own sibling failing when run alone.
+    previous = getattr(rt, "_CONFIG", None)
+    rt.configure(RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False))
+
+    tasks = (
+        AnswerQuestion,
+        GenerateSummary,
+        GenerateFAQ,
+        GenerateTimeline,
+        GenerateKeyInsight,
+        GeneratePodcastScript,
+    )
+    for cls in tasks:
+        task = cls()
+        names = {getattr(tool, "__name__", "") for tool in task.tools}
+        assert "read_skill" in names, f"{cls.__name__} has no skills"
+        assert "list_skills" not in names, f"{cls.__name__} pays for a discovery round-trip"
+        assert "corpus-navigation" in task.instructions, f"{cls.__name__} got no catalog"
+        # The class-level prompt is untouched; only the instance carries the catalog.
+        assert "corpus-navigation" not in cls.instructions
+        # ...and it is still switchable off, which a caller needs: a stale skill is worse than none.
+        assert {getattr(t, "__name__", "") for t in cls(skills_dir=None).tools} == {
+            f"validate_{cls.output_model.__name__.lower()}"
+        }
+
+    if previous is not None:
+        rt._CONFIG = previous
+
+
+def test_the_skills_wiring_exists_once():
+    """A source-tree assertion: six tasks calling `load_skills_as_tools` themselves would each own
+    a header, and the headers would drift."""
+    import inspect
+
+    from rlm_notebook import audio, guide, instructions, task
+
+    for module in (audio, guide, task):
+        source = inspect.getsource(module)
+        assert "load_skills_as_tools" not in source, (
+            f"{module.__name__} wires skills itself instead of calling `instructions.apply_skills`"
+        )
+        assert "render_skills_manifest" not in source
+    assert inspect.getsource(instructions).count("render_skills_manifest(") == 1
+
+
+def test_every_task_validator_rejects_a_marker_in_its_own_prose():
+    """The check was written for the podcast, whose failure was LOUD — the voice read the markers
+    aloud. `GenerateSummary` had produced exactly the same defect silently: four markers printed in
+    an overview a user reported as a broken render. A guard on the one task that made a noise is a
+    guard on the symptom.
+
+    Not a schema validator, deliberately: notebooks already on disk hold artifacts with markers in
+    them, and a field-level reject would make those files fail to LOAD — untidy data turned into a
+    corrupt-notebook 409.
+    """
+    import json
+
+    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.schema import FAQ, Answer, KeyInsight, PodcastScript, Summary, Timeline
+
+    cases = {
+        Answer: {"text": "A claim.[[SRC:s1|whole]]", "citations": []},
+        Summary: {"text": "A claim.[[SRC:s1|whole]]", "citations": []},
+        KeyInsight: {"text": "A claim.[[SRC:s1|whole]]", "citations": []},
+        FAQ: {"items": [{"question": "q?", "answer": "a [[SRC:s1|whole]]", "citations": []}]},
+        Timeline: {"events": [{"when": "2012", "description": "x [[SRC:s1|whole]]", "citations": []}]},
+        PodcastScript: {"utterances": [{"speaker": "host_a", "text": "x [[SRC:s1|whole]]", "citations": []}]},
+    }
+    for model, payload in cases.items():
+        verdict = make_grounded_validator(model)(json.dumps(payload))
+        assert verdict.startswith("Validation failed"), f"{model.__name__} accepts a marker in prose"
+        assert "[[SRC:" in verdict, "the message does not name what is wrong"
+
+    # A quote is EXEMPT: it is copied verbatim from a source, which could itself contain the text.
+    quoted = json.dumps({
+        "text": "A claim.",
+        "citations": [{"source_id": "s1", "locator": "whole", "quote": "the source wrote [[SRC:x|y]]"}],
+    })
+    assert make_grounded_validator(Summary)(quoted).startswith("Validation successful")
+
+
+def test_the_validator_factory_exists_once():
+    """Six tasks hand-rolling a schema-plus-marker check would drift, which is what happened: the
+    podcast had one and the other five did not."""
+    import inspect
+
+    from rlm_notebook import audio, guide, instructions, task
+
+    for module in (audio, guide, task):
+        assert "make_schema_validator" not in inspect.getsource(module), (
+            f"{module.__name__} builds a bare schema validator, so its prose is unguarded"
+        )
+    assert inspect.getsource(instructions).count("def make_grounded_validator") == 1
+
+
+def test_the_skills_catalog_keeps_its_header():
+    """A bare `- name: description` list tells the model nothing about what `read_skill` is or that
+    it should consult one. `_SKILLS_HEADER`'s own comment says it exists to prevent that drift, and
+    an independent review dropped the argument and watched the whole suite stay green."""
+    from rlm_harness import RLMConfig
+    from rlm_harness import runtime as rt
+
+    from rlm_notebook.task import AnswerQuestion
+
+    previous = getattr(rt, "_CONFIG", None)
+    rt.configure(RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False))
+    try:
+        instructions = AnswerQuestion().instructions
+        assert "<available_skills>" in instructions
+        assert "read_skill(name)" in instructions, "the catalog no longer says how to open one"
+        # An element that is opened must be closed, or every rule after it reads as being inside.
+        assert "</available_skills>" in instructions
+        assert instructions.index("<available_skills>") < instructions.index("</available_skills>")
+    finally:
+        if previous is not None:
+            rt._CONFIG = previous
+
+
+def test_an_empty_skills_directory_wires_nothing_at_all(tmp_path):
+    """`load_skills_as_tools` returns `read_skill` whether or not anything was discovered, and that
+    tool's description tells the model to pick "the ones listed in the skills manifest in your
+    instructions". Gating the TOOL on the directory existing rather than on the manifest handed the
+    model a tool pointing at a list that was not there — found by an independent fact-check of the
+    documentation, which claimed this was already the behaviour."""
+    from rlm_harness import RLMConfig
+    from rlm_harness import runtime as rt
+
+    from rlm_notebook.task import AnswerQuestion
+
+    previous = getattr(rt, "_CONFIG", None)
+    rt.configure(RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False))
+    try:
+        empty = tmp_path / "no-skills"
+        empty.mkdir()
+        task = AnswerQuestion(skills_dir=str(empty))
+        names = [getattr(t, "__name__", str(t)) for t in task.tools]
+        assert "read_skill" not in names, f"a skill-less directory still wired a tool: {names}"
+        assert "<available_skills>" not in task.instructions
+
+        # And with a real skill present, both halves ARE wired — or the guard above is vacuous.
+        (empty / "a-skill.md").write_text(
+            "---\nname: a-skill\ndescription: something\n---\n\n# body\n", encoding="utf-8"
+        )
+        wired = AnswerQuestion(skills_dir=str(empty))
+        assert "read_skill" in [getattr(t, "__name__", str(t)) for t in wired.tools]
+        assert "<available_skills>" in wired.instructions
+    finally:
+        if previous is not None:
+            rt._CONFIG = previous

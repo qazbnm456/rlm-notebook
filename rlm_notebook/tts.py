@@ -24,6 +24,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Protocol
 
+from .citations import strip_markers
 from .schema import PodcastScript
 
 
@@ -653,6 +654,40 @@ _PROVIDERS: dict[str, Callable[[], TTSProvider]] = {
     "edge-tts": EdgeTTSProvider,
     "chatterbox": ChatterboxProvider,
 }
+
+
+def spoken_script(script: PodcastScript) -> PodcastScript:
+    """`script` with every `[[SRC:...]]` marker removed from what the voices will read.
+
+    The model is told a marker belongs in a `Citation` and never in a spoken line, and a real run
+    ignored that in 19 of 47 utterances — so the episode said "S R C S one" out loud. The transcript
+    was already clean, because the API strips markers on the way out (invariant 62); synthesis reads
+    the script object directly and so had its own copy of the problem.
+
+    Applied HERE, once, rather than inside each provider: there are two implementations and a third
+    would silently ship without it. Utterance COUNT and order are untouched, so the offsets
+    invariant 44 defines still line up one-to-one with the transcript the reader sees.
+    """
+    def spoken(text: str) -> str:
+        stripped = strip_markers(text)
+        # A line that was NOTHING but a coordinate strips to "" or to a lone piece of punctuation,
+        # and neither provider survives that: `EdgeTTSProvider` raises `NoAudioReceived` for
+        # punctuation-only text (verified live, recorded in `_synthesize_all`'s own docstring), and
+        # `ChatterboxProvider` burns every re-roll before failing. The TTSError becomes a 502 and the
+        # whole paid-for RLM run is discarded — so this net, added to stop a marker being READ
+        # aloud, would have turned a survivable defect into a lost episode.
+        #
+        # Falling back to the original is the lesser harm and the discipline invariants 19/37/43
+        # already encode: never lose what already succeeded. A garbled line ships; a 502 does not.
+        return stripped if any(ch.isalnum() for ch in stripped) else text
+
+    return script.model_copy(
+        update={
+            "utterances": [
+                u.model_copy(update={"text": spoken(u.text)}) for u in script.utterances
+            ]
+        }
+    )
 
 
 def get_tts_provider(name: str) -> TTSProvider:

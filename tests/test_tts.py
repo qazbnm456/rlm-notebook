@@ -760,3 +760,78 @@ def test_both_audio_entry_points_validate_before_running_the_model():
     # fail against correct source.
     assert audio.index("provider.validate(") < audio.index("await _run_isolated(")
 
+
+
+def test_the_voices_never_read_a_corpus_marker_aloud():
+    """The transcript was already clean — the API strips markers on the way out (invariant 62) —
+    but synthesis reads the script OBJECT, so it had its own copy of the problem: a real run wrote
+    markers into 19 of 47 utterances and the episode said "S R C S one" out loud.
+
+    Applied once at the boundary rather than inside each provider: there are two implementations and
+    a third would silently ship without it.
+    """
+    from rlm_notebook.schema import PodcastScript, Utterance
+    from rlm_notebook.tts import spoken_script
+
+    script = PodcastScript(
+        utterances=[
+            Utterance(speaker="host_a", text="Trinity coordinates models [[SRC:s1|whole]]."),
+            Utterance(speaker="host_b", text="No marker here."),
+        ]
+    )
+    spoken = spoken_script(script)
+
+    assert "[[SRC:" not in " ".join(u.text for u in spoken.utterances)
+    assert spoken.utterances[0].text == "Trinity coordinates models."
+    # The gap the marker leaves is closed: a TTS voice pauses at "models ." otherwise.
+    assert " ." not in spoken.utterances[0].text
+    # COUNT and ORDER untouched, or the offsets invariant 44 defines stop lining up with the
+    # transcript the reader sees.
+    assert len(spoken.utterances) == len(script.utterances)
+    assert [u.speaker for u in spoken.utterances] == [u.speaker for u in script.utterances]
+    # And the stored script is not mutated — what the model produced stays what it produced.
+    assert "[[SRC:" in script.utterances[0].text
+
+
+def test_both_entry_points_synthesize_the_stripped_script():
+    """A source-tree assertion: there are two call sites and no runtime seam that would notice one
+    of them passing the raw script — the audio would simply speak the marker, as it did."""
+    import re as _re
+
+    for module in ("api", "cli"):
+        # Resolved from THIS file: the suite chdirs into a tmp dir (conftest's isolation
+        # fixture), so a relative path finds nothing.
+        root = Path(__file__).resolve().parent.parent / "rlm_notebook"
+        source = (root / f"{module}.py").read_text(encoding="utf-8")
+        calls = _re.findall(r"provider\.synthesize[,(]\s*([^,)]+)", source)
+        assert calls, f"the extraction no longer sees {module}'s synthesize call"
+        for arg in calls:
+            assert arg.strip().startswith("spoken_script("), (
+                f"{module}.py synthesizes a raw script, so the voices read the markers aloud"
+            )
+
+
+def test_stripping_a_marker_only_line_does_not_lose_the_episode():
+    """The net must not be able to destroy what it was protecting. A line that is NOTHING but a
+    coordinate strips to `""` or a lone piece of punctuation, and `EdgeTTSProvider` raises
+    `NoAudioReceived` for punctuation-only text (this module's own docstring records that, verified
+    live) — which becomes a 502 and discards the whole paid-for RLM run.
+
+    A garbled line ships; a 502 does not. Same discipline as invariants 19/37/43.
+    """
+    from rlm_notebook.schema import PodcastScript, Utterance
+    from rlm_notebook.tts import spoken_script
+
+    script = PodcastScript(
+        utterances=[
+            Utterance(speaker="host_a", text="[[SRC:s1|whole]]"),
+            Utterance(speaker="host_b", text="[[SRC:s2|whole]]。"),
+            Utterance(speaker="host_a", text="Real words [[SRC:s3|whole]]."),
+        ]
+    )
+    spoken = spoken_script(script)
+    assert all(any(c.isalnum() for c in u.text) for u in spoken.utterances), (
+        "an utterance was left with nothing speakable, which is a TTSError and a lost episode"
+    )
+    # The line that HAS content still gets its marker removed.
+    assert spoken.utterances[2].text == "Real words."

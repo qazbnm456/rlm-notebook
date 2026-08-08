@@ -12,9 +12,15 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from rlm_harness import RLMTask
-from rlm_harness.tools.validation import make_schema_validator
 
-from .instructions import CITATION_RULES, artifact_language_rule, validate_before_submit_rule
+from .instructions import (
+    CITATION_RULES,
+    SKILLS_DIR,
+    apply_skills,
+    artifact_language_rule,
+    make_grounded_validator,
+    validate_before_submit_rule,
+)
 from .schema import FAQ, KeyInsight, Summary, Timeline
 
 __all__ = ["GenerateFAQ", "GenerateKeyInsight", "GenerateSummary", "GenerateTimeline"]
@@ -52,7 +58,19 @@ class GenerateSummary(RLMTask):
         "reader would need, not a chapter-by-chapter recap.",
         "validate_summary",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(Summary)]
+    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Summary)]
+
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
+
+        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
+        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
+        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
+        told to consult its own knowledge base will not.
+        """
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+
 
 
 class GenerateFAQ(RLMTask):
@@ -67,7 +85,19 @@ class GenerateFAQ(RLMTask):
         "for their own sake.",
         "validate_faq",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(FAQ)]
+    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(FAQ)]
+
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
+
+        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
+        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
+        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
+        told to consult its own knowledge base will not.
+        """
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+
 
 
 class GenerateTimeline(RLMTask):
@@ -85,7 +115,19 @@ class GenerateTimeline(RLMTask):
         "list of events rather than fabricating one.",
         "validate_timeline",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(Timeline)]
+    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Timeline)]
+
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
+
+        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
+        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
+        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
+        told to consult its own knowledge base will not.
+        """
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+
 
 
 class GenerateKeyInsight(RLMTask):
@@ -101,4 +143,16 @@ class GenerateKeyInsight(RLMTask):
         "would consider most worth knowing.",
         "validate_keyinsight",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(KeyInsight)]
+    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(KeyInsight)]
+
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
+
+        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
+        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
+        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
+        told to consult its own knowledge base will not.
+        """
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+

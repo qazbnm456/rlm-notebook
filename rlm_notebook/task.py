@@ -14,9 +14,15 @@ from collections.abc import Callable
 from typing import Any, ClassVar
 
 from rlm_harness import RLMTask
-from rlm_harness.tools.validation import make_schema_validator
 
-from .instructions import CITATION_RULES, chat_language_rule, validate_before_submit_rule
+from .instructions import (
+    CITATION_RULES,
+    SKILLS_DIR,
+    apply_skills,
+    chat_language_rule,
+    make_grounded_validator,
+    validate_before_submit_rule,
+)
 from .schema import Answer
 
 __all__ = ["AnswerQuestion"]
@@ -55,4 +61,16 @@ class AnswerQuestion(RLMTask):
     output_field = "answer"
     output_model = Answer
     instructions = _INSTRUCTIONS
-    tools: ClassVar[list[Callable[..., Any]]] = [make_schema_validator(Answer)]
+    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Answer)]
+
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
+
+        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
+        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
+        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
+        told to consult its own knowledge base will not.
+        """
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+

@@ -932,3 +932,48 @@ def test_the_podcast_panels_small_controls_keep_their_own_width():
         f"a small control in the podcast panel is stretched to full width by the flex column: "
         f"exempted classes are {sorted(exempt)}"
     )
+
+
+def test_the_podcast_length_is_chosen_at_generation_time_and_sent():
+    """Three tiers, the same shape NotebookLM offers — asked AT generation time because that is
+    when a reader has an opinion about how long they want to listen, and because changing your mind
+    afterwards costs a full model run plus synthesis.
+
+    Pinned because a control that renders but is never sent looks identical to one that works: the
+    request would quietly produce a default-length episode after a real run.
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    script = (WEB / "app.js").read_text(encoding="utf-8")
+
+    for tier in ("short", "default", "long"):
+        assert f'data-length="{tier}"' in html, f"the {tier} option is not offered"
+
+    body = script[script.index("function initPodcastPlayer()") :]
+    body = body[: body.index("\nfunction ", 1)]
+    post = body[body.index('/audio`'):]
+    assert "length: podcastLength()" in post[:400], (
+        "the chosen length is never put in the request body, so every episode is `default`"
+    )
+    # ...and an unknown stored value must not be forwarded verbatim.
+    reader = script[script.index("function podcastLength()") :]
+    reader = reader[: reader.index("\n}") + 2]
+    assert "PODCAST_LENGTHS.has" in reader, (
+        "a hand-edited localStorage value reaches the server unchecked"
+    )
+
+
+def test_the_run_status_line_wraps_rather_than_truncating():
+    """`.run-text` was `white-space: nowrap` with an ellipsis, so a long phrase lost its END — and
+    the end is where the elapsed time lives, the one part that changes. A user hit it on
+    "正在合成語音…（此階段無法中止）· 已…", where the wait counter was the casualty.
+
+    `.run-status` already wraps its children, so a two-line status costs nothing.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    body = "".join(b for sel, b in _rules(css) if sel.strip() == ".run-text")
+    assert body, "the extraction broke; this would pass vacuously"
+    assert "nowrap" not in body, (
+        "the status line clips again, and what it clips is the elapsed time — the only part a "
+        "reader watching a slow run is actually reading"
+    )
+    assert "text-overflow: ellipsis" not in body

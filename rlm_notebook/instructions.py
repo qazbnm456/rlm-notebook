@@ -9,6 +9,161 @@ others would silently weaken the guarantee for whichever task got missed.
 
 from __future__ import annotations
 
+import os
+from collections.abc import Callable
+from pathlib import Path
+from typing import Any
+
+from rlm_harness import load_skills_as_tools, render_skills_manifest
+from rlm_harness.tools.validation import make_schema_validator
+
+#: This package's own recorded craft and measured failure modes, shipped INSIDE the wheel for the
+#: same packaging reason the web assets are (`packages = ["rlm_notebook"]`, invariant 29): a
+#: top-level directory works from a checkout and silently vanishes from an install. Verified by
+#: building a wheel and reading its manifest, not by trusting the layout.
+SKILLS_DIR = str(Path(__file__).resolve().parent / "skills")
+
+#: The catalog header every task shares. ONE copy, like `CITATION_RULES` — six tasks each wording
+#: their own invitation is exactly the drift invariant 13 exists to prevent.
+_SKILLS_HEADER = (
+    "<available_skills> — this project's own recorded craft and measured failure modes. "
+    "`read_skill(name)` loads one in full. Consult the relevant skill BEFORE working: they record "
+    "what was actually measured here, including several ways a run has been lost outright:"
+)
+
+
+
+def _marker_offenders(value: Any, path: str = "") -> list[str]:
+    """Every path under `value` whose string holds a `[[SRC:...]]` marker.
+
+    `quote` is EXEMPT: it is copied verbatim out of a source, and a source that itself contains the
+    literal text `[[SRC:` would make an honest quote look like a violation. Every other string in
+    every output model is the model's own prose, where a marker is always wrong.
+    """
+    from .citations import MARKER_PATTERN
+
+    if isinstance(value, str):
+        return [path] if MARKER_PATTERN.search(value) else []
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [p for i, v in enumerate(value) for p in _marker_offenders(v, f"{path}[{i}]")]
+    # No output model has a dict field today; skipping one silently would be a fail-open the moment
+    # somebody adds one, and this walk exists precisely because a guard that fails open is worse
+    # than no guard.
+    if isinstance(value, dict):
+        return [p for k, v in value.items() for p in _marker_offenders(v, f"{path}[{k!r}]")]
+    # `type(value)`, NOT the instance: pydantic deprecated instance access in 2.11 and removes it
+    # in 3.0, and `getattr(instance, "model_fields", None)` would then return None — this walk
+    # would return [] for every model and the guard would silently stop checking anything, on all
+    # six tasks, with no error. A guard that fails OPEN is worse than one that raises.
+    fields = getattr(type(value), "model_fields", None)
+    if fields:
+        out: list[str] = []
+        for name in fields:
+            if name == "quote":
+                continue
+            out += _marker_offenders(getattr(value, name), f"{path}.{name}" if path else name)
+        return out
+    return []
+
+
+def make_grounded_validator(model: type) -> Callable[[str], str]:
+    """`rlm_harness`'s schema validator PLUS a check the schema cannot express: no `[[SRC:...]]`
+    marker anywhere in the model's own prose.
+
+    **Why not a schema validator.** Nothing rewrites a stored artifact (the strip happens on the way
+    OUT), so a notebook written before this validator existed holds whatever the model produced — the
+    measured cases were a podcast with twenty markers across nineteen of its forty-seven utterances
+    and an overview with four — and a field-level reject would make those files fail to LOAD, turning
+    untidy data into a corrupt-notebook 409. The check belongs
+    where the model can still act on it: before SUBMIT, in the tool the instructions already tell it
+    to call.
+
+    **Why every task and not just the podcast.** It was written for `GeneratePodcastScript`, whose
+    failure was loud (the voice read the markers aloud). `GenerateSummary` had produced exactly the
+    same defect, silently — four markers printed in an overview a user reported as a broken render.
+    A guard on the one task that made a noise is a guard on the symptom.
+    """
+    schema_check = make_schema_validator(model)
+
+    def validate(data_json_str: str) -> str:
+        """Validate a JSON string against the expected output schema AND check that no
+        `[[SRC:...]]` marker appears in your own prose. Pass your generated JSON here before
+        emitting it as the final answer."""
+        verdict = schema_check(data_json_str)
+        if verdict.startswith("Validation failed"):
+            return verdict
+        offenders = _marker_offenders(model.model_validate_json(data_json_str))
+        if offenders:
+            # The advice has to differ by WHERE the marker is. "put it in the citations entry" is a
+            # dead end when the offender IS a citation field, and a model that loops on impossible
+            # advice spends the whole step budget doing it.
+            inside = [o for o in offenders if "citations[" in o or o.startswith("citations")]
+            if inside:
+                advice = (
+                    "a `source_id` is the id alone (`s1`) and a `locator` the locator alone "
+                    "(`whole`, `page:3`) — copy the PARTS out of the marker, never the marker itself"
+                )
+            else:
+                advice = (
+                    "remove it from the text and put the coordinate in the accompanying "
+                    "`citations` entry instead"
+                )
+            where = ", ".join(offenders)
+            verb = "contains" if len(offenders) == 1 else "contain"
+            return (
+                f"Validation failed: {where} {verb} a [[SRC:...]] marker. A marker is a coordinate "
+                f"for the interface, not a citation and not something a reader or a listener should "
+                f"ever see — {advice}."
+            )
+        return verdict
+
+    validate.__name__ = f"validate_{model.__name__.lower()}"
+    validate.__qualname__ = validate.__name__
+    return validate
+
+
+def apply_skills(task: Any, skills_dir: str | None) -> None:
+    """Wire `skills_dir` onto `task` using `discovery="inject"`, the shape four sibling projects
+    already use (`cabt-forge`, `bugcademy`, `cve-reverser`, `nuclei-forge`).
+
+    The CATALOG (one `- name: description` line per skill) is prepended to the instructions at
+    construction time, so the planner knows which skills exist without spending a `list_skills`
+    round-trip; only `read_skill` becomes a tool, pulling a body just-in-time. That is the whole
+    reason craft lives in a skill rather than in the prompt: the prompt is paid for on EVERY planner
+    turn, a skill body only when the model decides it needs one.
+
+    **What belongs in a skill and what does not.** A skill is read only if the model chooses to, so
+    anything that CORRUPTS the output when skipped stays in the prompt — grounding, citations, the
+    marker rule, language, the output shape. Craft and technique are the right things to move: work
+    done without them is duller or more expensive, not wrong.
+
+    `read_skill` resolves a NAME against the skills discovered here, so it cannot read an arbitrary
+    path and never touches the network — invariants 1 and 14 are about a model reaching the outside
+    world at generation time, which this does not do.
+
+    ONE directory for every task, deliberately: `rlm_harness.skills.discover_skills` takes a single
+    directory and does not recurse, and the catalog costs one line per skill. If it ever grows
+    enough that a chat turn is paying to be told about podcast craft, that is the point to split it —
+    not before.
+    """
+    if skills_dir is None or not os.path.isdir(skills_dir):
+        return
+    manifest = render_skills_manifest(skills_dir, header=_SKILLS_HEADER)
+    # The MANIFEST decides, not the directory. `load_skills_as_tools` returns `read_skill`
+    # regardless of whether anything was discovered, and that tool's own description tells the model
+    # to pick "the ones listed in the skills manifest in your instructions" — so an empty or
+    # skill-less directory used to hand the model a tool pointing at a list that was not there.
+    if not manifest:
+        return
+    task.tools = [*task.tools, *load_skills_as_tools(skills_dir, discovery="inject")]
+    # `instructions` is a ClassVar on RLMTask, so assigning it on the INSTANCE shadows the class
+    # default for this task only — the same pattern the `tools` line above relies on.
+    # CLOSED. `render_skills_manifest` only prepends the header, so without this every rule in
+    # the task's own prompt — citations, language, validate-before-submit — reads as though it
+    # were inside the skills element.
+    task.instructions = manifest + "\n</available_skills>\n\n" + type(task).instructions
+
+
 CITATION_RULES = """\
 `sources` is a single string containing every source in this notebook. Each citable block is
 preceded by a marker line of the EXACT form `[[SRC:<source_id>|<locator>]]`, immediately followed

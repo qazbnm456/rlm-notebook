@@ -13,8 +13,13 @@ import re
 from .corpus import Corpus
 from .schema import Citation, VerifiedCitation
 
-#: The corpus marker, as it appears inside the blob. Matched here so it can be removed from PROSE.
-_MARKER = re.compile(r"\[\[SRC:[^\]]*\]\]")
+#: The corpus marker, as it appears inside the blob. ONE spelling, exported because `audio.py`'s
+#: pre-SUBMIT validator needs the same pattern and a second copy is exactly what drifts.
+MARKER_PATTERN = re.compile(r"\[\[SRC:[^\]]*\]\]")
+
+#: Punctuation that must not be preceded by a space once a marker between them is removed —
+#: `claim . Next` is cosmetic on screen and audible in synthesis, where a voice pauses at the gap.
+_TIGHT_AFTER = ".,;:!?)]}\u3001\u3002\uff0c\uff1b\uff1a\uff01\uff1f\uff09\u300d\u300f"
 
 
 def strip_markers(text: str) -> str:
@@ -35,8 +40,18 @@ def strip_markers(text: str) -> str:
     """
     if "[[SRC:" not in (text or ""):
         return text or ""
-    out = _MARKER.sub("", text)
-    out = re.sub(r"[ \t]{2,}", " ", out)
+    # The gap is closed WHERE THE MARKER WAS, not globally. A global rule normalises text that had
+    # nothing to do with a marker — French typographic spacing (`vrai !`) is the case an independent
+    # review found — and because `strip_markers` early-returns on a string with no marker, prose and
+    # `answer_span` would then get DIFFERENT normalisation and the span would stop matching. That is
+    # invariant 49's failure mode one layer down: the stroke silently disappears.
+    def _close_gap(match: re.Match[str]) -> str:
+        before, after = match.string[: match.start()], match.string[match.end() :]
+        if not before or before[-1].isspace() or not after or after[0] in _TIGHT_AFTER:
+            return ""
+        return " " if match.group(0) != match.group("marker") else ""
+
+    out = re.sub(rf"[ \t]*(?P<marker>{MARKER_PATTERN.pattern})[ \t]*", _close_gap, text)
     out = re.sub(r"[ \t]+\n", "\n", out)
     out = re.sub(r"\n{3,}", "\n\n", out)
     return out.strip()
