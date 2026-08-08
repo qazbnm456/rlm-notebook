@@ -8,8 +8,38 @@ this module claim a stronger guarantee than "this citation points at a real bloc
 
 from __future__ import annotations
 
+import re
+
 from .corpus import Corpus
 from .schema import Citation, VerifiedCitation
+
+#: The corpus marker, as it appears inside the blob. Matched here so it can be removed from PROSE.
+_MARKER = re.compile(r"\[\[SRC:[^\]]*\]\]")
+
+
+def strip_markers(text: str) -> str:
+    """Remove any `[[SRC:<id>|<locator>]]` that leaked into model-authored prose.
+
+    The marker is a coordinate the model is told to echo into a `Citation` (invariant 4), never into
+    the sentence it is writing — but it is reading a corpus full of them, and a real run duly ended
+    four of five paragraphs with a literal `[[SRC:s1|whole]]` on screen. A user reported it as a
+    failed render, which is a fair reading: it looks exactly like a template that did not resolve.
+
+    Stripped at the DISPLAY boundary rather than before persisting: the stored artifact is what the
+    model actually produced, and rewriting it on the way in would make an old notebook and a new one
+    disagree about their own history. Doing it on the way out also fixes every notebook already on
+    disk, with no migration.
+
+    Whitespace is tidied only where the marker left a hole — a marker on its own line takes the line
+    with it, and one mid-sentence leaves a single space rather than two.
+    """
+    if "[[SRC:" not in (text or ""):
+        return text or ""
+    out = _MARKER.sub("", text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    out = re.sub(r"[ \t]+\n", "\n", out)
+    out = re.sub(r"\n{3,}", "\n\n", out)
+    return out.strip()
 
 
 def locate_answer_spans(citations: list[Citation], prose: str) -> list[Citation]:
@@ -28,7 +58,9 @@ def locate_answer_spans(citations: list[Citation], prose: str) -> list[Citation]
     """
     located: list[Citation] = []
     for citation in citations:
-        span = (citation.answer_span or "").strip()
+        # The SAME strip the prose gets, or a span that happens to include a marker stops matching
+        # the text it was copied from.
+        span = strip_markers(citation.answer_span or "").strip()
         if span and span in prose:
             located.append(citation.model_copy(update={"answer_span": span}))
         elif citation.answer_span:

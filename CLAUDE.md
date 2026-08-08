@@ -2175,4 +2175,46 @@ them exist because an earlier design discussion mentioned them.
     `TypeError` and did nothing, and nothing caught it — every method called on that object is now
     checked against the ones it defines.
 
+61. **The cheap `dspy.Predict` callers read `Corpus.excerpt`, never `blob()[:n]` — a prefix is
+    source ONE, not the notebook.** `naming.SuggestTitle` and `naming.SuggestLanguage` cannot read a
+    multi-MB corpus (invariant 37: they are one plain completion, not an `RLMTask`), so they get a
+    window. That window used to be a prefix of the blob, and the blob concatenates sources IN ORDER
+    — so with a 69,859-character first source against a 4,000-character budget, sources two through
+    four were invisible. A user reported the symptom precisely: a four-source notebook titled by
+    transliterating source one's own paper title.
+
+    **Language resolution read the same prefix, and that is the worse half**: a notebook whose later
+    sources are in another language would resolve the wrong one, and invariant 39 then persists that
+    guess and stops re-resolving. Nobody had noticed, because the reported symptom was cosmetic and
+    this one is not.
+
+    `excerpt(n)` gives every source an equal share taken from its START — a paper, a page or a
+    report states its subject in the opening lines, so the head is the most informative slice of a
+    fixed budget. The prompt was corrected to match: name what the COLLECTION is about, and treat
+    "translate source one's title" as the named failure mode rather than leaving the model to infer
+    it from a window that only ever showed source one.
+
+62. **A `[[SRC:...]]` marker is a coordinate for the interface and must never reach the reader —
+    stripped at the DISPLAY boundary, not before persisting.** Invariant 4 has always told the model
+    to echo a marker into a `Citation`; it says nothing about the model ALSO writing one into the
+    sentence it is composing, which is what a real run did — four of five overview paragraphs ended
+    with a literal `[[SRC:s1|whole]]` on screen. A user reported it as a failed render, which is a
+    fair reading: it looks exactly like a template that did not resolve.
+
+    **On the way OUT, so nothing stored is rewritten and every notebook already on disk is fixed
+    with no migration.** The stored artifact stays what the model actually produced — rewriting it
+    on the way in would make an old notebook and a new one disagree about their own history.
+
+    **`api._prose` is the ONE place, and the same value goes to `_citation_responses`.** Handing the
+    raw text to one and the stripped text to the other is silent in both directions: the markers
+    vanish from screen and every `answer_span` stops being locatable, so every highlighter stroke
+    disappears — invariant 49's failure mode, one layer down. `locate_answer_spans` strips the SPAN
+    too, because a span the model copied out of its own prose can carry a marker with it. Pinned by
+    a source-tree assertion over every call site, after the older sibling of that test was found to
+    have a filter that never excluded the function's own definition and passed by luck.
+
+    The prompt gained the rule as well. A display-layer strip is a NET, not a reason to stop asking:
+    the same residual-risk hedge as invariants 4 and 11 applies to whether the model complies, and
+    the net is what makes non-compliance cost nothing.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

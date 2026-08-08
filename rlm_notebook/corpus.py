@@ -53,6 +53,32 @@ class Corpus:
             )
         return text
 
+    def excerpt(self, max_chars: int) -> str:
+        """A sample of EVERY source, for the cheap `dspy.Predict` callers that cannot read the whole
+        corpus (`naming.SuggestTitle`, `naming.SuggestLanguage`).
+
+        Not `blob()[:max_chars]`, which is what this replaced. The blob concatenates sources in
+        order, so a prefix is whatever fits of source ONE — and a user reported the consequence
+        exactly: a four-source notebook titled by transliterating the first source's own paper
+        title, with sources two to four never seen, because source one alone was 69,859 characters
+        against a 4,000-character window. Language resolution had the same blind spot, which is
+        worse: a notebook whose later sources are in another language would resolve the wrong one.
+
+        Each source gets an equal share, taken from its START — a paper, a page or a report states
+        its subject in the opening lines, so the head is the most informative slice of a fixed
+        budget. Markers are included so a reader of the excerpt can still tell where one source ends
+        and the next begins; nothing downstream parses them.
+        """
+        if not self.sources or max_chars <= 0:
+            return ""
+        share = max(200, max_chars // len(self.sources))
+        parts: list[str] = []
+        for source in self.sources:
+            text = "\n".join(block.text for block in source.blocks)
+            head = text[:share]
+            parts.append(f"{source.marker(source.blocks[0].locator if source.blocks else 'whole')}\n{head}")
+        return "\n\n".join(parts)[:max_chars]
+
     def filtered(self, source_ids: list[str]) -> Corpus:
         """A new `Corpus` containing only the named sources, in their original order — the "ask
         about just these sources" subset selection a notebook UI can offer (see the design

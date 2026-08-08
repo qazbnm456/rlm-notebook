@@ -122,3 +122,38 @@ def test_the_span_and_the_quote_are_in_different_languages_on_purpose():
     assert located.quote == citation.quote  # untouched
     # ...and the quote alone could never have located anything in this prose, which is the bug.
     assert citation.quote not in prose
+
+
+def test_a_corpus_marker_never_reaches_the_reader():
+    """The marker is a coordinate the model is told to echo into a `Citation` (invariant 4), never
+    into the sentence it is writing — but it reads a corpus full of them, and a real run ended four
+    of five paragraphs with a literal `[[SRC:s1|whole]]` on screen. A user reported it as a failed
+    render, which is a fair reading: it looks exactly like a template that did not resolve."""
+    from rlm_notebook.citations import strip_markers
+
+    assert strip_markers("A claim.[[SRC:s1|whole]]") == "A claim."
+    assert strip_markers("Mid [[SRC:s2|page:3]] sentence.") == "Mid sentence."
+    assert strip_markers("Para one.\n\n[[SRC:s1|whole]]\n\nPara two.") == "Para one.\n\nPara two."
+    # Untouched when there is nothing to strip — including the empty and None cases.
+    assert strip_markers("Ordinary prose.") == "Ordinary prose."
+    assert strip_markers("") == ""
+    assert strip_markers(None) == ""
+    # A locator with a pipe or a colon in it is still one marker, not a partial match.
+    assert strip_markers("x[[SRC:s1|ts:01:20]]y") == "xy"
+
+
+def test_a_span_carrying_a_marker_still_matches_the_stripped_prose():
+    """The model copies `answer_span` out of its own text, so if the text had a marker the span can
+    have one too. Both get the SAME strip, or the span silently stops being locatable and the
+    highlighter stroke disappears — which is invariant 49's whole failure mode, one layer down."""
+    from rlm_notebook.citations import locate_answer_spans, strip_markers
+    from rlm_notebook.schema import Citation
+
+    raw = "Voyager left in 2012.[[SRC:s1|whole]] It still transmits."
+    prose = strip_markers(raw)
+    located = locate_answer_spans(
+        [Citation(source_id="s1", locator="whole", quote="q",
+                  answer_span="Voyager left in 2012.[[SRC:s1|whole]]")],
+        prose,
+    )
+    assert located[0].answer_span == "Voyager left in 2012."

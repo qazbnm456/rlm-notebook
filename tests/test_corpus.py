@@ -62,3 +62,52 @@ def test_filtered_raises_on_unknown_id():
     corpus.add(_source("s1"))
     with pytest.raises(ValueError):
         corpus.filtered(["s1", "nope"])
+
+
+def test_an_excerpt_samples_every_source_not_just_the_first():
+    """`blob()[:n]` is what this replaced, and a user reported the consequence: a four-source
+    notebook was titled by transliterating source ONE's own paper title, because source one alone
+    was 69,859 characters against a 4,000-character window — sources two to four were never seen.
+    Language resolution read the same prefix, which is worse: later sources in another language
+    would have resolved the wrong one."""
+    from rlm_notebook.corpus import Corpus
+    from rlm_notebook.schema import Source, SourceBlock
+
+    sources = [
+        Source(
+            id=f"s{i}",
+            kind="web",
+            origin=f"https://example.com/{i}",
+            blocks=[SourceBlock(locator="whole", text=f"SOURCE-{i}-OPENING " + "x" * 20_000)],
+        )
+        for i in (1, 2, 3, 4)
+    ]
+    corpus = Corpus(sources)
+
+    excerpt = corpus.excerpt(4000)
+    assert len(excerpt) <= 4000
+    for i in (1, 2, 3, 4):
+        assert f"SOURCE-{i}-OPENING" in excerpt, f"source {i} is invisible to the excerpt"
+
+    # ...and the prefix this replaced genuinely could not see them, so the test is not vacuous.
+    prefix = corpus.blob(max_chars=None)[:4000]
+    assert "SOURCE-2-OPENING" not in prefix
+
+
+def test_an_excerpt_of_one_source_is_still_its_opening():
+    from rlm_notebook.corpus import Corpus
+    from rlm_notebook.schema import Source, SourceBlock
+
+    corpus = Corpus([
+        Source(id="s1", kind="text", origin="o",
+               blocks=[SourceBlock(locator="whole", text="THE OPENING LINE. " + "y" * 9000)])
+    ])
+    excerpt = corpus.excerpt(500)
+    assert "THE OPENING LINE." in excerpt
+    assert len(excerpt) <= 500
+
+
+def test_an_excerpt_of_an_empty_corpus_is_empty():
+    from rlm_notebook.corpus import Corpus
+
+    assert Corpus([]).excerpt(4000) == ""

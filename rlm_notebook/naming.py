@@ -42,8 +42,14 @@ Rules:
   or "Summary of sources".
 - Write the title in the language named by `language`. If that is empty, use the sources' own
   language: if they are in Chinese, write a Chinese title.
-- If the sources are too fragmentary to tell what they are about, answer with their most concrete
-  shared noun rather than inventing a theme.
+- Name what the COLLECTION is about, not what one source is called. `sources` is a sample of EVERY
+  source in the notebook, separated by `[[SRC:...]]` markers — read past the first one. Copying or
+  translating source one's own title is the failure mode here: a notebook holding a paper, a lab
+  announcement, a product page and a geopolitics report is not "Trinity: An Evolved LLM
+  Coordinator", it is what those four have in common.
+- If the sources genuinely share no theme, say what the biggest one is about rather than inventing
+  a connection between them.
+- Ignore the `[[SRC:...]]` markers themselves; they are separators, never part of the title.
 """
 
 

@@ -2344,8 +2344,12 @@ def test_every_citation_response_is_checked_against_its_own_artifacts_text():
     import re as _re
 
     source = inspect.getsource(api)
+    # The DEFINITION is excluded by its type annotations, not by looking for "def" — that word sits
+    # before the paren the regex captures, so the obvious filter never matched it. The older sibling
+    # of this test has the same hole and passes only because a def line happens to satisfy its
+    # assertion; both are fixed here.
     calls = _re.findall(r"_citation_responses\(([^)]*)\)", source)
-    calls = [c for c in calls if "def _citation_responses" not in c]
+    calls = [c for c in calls if ": " not in c]
     assert len(calls) >= 8, f"call sites went missing, so this would pass vacuously: {calls}"
 
     for call in calls:
@@ -2435,3 +2439,58 @@ def test_the_podcast_task_really_does_carry_the_longest_instructions():
         "the podcast no longer has the longest instructions, so invariant 59's account of why the "
         "token cap bit it first is no longer the explanation"
     )
+
+
+def test_no_response_ships_a_corpus_marker_in_its_prose(client, monkeypatch):
+    """Behavioural: every artifact's text goes through `_prose`, and the SAME value is handed to
+    `_citation_responses`, so the string on screen and the string the spans were located in can
+    never be different."""
+    _live_env(monkeypatch)
+    _add_a_source(client)
+    _mock_runner(
+        monkeypatch,
+        {
+            "text": "Voyager left in 2012.[[SRC:s1|whole]]",
+            "citations": [
+                {
+                    "source_id": "s1",
+                    "locator": "whole",
+                    "quote": "content of https://example.com/a",
+                    "answer_span": "Voyager left in 2012.[[SRC:s1|whole]]",
+                }
+            ],
+        },
+    )
+
+    asked = client.post("/notebooks/mynb/ask", json={"question": "q"}).json()
+    assert "[[SRC:" not in asked["text"]
+    # ...and the span still locates against the stripped prose, so the stroke survives.
+    assert asked["citations"][0]["answer_span"] == "Voyager left in 2012."
+
+    turn = client.get("/notebooks/mynb").json()["turns"][0]
+    assert "[[SRC:" not in turn["answer"]
+    assert turn["citations"][0]["answer_span"] == "Voyager left in 2012."
+
+
+def test_every_artifact_text_in_a_response_goes_through_the_same_stripper():
+    """A source-tree assertion for the sites a mocked test cannot all reach at once (guide kinds,
+    podcast utterances). Passing the RAW text to one of the two arguments and the stripped text to
+    the other is silent: the markers vanish from screen and every highlighter stroke stops being
+    found, which is the failure invariant 49 already records one layer up."""
+    import inspect
+    import re as _re
+
+    source = inspect.getsource(api)
+    # The DEFINITION is excluded by its type annotations, not by looking for "def" — that word sits
+    # before the paren the regex captures, so the obvious filter never matched it. The older sibling
+    # of this test has the same hole and passes only because a def line happens to satisfy its
+    # assertion; both are fixed here.
+    calls = _re.findall(r"_citation_responses\(([^)]*)\)", source)
+    calls = [c for c in calls if ": " not in c]
+    assert len(calls) >= 8, f"call sites went missing, so this would pass vacuously: {calls}"
+    for call in calls:
+        prose_arg = [a.strip() for a in call.split(",")][2]
+        assert prose_arg.startswith("_prose("), (
+            f"_citation_responses({call}) is given prose that has not been stripped of corpus "
+            f"markers, while the text beside it has"
+        )

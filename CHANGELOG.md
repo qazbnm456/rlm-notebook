@@ -1853,3 +1853,25 @@ questions with verifiable citations, and get a distilled research artifact out.
   Also recorded: chatterbox's position is the LOCAL/privacy option, not "the only one that handles
   mixed script" — 33x the wall clock and 9x the bytes is a trade a reader whose sources cannot leave
   the machine should be able to make, and one nobody should be made to take by default.
+
+- **Two defects a user found in one notebook, and the smaller-looking one was the dangerous one.**
+
+  **The notebook was titled by transliterating its first source's paper title**, because the titler
+  reads a WINDOW of the corpus and that window was `blob()[:4000]` — a prefix of a string that
+  concatenates sources in order. Source one alone was 69,859 characters, so sources two, three and
+  four were never seen. `Corpus.excerpt(n)` gives every source an equal share from its opening
+  lines; verified against the reported notebook, where the old prefix saw `s1` and the new excerpt
+  sees `s1 s2 s3 s4`. **Language resolution read the same prefix**, which is worse than a bad title:
+  a notebook whose later sources are in another language would resolve the wrong one, and that guess
+  is then persisted (invariant 39). The prompt now names "translate source one's title" as the
+  failure mode instead of leaving it to be inferred.
+
+  **Raw `[[SRC:s1|whole]]` markers were on screen in the overview** — the model wrote the coordinate
+  into its own prose, which the rules never covered because they only ever said where a marker
+  BELONGS. Stripped at the display boundary, so nothing stored is rewritten and every notebook
+  already on disk is fixed with no migration. The same strip runs on `answer_span`, or a span
+  carrying a marker silently stops matching and every highlighter stroke vanishes.
+
+  Also measured, in answer to a question rather than a bug report: the two podcast hosts speak at
+  different speeds (5.43 vs 4.84 characters per second, consistent across every line) because they
+  are two different edge-tts voices and this project sets no rate at all.

@@ -22,6 +22,10 @@ guess, or reconstruct one from surrounding context. If you cannot find a marker 
 leave that claim uncited rather than fabricating a citation for it; an uncited claim is honest, a
 fabricated citation is not.
 
+A `[[SRC:...]]` marker belongs in a `Citation` and NOWHERE ELSE. Never write one into your own
+prose: it is a coordinate for the interface, and a reader sees it as a template that failed to
+render. Cite by filling in a `Citation`; write the sentence as a sentence.
+
 A `Citation`'s `quote` is copied VERBATIM from the block — never translated, paraphrased,
 summarised, re-punctuated, or tidied. It is the reader's way of checking your prose against the
 source's own words, and it stops being that the moment you rewrite it.

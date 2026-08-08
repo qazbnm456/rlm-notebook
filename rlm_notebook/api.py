@@ -78,7 +78,7 @@ from pydantic import BaseModel, ConfigDict, ValidationError
 
 from . import runner
 from .audio import GeneratePodcastScript
-from .citations import locate_answer_spans, verify_citations
+from .citations import locate_answer_spans, strip_markers, verify_citations
 from .config import (
     NotebookConfig,
     max_trace_files,
@@ -322,6 +322,14 @@ class CitationResponse(BaseModel):
     #: that could not be located — the UI then shows the citation as a reference without a
     #: highlight, which is the honest outcome.
     answer_span: str | None = None
+
+
+def _prose(text: str) -> str:
+    """Model-authored text as the client should render it: corpus markers removed
+    (`citations.strip_markers`). Every site that emits an artifact's text uses this AND passes the
+    same value to `_citation_responses`, so the string on screen and the string the spans were
+    located in are the same one."""
+    return strip_markers(text or "")
 
 
 def _citation_responses(citations: list[Citation], corpus, prose: str) -> list[CitationResponse]:
@@ -612,8 +620,8 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
         turns=[
             ChatTurnResponse(
                 question=t.question,
-                answer=t.answer.text,
-                citations=_citation_responses(t.answer.citations, corpus, t.answer.text),
+                answer=_prose(t.answer.text),
+                citations=_citation_responses(t.answer.citations, corpus, _prose(t.answer.text)),
                 run_id=t.run_id,
                 follow_ups=t.answer.follow_ups,
             )
@@ -636,7 +644,9 @@ def _podcast_response(notebook: Notebook, corpus) -> PodcastResponse | None:
     return PodcastResponse(
         utterances=[
             AudioUtteranceResponse(
-                speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus, u.text)
+                speaker=u.speaker,
+                text=_prose(u.text),
+                citations=_citation_responses(u.citations, corpus, _prose(u.text)),
             )
             for u in podcast.utterances
         ],
@@ -661,8 +671,8 @@ def _overview_response(notebook: Notebook, corpus) -> OverviewResponse | None:
     if overview is None:
         return None
     return OverviewResponse(
-        text=overview.text,
-        citations=_citation_responses(overview.citations, corpus, overview.text),
+        text=_prose(overview.text),
+        citations=_citation_responses(overview.citations, corpus, _prose(overview.text)),
         starter_questions=overview.starter_questions,
         run_id=overview.run_id,
         stale=set(overview.source_ids) != {s.id for s in notebook.sources},
@@ -1037,7 +1047,8 @@ async def _resolve_language(
     if notebook.output_language:
         return notebook.output_language
 
-    excerpt = corpus_of(notebook).blob(max_chars=None)[:4000] if notebook.sources else ""
+    # EVERY source, not the first 4000 characters of the blob — see `Corpus.excerpt`.
+    excerpt = corpus_of(notebook).excerpt(4000) if notebook.sources else ""
     questions = "\n".join(turn.question for turn in notebook.turns[-5:])
     try:
         resolved = await _run_isolated(
@@ -1207,8 +1218,8 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
     # "re-verified fresh against the current sources" governs reading a turn BACK (`get_notebook`),
     # and is unaffected.
     return AskResponse(
-        text=answer.text,
-        citations=_citation_responses(answer.citations, corpus, answer.text),
+        text=_prose(answer.text),
+        citations=_citation_responses(answer.citations, corpus, _prose(answer.text)),
         follow_ups=answer.follow_ups,
     )
 
@@ -1279,7 +1290,8 @@ async def suggest_title(
     config = _config()
     run_id = _derive_run_id(notebook_id, body.run_id)
     try:
-        excerpt = corpus_of(notebook).blob(max_chars=None)[:8000]
+        # EVERY source, not the first 8000 characters of the blob — see `Corpus.excerpt`.
+        excerpt = corpus_of(notebook).excerpt(8000)
         # The title follows the notebook's resolved language too. Consequence to accept: the UI
         # calls this from an action that is about to run a model anyway (invariant 37), so if no
         # question has been asked yet, resolution runs with two of its three signals and serialises
@@ -1419,16 +1431,16 @@ async def guide(
 
     if kind in ("summary", "insight"):
         return {
-            "text": parsed.text,
-            "citations": _citation_responses(parsed.citations, corpus, parsed.text),
+            "text": _prose(parsed.text),
+            "citations": _citation_responses(parsed.citations, corpus, _prose(parsed.text)),
         }
     if kind == "faq":
         return {
             "items": [
                 {
                     "question": item.question,
-                    "answer": item.answer,
-                    "citations": _citation_responses(item.citations, corpus, item.answer),
+                    "answer": _prose(item.answer),
+                    "citations": _citation_responses(item.citations, corpus, _prose(item.answer)),
                 }
                 for item in parsed.items
             ]
@@ -1438,8 +1450,8 @@ async def guide(
         "events": [
             {
                 "when": event.when,
-                "description": event.description,
-                "citations": _citation_responses(event.citations, corpus, event.description),
+                "description": _prose(event.description),
+                "citations": _citation_responses(event.citations, corpus, _prose(event.description)),
             }
             for event in parsed.events
         ]
@@ -1531,7 +1543,9 @@ async def audio(
 
     utterances = [
         AudioUtteranceResponse(
-            speaker=u.speaker, text=u.text, citations=_citation_responses(u.citations, corpus, u.text)
+            speaker=u.speaker,
+            text=_prose(u.text),
+            citations=_citation_responses(u.citations, corpus, _prose(u.text)),
         )
         for u in script.utterances
     ]
