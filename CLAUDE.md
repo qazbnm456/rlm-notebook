@@ -2217,4 +2217,196 @@ them exist because an earlier design discussion mentioned them.
     the same residual-risk hedge as invariants 4 and 11 applies to whether the model complies, and
     the net is what makes non-compliance cost nothing.
 
+    **Removing a marker leaves a HOLE, and closing it is done at the hole — never globally.** A
+    marker between a word and its punctuation leaves `claim . Next`, cosmetic on screen and audible
+    in synthesis where the voice pauses at the gap. The obvious fix is a space-before-punctuation
+    rule over the whole string, and it is wrong twice: it normalises text that never had a marker
+    (French typographic spacing, `vrai !`), and because `strip_markers` early-returns on a
+    marker-free string, the prose and the `answer_span` would then get DIFFERENT normalisation and
+    the span would stop matching — invariant 49's failure mode one layer down, the stroke silently
+    gone. `_close_gap` is a replacement function on the marker match itself, so it can only ever
+    edit the whitespace the marker sat between.
+
+63. **The podcast has a LENGTH, chosen at generation time, and the tiers are numbers rather than
+    adjectives.** `short` / `default` / `long` (about 3-5 / 8-12 / 18-25 minutes, 12-18 / 30-45 /
+    60-90 turns), the same three NotebookLM offers. Numbers because the previous instruction —
+    "aim for a natural episode length given how much the sources actually contain" — demonstrably
+    did nothing: four measured episodes all landed near three minutes, and the EIGHT-source notebook
+    produced the SHORTEST of them. "Let the sources decide" was not happening.
+
+    **Asked at generation time, not on the settings page.** That is the moment a reader has an
+    opinion about how long they want to listen, and changing your mind afterwards costs a full model
+    run plus synthesis. It also keeps invariant 41's settings surface as narrow as it was.
+
+    **Both entry points carry it** (`POST /audio`'s `length`, `rlm-notebook audio --length`).
+    Invariant 20 does not require this — it is about the two entry points SHARING code so a fix
+    cannot land on only one — but a browser-only capability is the same divergence one level up, and
+    the CLI is the path with no server at all. The value
+    reaches the model as a SIGNATURE FIELD, for the same reason `output_language` does: a class-level
+    `instructions` string is composed at import time and cannot know a per-request value.
+
+    **`AudioOptions` SUBCLASSES `RunOptions` rather than re-declaring `run_id`.** A copy would
+    silently skip `/audio` the next time a field is added to the shared body — `run_id` itself was
+    added that way (invariant 29), so the shape has happened here before. It keeps `extra="forbid"`
+    for the reason `SettingsRequest` does (invariant 41): pydantic DROPS unknown keys, so
+    `{"len": "long"}` would otherwise return a `default` episode with nothing to indicate the knob
+    was ignored.
+
+    **The CHOICE is remembered in the browser (`localStorage`, `rlmnb-podcast-length`), and
+    deliberately not on the server.** It is a per-reader habit, not a notebook property — one person
+    who always wants `long` should not impose it on a shared notebook, and a per-notebook field
+    would ask which notebook the preference belongs to when the answer is "none of them". This is
+    the WHERE-IT-LIVES half of the split invariant 48 draws for the interface language — a
+    per-browser preference rather than server state. Only that half: the interface language is never
+    sent at all, whereas the length is sent on every generate and reaches the prompt as a signature
+    field, because it changes what the model writes. What is browser-local is the REMEMBERING. The
+    default when nothing is stored is `default`, so a first visit is unchanged.
+
+    **Honest calibration gap, left in deliberately**: the turn counts are met and the minute figures
+    are not. `long` produced 80 turns — inside its 60-90 target — but 4,495 characters, which at the
+    measured speaking rate is about 14-15 minutes against a stated 18-25. The turn count is what the
+    model actually follows; the minutes were computed from an assumed ~90 characters per turn and
+    the real figure is ~56. One sample per tier is not enough to recalibrate on, so both numbers
+    stand until there are more.
+
+64. **A `long` script is built across REPL turns, and that is what the sandbox is FOR.** Written as
+    one code block it was TRUNCATED by the per-call generation cap mid-structure; the salvaged
+    fragment parsed as `{'utterances': []}`, the run failed, and dspy said so in as many words
+    (`LM response was truncated due to exceeding max_tokens=16384`). Accumulated in a list across
+    turns instead — printing only its LENGTH, never its contents — the same corpus and the same cap
+    produced 80 utterances with 44 citations. **Nothing about the budget changed.**
+
+    This is the second time a truncation could have been answered by raising `max_tokens` and the
+    first time it should not have been: invariant 59's raise was correct because the PLANNER's
+    reasoning did not fit, and this one is an OUTPUT that should never have been one reply. The
+    generalisation, recorded in the `corpus-navigation` skill: if a finished object will not
+    comfortably fit in one reply, it must not be written in one reply.
+
+65. **Every RLM task here carries `rlm_harness.skills` with `discovery="inject"`, and the
+    prompt/skill split is a rule rather than a preference.** This project had NO skills at all until
+    a user asked; the mechanism is `rlm-harness`'s own, distinct from the Claude Code skills that a
+    coding agent reads and this task never sees. Four siblings (`cabt-forge`, `bugcademy`,
+    `cve-reverser`, `nuclei-forge`) already shipped the same `inject` shape.
+
+    **The split**: a skill is read only if the model chooses to, so anything that CORRUPTS the output
+    when skipped stays in the prompt — grounding, citations, the marker rule, language, the output
+    shape, the length target. Craft and measured technique are what a skill is for: work done without
+    them is duller or more expensive, not wrong.
+
+    **Almost nothing was actually MOVED, and saying otherwise overstated the change.** The brief was
+    to relocate suitable prompt content into skills; applying the split honestly found there was
+    barely any to relocate. The Guide prompts are entirely must-apply. The podcast prompt lost one
+    paragraph, and to the length tiers (invariant 63) rather than to a skill. Both skills are NEW
+    material — the interview techniques and this project's own measured failures — written because
+    the second half of the brief (record what has been learned) had far more in it than the first.
+    A no-disfluencies rule and a good-close rule appear in BOTH the prompt and `podcast-craft`, and
+    that duplication is deliberate: they are must-apply, so they cannot leave the prompt, and the
+    skill is where the REASON for them lives. Inventing craft to have something to move would have
+    been worse than an empty skill directory.
+
+    **One line of that split is NOT clean, and it is stated rather than smoothed over.** The
+    build-across-turns mechanic (invariant 64) is a must-apply rule by its own account — skipping it
+    LOSES the run — and it is in `GeneratePodcastScript`'s prompt only. For the other five tasks it
+    exists solely in the optional `corpus-navigation` skill, where a model that never calls
+    `read_skill` never sees it. That is tolerable today because the podcast is the one task whose
+    output is reliably large enough to hit the cap, and it is exactly the kind of "tolerable today"
+    that becomes a lost run when a Guide artifact grows. Promoting it into the shared prompt is a
+    real follow-up, not a note.
+
+    **Provenance is part of the craft, and this project got it wrong on the first try.**
+    `podcast-craft`'s techniques are quoted from the NotebookLM team's own interview; its
+    no-disfluencies rule was originally justified with a sentence attributed to that team which
+    turned out to be the HOSTS' editorial show note, contradicted by the guest when asked directly.
+    It arrived from a fetched summary nobody opened the transcript to check — the same failure mode
+    invariant 43 records for three TTS recommendations. The rule survives on this project's OWN
+    measurement instead (a Chinese sentence with six characters of written filler synthesized to
+    4.08s against the plain sentence's 2.90s, i.e. the filler was pronounced rather than realised as
+    prosody). A skill is a durable claim about how to work; an unchecked quote in one is worse than
+    no skill, because a later reader has no reason to doubt it.
+
+    **`instructions.apply_skills` is the ONE copy of the wiring**, next to `CITATION_RULES` and for
+    the identical reason: six tasks each calling `load_skills_as_tools` would each own a catalog
+    header, and the headers would drift. Pinned by a test that forbids `load_skills_as_tools` from
+    appearing in `audio.py`/`guide.py`/`task.py` at all.
+
+    **The catalog is CLOSED (`</available_skills>`) and the MANIFEST decides whether anything is
+    wired at all.** `render_skills_manifest` only prepends the header, so without an explicit close
+    every rule in the task's own prompt — citations, language, validate-before-submit — reads as
+    though it were inside the skills element. And gating on the manifest rather than on the
+    directory existing is what stops an empty (or skill-less) directory from adding `read_skill`,
+    whose own description tells the model to pick "the ones listed in the skills manifest in your
+    instructions" — a tool pointing at a list that is not there. **That sentence was written before
+    it was true**: the tool was appended unconditionally and only the INSTRUCTIONS were gated, so
+    this documented a fix that had not been applied. Found by an independent fact-check of the
+    documentation against the code — which is the reason to run one, and the reason a claim about
+    behaviour is worth no more than the test under it. Pinned now, in both directions.
+
+    **`skills_dir` is a constructor argument defaulting ON**, matching the siblings: a test points it
+    at a fixture and `None` turns it off, which a caller needs because a stale skill is worse than an
+    absent one — and defaulting ON because a planner that has to be told to consult its own knowledge
+    base will not. `read_skill` resolves a NAME against the skills discovered at construction, so it
+    cannot read an arbitrary path and never touches the network; invariants 1 and 14 are about a
+    model reaching the outside world at generation time, which this does not do.
+
+    ONE directory for every task, because `discover_skills` takes a single directory and does not
+    recurse, and a catalog line per skill is cheap. Split it when a chat turn is measurably paying to
+    be told about podcast craft — not before. The files ship inside the wheel for the same packaging
+    reason the web assets do (invariant 29), verified by building one and reading its manifest.
+
+66. **The pre-SUBMIT validator is `instructions.make_grounded_validator` for EVERY task — schema plus
+    "no `[[SRC:...]]` marker in the model's own prose".** The marker check was written for
+    `GeneratePodcastScript`, whose failure was loud: the voices read the markers aloud. It was a
+    guard on the SYMPTOM — `GenerateSummary` had produced exactly the same defect silently, four
+    markers printed in an overview a user reported as a broken render. Six tasks each holding their
+    own validator is how one of them ended up with a check the other five lacked.
+
+    **Not a schema-level reject, deliberately.** Nothing rewrites a stored artifact (invariant 62
+    strips on the way OUT), so a notebook written before this validator existed holds whatever the
+    model produced — the measured cases were a podcast with twenty markers across nineteen of its
+    forty-seven utterances and an overview with four — and a field validator would make those files
+    fail to LOAD, untidy data turned into a corrupt-notebook 409. The check belongs where the model
+    can still act on it, in the tool the instructions already tell it to call before SUBMIT.
+    (Neither measured artifact is still on disk — notebooks were cleared at the owner's request and
+    the survivor's podcast was regenerated. The reasoning is about what CAN be persisted, not about
+    what happens to be there: `notebooks/` can neither confirm nor refute it, so do not try to
+    "verify" this by grepping it.)
+
+    **`Citation.quote` is exempt**, and that is not laziness: a quote is copied verbatim out of a
+    source, so a source containing the literal text `[[SRC:` would make an honest quote look like a
+    violation. Every other string in every output model is the model's own prose, where a marker is
+    always wrong.
+
+    **`_marker_offenders` reads `model_fields` off `type(value)`, walks dicts and sets as well as
+    lists, and its rejection message BRANCHES on where the marker is.** Each is a fail-open the
+    review found rather than a refinement: reading `model_fields` off the INSTANCE is deprecated in
+    pydantic 2.11 and removed in 3.0, so the walk would one day return "no offenders" for every
+    input while still passing every test; a dict field skipped silently is the same hole the moment
+    someone adds one; and telling a model to "put the coordinate in the accompanying `citations`
+    entry" when the offender IS a citation field is advice it cannot follow, which costs the whole
+    step budget looping on it rather than one retry. A guard that fails open is worse than no guard,
+    because the prompt still promises it.
+
+    Three layers, none of them sufficient alone and all of them cheap: this validator (before
+    SUBMIT), `citations.strip_markers` at the display boundary (invariant 62), and
+    `tts.spoken_script` before synthesis. The last two are nets — a skipped validator must not put a
+    coordinate on screen or into a voice.
+
+    **A net must not be able to destroy what it was protecting, and `tts.spoken_script` could.** A
+    line that is NOTHING but a coordinate strips to `""` or a lone piece of punctuation, and
+    `EdgeTTSProvider` raises `NoAudioReceived` for punctuation-only text — verified live, recorded in
+    `_synthesize_all`'s own docstring. That `TTSError` is a 502 and discards the whole paid-for RLM
+    run — so a net added to stop a
+    marker being READ ALOUD would have turned a survivable defect into a lost episode: in the
+    incident above, all nineteen affected utterances were merely garbled, and the strip would have
+    killed the episode outright. It falls back to the ORIGINAL text when nothing alphanumeric
+    survives. A garbled line ships; a 502 does not — the same "never lose what already succeeded"
+    discipline as invariants 19, 37 and 43.
+
+    Stated precisely, because a first draft of this paragraph claimed the same failure for
+    `ChatterboxProvider` and a fact-check found it does not hold: `expected_seconds` floors at one
+    second, so a short line clears the runaway ceiling on its first take and burns no re-rolls, and
+    `_generate_one` returns the shortest take rather than raising. Its behaviour on a stripped-empty
+    line is simply UNMEASURED. The fallback is justified by the default provider, where the failure
+    is measured — not by a second one where it was assumed.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

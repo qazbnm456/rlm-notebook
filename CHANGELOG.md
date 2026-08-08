@@ -1875,3 +1875,84 @@ questions with verifiable citations, and get a distilled research artifact out.
   Also measured, in answer to a question rather than a bug report: the two podcast hosts speak at
   different speeds (5.43 vs 4.84 characters per second, consistent across every line) because they
   are two different edge-tts voices and this project sets no rate at all.
+
+- **The podcast got a length, and then the length broke it in a way worth recording.** Three tiers
+  (`short`/`default`/`long`, ~3-5/8-12/18-25 minutes), chosen at generation time and carried by both
+  entry points. The tiers are numbers because the previous instruction — "a natural episode length
+  given how much the sources contain" — measurably did nothing: four episodes all landed near three
+  minutes and the eight-source notebook produced the shortest.
+
+  `long` then failed outright: written as one code block it exceeded the per-call generation cap and
+  the salvaged fragment parsed as an empty object. dspy named the cause in a warning. The fix was
+  NOT to raise the cap — it was to build the script across REPL turns, which is what the sandbox is
+  for. Same corpus, same budget: 80 utterances and 44 citations.
+
+- **A user asked where the markers were coming from, and the answer was worse than a render bug.**
+  One episode had 20 markers written across 19 of its 47 utterances and ZERO citations: the model had
+  abandoned the `citations` field entirely and was citing by writing coordinates into the prose. So
+  the voices read them aloud, the transcript had no references, and the display-layer strip added
+  earlier made the evidence vanish rather than recovering it. Three layers now: a pre-SUBMIT
+  validator that rejects a marker in prose, the display strip, and a strip before synthesis.
+
+  That validator started life on the podcast alone, because that is where the failure made a noise —
+  `GenerateSummary` had produced the same defect silently, four markers in an overview. It is shared
+  by all six tasks now, from one factory.
+
+- **This project had no `rlm_harness.skills` at all, which a user had to point out.** It is
+  `rlm-harness`'s own progressive-disclosure mechanism for downstream RLMs — distinct from the
+  Claude Code skills a coding agent reads and this task never sees — and four sibling projects
+  already shipped the same `discovery="inject"` shape.
+
+  Two skills so far: `podcast-craft` (tension, pacing, the reveal — from the NotebookLM team's own
+  account of how the format is made, plus the one technique this project cannot copy and why) and
+  `corpus-navigation` (every measured way a run has been lost here: the one-code-block truncation,
+  printing what you are accumulating, a truncated span costing a whole turn, the nine-of-ten step
+  budget, and the marker incident). Nothing was moved out of the four Guide prompts, which are
+  entirely must-apply — inventing craft to have something to move would have been worse than an
+  empty directory.
+
+  `podcast-craft` also records a mistake made while writing it: its no-disfluencies rule was
+  justified with a quote attributed to the NotebookLM team that was actually their hosts' show note,
+  and the guest contradicts it when asked directly. It came from a fetched summary nobody opened the
+  transcript to check. The rule now stands on this project's own measurement — a Chinese sentence
+  with six characters of written filler synthesized to 4.08s against the plain sentence's 2.90s.
+
+- **The independent review of this batch found the marker net could destroy the episode it was
+  protecting.** A line that is nothing but a coordinate strips to empty or to a lone piece of
+  punctuation, and edge-tts raises on punctuation-only text — a 502 that discards the whole
+  paid-for run. In the incident that motivated the strip, those nineteen utterances were merely
+  garbled; with the strip they would have been a lost episode. It falls back to the original text
+  when nothing speakable survives.
+
+  The same review found the strip's punctuation tidy running over the whole string rather than the
+  hole the marker left, which normalises text that never had a marker and — because the strip
+  early-returns on a marker-free string — makes the prose and the `answer_span` disagree, so every
+  highlighter stroke vanishes. And in the validator itself: `model_fields` read off the instance
+  (a silent fail-open under pydantic 3), dict fields skipped, a rejection message giving impossible
+  advice when the offender is a citation field, and the skills catalog opened without being closed.
+
+  Two behaviours that had shipped undocumented are written down now: the display strip's
+  whitespace-before-punctuation rule, and the podcast length being remembered per browser in
+  `localStorage` rather than on the notebook — a per-reader habit, the same split invariant 48 draws
+  for the interface language.
+
+  The CLI half of the length feature was not pinned at all: the review changed `target_length` to a
+  hardcoded `"default"` and renamed the tier choices, and the whole suite stayed green both times,
+  because the assertions read the flag's own help text. They read the parser and drive `_cmd_audio`
+  now.
+
+- **A fact-check of the documentation against the code found a fix that had only been written
+  down.** `apply_skills` gated the skills CATALOG on a manifest existing but appended the
+  `read_skill` TOOL whenever the directory did — so an empty skills directory handed the model a
+  tool whose description points at a list that is not in its instructions, while CLAUDE.md said
+  that was prevented. The code does it now and a test pins both directions.
+
+  Five other doc claims did not survive the same pass and are corrected rather than quietly
+  dropped: the podcast length was described as browser-local "never sent to the server" when it is
+  sent on every generate and reaches the prompt (only the REMEMBERING is browser-local); the
+  marker-strip fallback was justified partly by a chatterbox failure mode that does not exist
+  (its runaway ceiling floors at one second, so a short line burns no re-rolls and never raises);
+  the marker count disagreed with four other files; invariant 20 was cited for a feature-parity rule
+  it does not state; and the skills work was framed as content MOVED out of prompts when almost
+  nothing was — both skills are new material, and the two rules that appear in a prompt and a skill
+  are there deliberately, the prompt stating a must-apply rule and the skill carrying its reason.
