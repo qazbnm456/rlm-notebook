@@ -1835,3 +1835,21 @@ questions with verifiable citations, and get a distilled research artifact out.
   and two `forEach` parameters named `body` collided with the podcast panel's own local, which made
   the hidden-toggle tripwire flag `.podcast-body` — fixed by renaming the locals, which is what that
   test's own docstring prescribes for its known false positive rather than loosening the check.
+
+- **A listening comparison retired an assumption, and the assumption was load-bearing.** The record
+  said "a TTS voice cannot pronounce another script" — established for kokoro, and merely ASSUMED
+  for `edge-tts`, the provider that actually ships by default. One hostile line synthesized through
+  both settles it: Chinese prose carrying `NASA`, `Voyager 1`, `CVE-2026-1234`, `RAPTOR`, `harness`
+  and a whole English clause took **8.2s / 81KB on edge-tts** and **273.4s / 749KB on chatterbox**,
+  and edge-tts handled the mixed script — some pronunciations odd, none mangled.
+
+  So `GeneratePodcastScript`'s rule to transliterate foreign proper nouns (acronyms included, no
+  original in parentheses) was solving a problem the default provider does not have, while costing
+  something real: `Utterance.text` is BOTH the transcript and what the voice reads, and a rewritten
+  name is exactly the word a listener cannot look up when the audio is unclear. The rule is gone.
+  Names stay as their source wrote them; numbers, dates and units still get spoken form, because
+  those read aloud badly everywhere and nobody looks them up.
+
+  Also recorded: chatterbox's position is the LOCAL/privacy option, not "the only one that handles
+  mixed script" — 33x the wall clock and 9x the bytes is a trade a reader whose sources cannot leave
+  the machine should be able to make, and one nobody should be made to take by default.

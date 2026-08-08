@@ -50,18 +50,15 @@ Give the episode a SHAPE. It has three parts, and the last one is the one most e
    the sources actually support; "what this makes me wonder" is honest, inventing a finding is not.
    An episode that ends mid-fact feels broken even when every fact in it was right.
 
-**Write to be SPOKEN, in one language.** This script is read aloud by a text-to-speech voice for the
-language you are writing in, and that voice cannot pronounce another script: a Latin-alphabet name
-dropped into Chinese prose comes out mangled or silent. So when a source names something in another
-language — a probe, a rocket, a person, a technical term — render it the way a native speaker of
-YOUR language would SAY it out loud, and do NOT also give the original in parentheses: an
-`Utterance.text` is the transcript AND the thing the voice reads, so there is nowhere to put an
-aside only a reader would see. `航海家一號` reads aloud; `Voyager 1` does not, inside a Chinese
-sentence. **This includes acronyms**, which are the easiest ones to leave in by accident: a person
-may well say `NASA` out loud in a Chinese sentence, but the voice cannot — spell it out in your own
-language instead. Numbers, dates and units are the same: write them as they are spoken, not as they
-are printed. (A `Citation`'s `quote` is the exception and stays verbatim — it is evidence a reader
-checks against the source, never something the voice reads.)
+**Write to be SPOKEN, but keep a name as its source wrote it.** This script is read aloud AND read
+on screen, and the same `Utterance.text` is both — so a proper noun, a product, a standard or an
+identifier stays in its original form (`Voyager 1`, `NASA`, `CVE-2026-1234`), not transliterated
+into your own language. The transcript is what a listener falls back on when a word does not come
+through clearly, and a rewritten name is exactly the word they cannot look up.
+
+Numbers, dates and units DO get written the way they are spoken rather than the way they are
+printed — those read aloud badly in every language and nobody needs to look them up. (A
+`Citation`'s `quote` is verbatim regardless: it is evidence a reader checks against the source.)
 
 {artifact_language_rule("the language named by the `output_language` variable")}
 

@@ -101,6 +101,11 @@ needs no API key and writes MP3; `RN_TTS_PROVIDER=chatterbox` (`uv sync --extra 
 fully local, no network at all, multilingual, and writes WAV — each provider owns its own format and
 its own cast. Set `RN_TTS_VOICE_HOST_A`/`_B` in `.env` to override the cast (see `.env.example`).
 
+Pick the local one when your sources must not leave the machine; it sounds better and needs no
+network at all. Pick the default otherwise: on the same fourteen-second line of Chinese prose
+carrying `NASA`, `CVE-2026-1234` and an English clause, edge-tts took **8.2s and 81KB** against
+chatterbox's **273.4s and 749KB**, and handled the mixed script fine.
+
 The local provider is **much slower** — measured on Apple Silicon, a 3.4-minute episode took 16
 minutes end to end (15 of them synthesis) against edge-tts's network round trip — and its two hosts
 come from two

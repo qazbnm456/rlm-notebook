@@ -1403,6 +1403,17 @@ them exist because an earlier design discussion mentioned them.
     - **VibeVoice** (MIT, purpose-built for multi-speaker long-form) is English and Chinese only by
       its own model card, and embeds an AUDIBLE AI disclaimer in every output.
 
+    **Its POSITION is the local/privacy option, not "the only one that handles mixed script".**
+    That distinction matters because the language matrix is what selected it over kokoro and
+    MeloTTS, and a later reader could easily carry that reasoning one step too far into "so it
+    should be the default". A same-input comparison settles it: one hostile line (Chinese prose with
+    `NASA`, `Voyager 1`, `CVE-2026-1234`, `RAPTOR`, `harness`, plus an English clause) took
+    **8.2s / 81KB on edge-tts and 273.4s / 749KB on chatterbox** — 33x the wall clock and 9x the
+    bytes, for a 14-second sample. edge-tts handled the mixed script (see invariant 45, where that
+    retires an assumption). chatterbox sounds better and never touches the network, which is exactly
+    the trade a reader who cannot send their sources to a cloud service wants to make — and exactly
+    the trade nobody should be made to take by default.
+
     **Three costs, measured on Apple Silicon and none of them hidden.** (1) RTF ~4.5 against Kokoro's
     ~0.2. Measured end to end through the real product, not extrapolated: a 3.4-minute episode took
     **16.1 minutes** of wall clock — 67s of script generation and 15.0 minutes of synthesis — where
@@ -1570,12 +1581,25 @@ them exist because an earlier design discussion mentioned them.
     together and says what it adds up to — with the reflection grounded in the sources ("what this
     makes me wonder" is honest, inventing a finding is not).
 
-    **Foreign proper nouns are rendered the way a native speaker would SAY them, ACRONYMS INCLUDED,
-    and no original-in-parentheses.** A TTS voice for one language genuinely cannot pronounce
-    another script, and the mechanism was confirmed rather than assumed: kokoro's Chinese G2P
+    **Foreign proper nouns stay as the source wrote them — this REVERSES the rule this invariant
+    used to state, and the reversal is the point.** The original rule said to transliterate them, because kokoro's Chinese G2P
     (`misaki` zh) passes Latin text through UNCONVERTED — `KPipeline(lang_code="z")` returns the
-    literal string `NASA` and `Voyager i→` as its own "phonemes", so raw letters reach the acoustic
-    model as unknown tokens and come out as the mangled noise a user heard. Two consequences the
+    literal string `NASA` and `Voyager i→` as its own "phonemes", so raw letters reached the
+    acoustic model as unknown tokens and came out as the mangled noise a user heard. **kokoro is
+    gone, and the assumption that this generalised was measured FALSE on the provider that actually
+    ships** (invariant 43's comparison): edge-tts renders `NASA`, `CVE-2026-1234` and a whole
+    English clause inside Chinese prose acceptably — some pronunciations odd, none mangled.
+
+    So the rule was solving a problem the default provider does not have, while costing something
+    real. `Utterance.text` is BOTH the transcript and the string the voice reads, which the old rule
+    treated as a reason to optimise for the voice; the user's call is the opposite, and better: the
+    transcript is what a listener falls back on when a word does not come through, and a
+    transliterated name is precisely the word they then cannot look up. Numbers, dates and units
+    still get spoken form — they read aloud badly everywhere and nobody looks them up.
+
+    **The accepted cost, stated rather than glossed:** a provider with kokoro's weakness would now
+    mangle those names instead of avoiding them. That is a provider problem to solve in the
+    provider (or by scoping a rule to it), not by degrading every transcript in advance. Two consequences the
     first draft of this rule got wrong, both found by checking rather than reasoning: (a) it invited
     the model to give the original once in parentheses, which is the exact failure the rule exists
     to prevent — an `Utterance.text` IS both the transcript and the string the voice reads, so there
@@ -1588,17 +1612,25 @@ them exist because an earlier design discussion mentioned them.
     **Same residual-risk hedge as invariants 4 and 11, and for the same reason**: this is a
     PROMPT-COMPLIANCE claim, and the offline suite drives a scripted LM whose turns are fixed dicts,
     so it can demonstrate none of it. The evidence below is two live runs against one small corpus
-    on one provider. The MECHANISM evidence is kokoro-specific too — `edge-tts`, the DEFAULT
-    provider, was not probed the same way, so "the voice cannot pronounce another script" is
-    established for the local provider and assumed for the cloud one. Evidence, not proof; do not
-    rewrite either into a guarantee. Verified by
-    regenerating a real Chinese episode from English sources against the tightened rule: `NASA`
-    became `美國國家航空暨太空總署`, and `航海家一號`/`卡爾·薩根`/`鈽二三八` all render spoken,
-    while every one of the episode's citations kept its verbatim English `quote` and verified.
-    **Stated residual, not fixed**: one Latin letter survived — the `E` in `泰坦三號E半人馬座運載
-    火箭` — because that IS how the designation is written in Chinese. A prompt rule cannot reach
-    the last letter of a model designation; a provider whose Chinese G2P transliterates Latin
-    (rather than passing it through) is the fix for that class, not a stricter sentence here.
+    on one provider. **The MECHANISM claim has since been MEASURED on the default provider, and it does not hold
+    there.** It was kokoro-specific and merely assumed for `edge-tts`; a listening comparison
+    synthesized one deliberately hostile line — Chinese prose carrying `NASA`, `Voyager 1`,
+    `CVE-2026-1234`, `RAPTOR`, `harness` and a whole English clause — through both providers. The
+    user's verdict on edge-tts: quality acceptable, some pronunciations odd, **and it does handle
+    mixed Chinese/English**. So "the voice cannot pronounce another script" is established for
+    kokoro (which is gone) and FALSE for the provider that actually ships by default.
+
+    **The consequence is a live question, deliberately not answered by this edit**: the rewrite rule
+    above exists because kokoro could not say `NASA`. On edge-tts it is solving a problem that is
+    not there, and it costs something real — a transcript reader loses the original term, and the
+    rule explicitly forbids putting it back in parentheses. Whether to scope the rule to providers
+    that need it is a product decision with a trade-off, not a correction; do not quietly drop it,
+    and do not restate its justification as if it still applied everywhere. Evidence, not proof; do not
+    rewrite either into a guarantee. The superseded rule HAD been verified working — a
+    regenerated Chinese episode turned `NASA` into `美國國家航空暨太空總署` and rendered
+    `航海家一號`/`卡爾·薩根`/`鈽二三八` spoken, with every citation keeping its verbatim English
+    `quote`. It worked; it was aimed at the wrong provider. Recorded because "the rule did what it
+    said" and "the rule should exist" are different questions, and only the second one changed.
 
 46. **Every run-taking handler ANNOUNCES its run id (`api._announced`) before any pre-work, not
     just before the spawn.** A user generated an overview on a brand-new notebook and the ticker
