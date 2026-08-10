@@ -2575,12 +2575,32 @@ them exist because an earlier design discussion mentioned them.
     "regenerate to try again" note unable to name a missing action, which is the strongest form of
     the rule its own tripwire was written for.
 
-    **What is NOT a bug, asked directly by a user: asking a question while an overview regenerates.**
-    The two are separate runs with distinct ids; `mutate_notebook` re-reads under a lock and applies
-    each delta (invariant 34), so the turn and the overview both land; `rebuildHistory` re-appends
-    the SAME `overviewEl` node, so a finishing question cannot wipe a running overview; and
-    invariant 60 already makes the reverse safe. Freezing the composer for a multi-minute run would
-    cost the reader more than it protects — and the two writes were made safe precisely so it does
-    not have to.
+    **`/overview` runs TWO tasks and its ticker follows ONE, so the shared status line said
+    "Finished" while half the action was still running.** Forwarding the summary run's terminal
+    event made it the whole action's headline; the panel then sat on "Finished" beside a live Stop
+    button until the FAQ half returned. Measured on a real run: a 63KB summary trace next to a
+    226-byte FAQ trace whose worker was still alive, with the POST not yet returned. That is
+    invariant 60's rule — a status line may not claim something the page is not doing — broken by a
+    second RUN rather than by a phase, which is why the fix reuses `setPhase`, the seam invariant 60
+    added for a stage the trace cannot see. It stays STOPPABLE: `runIds` carries both ids and the
+    FAQ run is genuinely cancellable.
+
+    A user found it by asking why "完成" appeared next to a Stop button. The pairing is the tell —
+    Stop during generation is correct, so seeing both means one of the two is lying, and which one
+    was answerable from the process table.
+
+    **The chat composer IS frozen while an overview generates — asked for by the user, twice, and
+    NOT because of a race.** The two runs are independent; `mutate_notebook` re-reads under a
+    per-notebook lock so both writes land (invariant 34); `rebuildHistory` re-appends the SAME
+    `overviewEl` node, so a finishing question cannot wipe a running overview; and invariant 60
+    makes the reverse safe. Nothing is lost either way — the reason is that a question asked into a
+    thread whose overview is being rewritten READS as two things fighting whether or not they are,
+    and the person using it gets to decide that. Recorded as a product decision rather than a fix,
+    so a later reader does not "simplify" it away as redundant with the locking.
+
+    **The COMPOSER only, never the thread.** Clearing the conversation was offered as the
+    alternative and is the one thing not to do: it would destroy history to signal a transient
+    state. Every exit thaws it — cancel, success, error, and a notebook switch, which strands the
+    run rather than ending it and would otherwise leave the NEW notebook's composer frozen.
 
 See `CHANGELOG.md` for what shipped in the current slice and why.

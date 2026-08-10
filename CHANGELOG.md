@@ -2070,3 +2070,21 @@ questions with verifiable citations, and get a distilled research artifact out.
   quiet when nothing is wrong, because regenerating costs two real model runs and must not be the
   loudest control on a panel that already holds what it makes; louder and explicit when stale or
   incomplete. The same three-state shape the podcast's own button has had since it was persisted.
+
+- **"完成" appeared next to a live Stop button, and the pairing was the tell.** `/overview` runs two
+  tasks and its ticker follows only the summary; forwarding that run's terminal event made
+  "Finished" the whole action's headline while the FAQ half was still going and the POST had not
+  returned. Measured on the user's own run: a 63KB summary trace beside a 226-byte FAQ trace whose
+  worker was still alive. Invariant 60's rule broken by a second RUN rather than by a phase — so the
+  fix reuses the same `setPhase` seam that invariant added, naming the second half honestly and
+  keeping Stop available, because that half really is cancellable.
+
+- **The chat composer is frozen while an overview generates.** Asked for by the user twice, and not
+  because of a race: the runs are independent, both writes land under the per-notebook lock, and
+  neither repaint can delete the other's run. Nothing was ever lost. The reason is that a question
+  asked into a thread whose overview is being rewritten reads as two things fighting whether or not
+  they are — a product decision, recorded as one so it does not get simplified away later as
+  redundant with the locking.
+
+  The composer only. Clearing the conversation was the offered alternative and is the one thing not
+  to do: it would destroy history to signal a transient state.

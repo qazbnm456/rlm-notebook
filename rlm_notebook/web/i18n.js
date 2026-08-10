@@ -119,6 +119,7 @@ const STRINGS = {
     "references.uses": "引用 {n} 次",
     // --- trajectory drawer
     "chat.refreshOverview": "↻ 重新產生",
+    "chat.overviewSecondHalf": "摘要完成 · 正在產生建議問題…",
     "traj.title": "執行軌跡",
     "traj.search": "搜尋回合…",
     "traj.stat": "{turns} 個回合 · {tools} 次工具呼叫",

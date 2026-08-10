@@ -1236,3 +1236,56 @@ def test_a_superseded_overview_note_never_lands_in_another_notebooks_panel():
     assert len(guarded) == len(calls), (
         f"{len(calls) - len(guarded)} supersede note(s) can still land in another notebook's panel"
     )
+
+
+def test_the_overviews_ticker_never_calls_the_whole_action_finished():
+    """`/overview` runs TWO tasks and the ticker follows only the summary. Forwarding its terminal
+    event made "Finished" the whole action's headline while the FAQ half was still running and the
+    POST had not returned — measured live: a 63KB summary trace beside a 226-byte FAQ trace whose
+    worker was still alive, with no response yet. The panel sat on "Finished" next to a live Stop.
+
+    Invariant 60's rule ("a status line may not claim something the page is not doing") broken by
+    the second RUN rather than by a phase — which is why the fix reuses `setPhase`, the seam that
+    invariant added for a stage the trace cannot see."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    gen = re.search(r"async function generateOverview\(\)\s*\{(.*?)\n\}\n", js, re.DOTALL)
+    assert gen, "generateOverview is gone"
+    body = gen.group(1)
+    ticker = re.search(r"void openTicker\((.*?)\n  \}\);", body, re.DOTALL)
+    assert ticker, "the overview ticker is gone"
+    hook = ticker.group(1)
+    assert "TERMINAL_KINDS.has(event.kind)" in hook, (
+        "a terminal event from the summary run reaches the shared status line again, so the panel "
+        "says Finished while the FAQ half is still running"
+    )
+    assert "status.setPhase(" in hook, "the second half is not named"
+    # It must RETURN rather than fall through, or the phase is immediately overwritten by the
+    # terminal event's own label.
+    assert re.search(r"status\.setPhase\([^;]*\);\s*\n\s*return;", hook, re.DOTALL), hook
+    # Stop stays available: `runIds` carries both ids and the FAQ run is genuinely cancellable.
+    assert "stoppable: false" not in hook, "Stop was disabled for a stage that IS interruptible"
+
+
+def test_the_chat_composer_is_frozen_while_an_overview_generates():
+    """Asked for twice by the user. NOT needed for correctness — the two runs are independent, both
+    writes land under the per-notebook lock (invariant 34), and neither repaint can delete the
+    other's run (invariants 60, 71) — but a question asked into a thread whose overview is being
+    rewritten reads as two things fighting, whether or not they are.
+
+    The COMPOSER only. Clearing the conversation was offered as an alternative and is the one thing
+    not to do: it would destroy history to signal a transient state."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    gen = re.search(r"async function generateOverview\(\)\s*\{(.*?)\n\}\n", js, re.DOTALL)
+    assert gen, "generateOverview is gone"
+    body = gen.group(1)
+    assert 'store.emit("chat:pending", { pending: true })' in body, "the composer is never frozen"
+    # Every exit must thaw it, or one failed generation locks the composer for the session.
+    releases = body.count('store.emit("chat:pending", { pending: false })')
+    assert releases >= 3, f"only {releases} of the exits thaw the composer (need cancel/ok/error)"
+    # ...including a notebook switch, which strands the run rather than ending it.
+    switched = re.search(r'store\.on\("notebook:switched", \(\) => \{(.*?)\n  \}\)', js, re.DOTALL)
+    assert switched and 'pending: false' in switched.group(1), (
+        "switching notebooks leaves the new notebook's composer frozen by the old run"
+    )
+    # The THREAD is never cleared — history must not be destroyed to signal a transient state.
+    assert "state.turns = []" not in body and "history.textContent" not in body

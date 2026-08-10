@@ -2388,6 +2388,15 @@ async function generateOverview() {
   el.hidden = false;
   el.textContent = "";
   overviewRunning = true;
+  // FREEZE THE COMPOSER, at the user's request and twice asked for. It is not needed for
+  // correctness — the two runs are independent, `mutate_notebook` re-reads under a per-notebook
+  // lock so both writes land (invariant 34), and neither repaint can delete the other's run
+  // (invariants 60 and 71). It is what the person using it wants: a question asked into a thread
+  // whose overview is being rewritten reads as two things fighting, whether or not they are.
+  //
+  // The composer only — never the thread. Clearing the conversation was offered as an alternative
+  // and is the one thing not to do: it would destroy history to signal a transient state.
+  store.emit("chat:pending", { pending: true });
 
   // The server appends `-summary`/`-faq` to the run id it derives, so both targets are predictable:
   // the ticker follows the summary, and Stop cancels BOTH (a notebook-scoped cancel would leave the
@@ -2404,13 +2413,28 @@ async function generateOverview() {
       cancelled = true;
       overviewToken += 1; // strand this generation's own response
       overviewRunning = false; // release BEFORE the repaint, or the guard above swallows it
+      store.emit("chat:pending", { pending: false });
       renderChatOverview(); // straight back to the pre-run state, nothing half-written left behind
     },
   });
   el.appendChild(status.node);
 
   void openTicker(notebookId, `${base}-summary`, (event) => {
-    if (live()) status.onEvent(event);
+    if (!live()) return;
+    // `/overview` runs TWO tasks and this ticker follows only the summary. Forwarding its terminal
+    // event made "完成" the whole action's headline while the FAQ half was still running and the
+    // POST had not returned — measured: a 63KB summary trace beside a 226-byte FAQ trace, its
+    // worker still alive, and no response yet. The panel then sat on "Finished" next to a live Stop
+    // button, which is invariant 60's rule ("a status line may not claim something the page is not
+    // doing") broken by the second run rather than by a phase.
+    //
+    // `setPhase` is exactly the seam invariant 60 added for a stage the trace cannot see. STOPPABLE,
+    // because it genuinely is: `runIds` carries both ids and Stop cancels each by run id.
+    if (TERMINAL_KINDS.has(event.kind)) {
+      status.setPhase(t("chat.overviewSecondHalf", "Summary done \u00b7 writing suggested questions\u2026"));
+      return;
+    }
+    status.onEvent(event);
   });
 
   try {
@@ -2421,6 +2445,7 @@ async function generateOverview() {
     });
     status.finish();
     overviewRunning = false;
+    store.emit("chat:pending", { pending: false });
     if (cancelled) return;
     if (!live()) {
       // SUPERSEDED, not lost. Saying nothing here is what made a real report read as "pressed
@@ -2445,6 +2470,7 @@ async function generateOverview() {
   } catch (err) {
     status.finish();
     overviewRunning = false;
+    store.emit("chat:pending", { pending: false });
     if (cancelled) return;
     if (!live()) {
       if (generation === notebookGeneration) supersededNote(el);
@@ -2527,6 +2553,7 @@ function initChatPanel() {
 
   store.on("notebook:switched", () => {
     overviewToken += 1; // a notebook switch strands any generation still in flight
+    store.emit("chat:pending", { pending: false }); // ...and un-freezes the new notebook's composer
     // ...and releases the panel it owned. Without this the new notebook keeps the OLD run's
     // pulsing dot and Stop, because `renderChatOverview` defers while a run owns the element.
     overviewRunning = false;
