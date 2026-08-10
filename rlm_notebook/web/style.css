@@ -117,9 +117,10 @@ body {
 }
 
 /* JetBrains Mono — the one deliberate callback to the sibling studios' technical identity, used by
-   the reasoning-trace ticker (.ticker-toggle/.ticker-detail), which extends this class rather than
-   repeating the font stack. (It also styled the citation-turn detail payload, until the References
-   view replaced that panel.) */
+   the reasoning-trace pill (.ticker-toggle), which extends this class rather than repeating the
+   font stack. (It also styled the citation-turn detail payload, until the References view replaced
+   that panel, and `.ticker-detail`, until the pill stopped expanding inline and started opening the
+   Trajectory drawer.) */
 .trace-face {
   font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
 }
@@ -1147,16 +1148,6 @@ body.is-resizing .cols {
   color: var(--text-dim);
 }
 
-.ticker-detail {
-  margin-top: 0.4rem;
-  border-left: 2px solid var(--border-strong);
-  padding-left: 0.6rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-  font-size: 0.72rem;
-  color: var(--text-faint);
-}
 
 /* The SECOND instance of the hidden-vs-display defect (see .modal-overlay below for the mechanism).
    This one shipped from Phase 3 and made the step log render permanently expanded with a dead
@@ -1164,9 +1155,6 @@ body.is-resizing .cols {
    message and CLAUDE.md for that fix both cited "the ticker already toggles on re-click" as the
    reason a citation detail should toggle too. It never toggled. An independent review caught both
    the miss and the false justification. */
-.ticker-detail[hidden] {
-  display: none;
-}
 
 /* --- Chat overview (the "generate the research artifact" first action) --- */
 
@@ -1189,8 +1177,8 @@ body.is-resizing .cols {
   flex: 0 0 auto;
 }
 
-/* Paired with the `display` above — see the .modal-overlay/.ticker-detail rules for the mechanism
-   and why omitting this pairing has twice made part of this UI unusable. */
+/* Paired with the `display` above — see the .modal-overlay/.traj-drawer rules for the mechanism and
+   why omitting this pairing has twice made part of this UI unusable. */
 .chat-overview[hidden] {
   display: none;
 }

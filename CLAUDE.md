@@ -2530,6 +2530,24 @@ them exist because an earlier design discussion mentioned them.
     a Chinese drawer. The server says WHICH case holds; the interface says it in the reader's
     language (invariant 48).
 
+    **There are TWO "⌁ N steps" affordances and moving one is not moving both.** `runStatus` owns
+    the LIVE log during a run; `renderTickerAffordance` owns the PERSISTED pill under a finished
+    artifact — a chat answer, the overview, a Guide result, the podcast — and it is the one a reader
+    presses most, because most of the time the run is over. Replacing only the live one left the
+    persisted one still expanding the model's reasoning prose inline. A user hard-reloaded, pressed
+    it, and reported the drawer as still missing; the first diagnosis (a stale cached `app.js`) was
+    WRONG and the real cause was a second component nobody had connected to the first. Both open the
+    drawer now, and the drawer shows strictly more than the inline panel ever did: the code each
+    turn ran, the tool calls, real per-turn timing, search and replay, against the same trace file.
+
+    `.ticker-detail`/`.ticker-row` and their CSS are gone with it, and `tickerLogs` stopped being a
+    cache — it is now only what `openTicker` resolves with. **`.ticker-detail` was also one of the
+    two sentinels in invariant 36's tripwire**, the list that stops that whole test passing
+    vacuously; it is replaced by `.traj-drawer` rather than dropped, and the extraction gained a
+    route for a BARE `hidden` attribute in the markup, which is the ordinary spelling and which all
+    four existing routes were blind to (the drawer is reached as `trajEl.drawer.hidden = …`, a
+    property on an object built in a loop, which no `const x = getElementById(...)` pattern matches).
+
     **Verified with a DOM shim under `node` against a real 12-turn trace**, since this project still
     has no JS test runner (invariant 29) — 13 step rows, per-turn durations, proportional segment
     widths, turn and tool details, search matching two turns, and stepping from a tool selection

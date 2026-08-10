@@ -122,6 +122,11 @@ async function api(path, options) {
 //: One client-side log per run id, kept for the lifetime of the page (not just while a stream is
 //: open) so a "⌁ N steps" affordance can expand instantly without re-fetching. Shared across
 //: Chat/Guide/Podcast rather than three separate caches.
+//: Every event a run's stream has produced this page-session, keyed by run id. `openTicker`
+//: accumulates into it and RESOLVES with it, which is what the awaiting caller reads — nothing
+//: else does any more. It stopped being a cache when the persisted "⌁ N steps" pill moved from
+//: expanding inline to opening the Trajectory drawer, which fetches its own decomposition from the
+//: server and so needs no client-side log at all.
 const tickerLogs = new Map();
 
 //: Kinds that end a stream. Written down once so the ticker, the tests and any later consumer
@@ -553,75 +558,26 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 }
 
 function renderTickerAffordance(runId) {
+  // The PERSISTED "⌁ N steps" pill under a finished artifact — a chat answer, the overview, a Guide
+  // result, the podcast. Distinct from `runStatus`'s LIVE log, which is why moving that one into the
+  // Trajectory drawer left this one still expanding the model's reasoning prose inline: a user hard-
+  // reloaded, pressed it, and reported the drawer as still missing. It was a different component,
+  // and the first diagnosis (a stale cached `app.js`) was wrong.
+  //
+  // Both open the drawer now. `runId` is all `openTrajectory` needs, and the drawer shows strictly
+  // more than this ever did: the code each turn ran, the tool calls, real per-turn timing, search
+  // and replay — against the same trace file this used to page through as flat rows.
   const wrapper = document.createElement("div");
   wrapper.className = "ticker-affordance";
 
   const toggle = document.createElement("button");
   toggle.type = "button";
   toggle.className = "ticker-toggle trace-face";
-
-  const detail = document.createElement("div");
-  detail.className = "ticker-detail trace-face";
-  detail.hidden = true;
-
-  const fill = (events) => {
-    detail.textContent = "";
-    // A trace collected by retention (invariant 34) comes back as a single `not_found`, which is an
-    // ordinary outcome rather than a fault — a 7-day-old run simply has no record any more.
-    if (events.length === 1 && events[0].kind === "not_found") {
-      toggle.textContent = t("err.stepsGone", "\u2301 no record");
-      const note = document.createElement("div");
-      note.className = "ticker-row";
-      note.textContent = t(
-        "err.stepsGoneNote",
-        "This run's record has been cleared. Records are kept for a limited time.",
-      );
-      detail.appendChild(note);
-      return;
-    }
-    toggle.textContent = t("err.steps", `\u2301 ${events.length} step${events.length === 1 ? "" : "s"}`, {
-      n: events.length,
-    });
-    events.forEach((event) => {
-      const row = document.createElement("div");
-      row.className = `ticker-row kind-${event.kind || "other"}`;
-      row.textContent = event.summary || traceHeadline(event) || "";
-      detail.appendChild(row);
-    });
-  };
-
-  // `cached.length`, not just presence: `openTicker` sets `[]` up front and resolves with `[]` on a
-  // dropped stream, so a live run whose SSE broke leaves an empty array behind — and treating that
-  // as a hit rendered a permanent `0 steps` pill that only ever toggled an empty box.
-  const cached = tickerLogs.get(runId);
-  if (cached && cached.length) {
-    fill(cached);
-  } else {
-    // NOT hidden any more when the page has no log for this run. `tickerLogs` lives for one page
-    // session, so after a reload every "N steps" pill vanished even though the trace file is still
-    // on the server and the stream endpoint replays it from the start. A user asked where the
-    // overview's step count had gone; the answer was that we had the affordance gated on a cache
-    // rather than on whether the record exists.
-    toggle.textContent = t("err.stepsLoad", "\u2301 steps");
-  }
-
-  toggle.addEventListener("click", async () => {
-    if (!(tickerLogs.get(runId) || []).length) {
-      toggle.disabled = true;
-      toggle.textContent = t("cite.loading", "Loading\u2026");
-      // Replays the whole file and terminates: `_tail_trace_events` reads what is already there
-      // before it starts tailing, so a finished run streams its complete log and then ends.
-      await openTicker(state.notebookId, runId, () => {});
-      toggle.disabled = false;
-      fill(tickerLogs.get(runId) || []);
-      detail.hidden = false;
-      return;
-    }
-    detail.hidden = !detail.hidden;
-  });
+  toggle.textContent = t("err.stepsLoad", "\u2301 steps");
+  toggle.dataset.tip = t("traj.open", "Open the run's trajectory");
+  toggle.addEventListener("click", () => openTrajectory([runId]));
 
   wrapper.appendChild(toggle);
-  wrapper.appendChild(detail);
   return wrapper;
 }
 

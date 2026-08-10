@@ -2095,3 +2095,14 @@ questions with verifiable citations, and get a distilled research artifact out.
   app whose filenames carry no content hash, so there was no cache-busting URL either. The assets
   now say `no-cache`, which means revalidate rather than don't store: unchanged assets still cost
   one conditional request and a 304 with no body.
+
+- **The steps pill still expanded inline after a hard reload, and the cache was not the reason.**
+  There are TWO "⌁ N steps" affordances: the live one during a run, and the persisted one under a
+  finished artifact — which is the one a reader presses most, because most of the time the run is
+  over. Only the live one had been moved into the Trajectory drawer. The previous entry's
+  cache-revalidation fix is a real improvement and was not the cause of this.
+
+  Both open the drawer now. `.ticker-detail`/`.ticker-row` and their CSS are gone, and the
+  invariant-36 tripwire — which had `.ticker-detail` as one of its two anti-vacuity sentinels —
+  gained a route for a bare `hidden` attribute in the markup. That is the ordinary spelling of the
+  very attribute the tripwire polices, and all four of its existing routes were blind to it.

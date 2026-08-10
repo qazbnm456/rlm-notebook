@@ -121,6 +121,7 @@ const STRINGS = {
     "chat.refreshOverview": "↻ 重新產生",
     "chat.overviewSecondHalf": "摘要完成 · 正在產生建議問題…",
     "traj.title": "執行軌跡",
+    "traj.open": "開啟這次執行的軌跡",
     "traj.search": "搜尋回合…",
     "traj.stat": "{turns} 個回合 · {tools} 次工具呼叫",
     "traj.init": "起始",

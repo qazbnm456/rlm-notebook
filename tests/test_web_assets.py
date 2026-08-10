@@ -127,11 +127,28 @@ def test_every_hidden_toggled_class_still_honours_the_hidden_attribute():
                 if attr_match:
                     toggled |= set(attr_match.group(1).split())
 
+    # (e) A BARE `hidden` attribute in the markup. An element written hidden is by definition
+    #     toggled — something has to unhide it or it would never be seen — and this route needs to
+    #     know nothing about HOW. It is what the four routes above all missed for the Trajectory
+    #     drawer, whose element is reached as `trajEl.drawer.hidden = …`: a property on an object
+    #     built in a loop, which no `const x = getElementById(...)` pattern can match. Blind to the
+    #     ordinary spelling of the very attribute this file exists to police.
+    for tag in re.findall(r"<[^>]*\bhidden\b[^>]*>", html):
+        if re.search(r'\bhidden\s*=\s*"', tag):
+            continue  # `hidden="..."` is route (d)'s data-attribute shape, not a boolean attribute
+        attr = re.search(r'class="([^"]*)"', tag)
+        if attr:
+            toggled |= set(attr.group(1).split())
+
     # A self-check on the EXTRACTION, one per route: if any route silently stops matching, this
     # fails loudly instead of the whole test passing vacuously — which is exactly how the first
     # version of this file reported "ok" for a class that was broken at the time.
+    # `.ticker-detail` was one of these until the persisted steps pill stopped expanding inline and
+    # started opening the Trajectory drawer. Replaced by `.traj-drawer` rather than dropped: this
+    # list is what stops the whole test passing vacuously, so it has to keep naming a class that IS
+    # hidden-toggled AND carries an author `display` — and the drawer is exactly that.
     for expected in (
-        "modal-overlay", "ticker-detail", "empty-note", "tab-body", "run-log-toggle", "studio-view"
+        "modal-overlay", "traj-drawer", "empty-note", "tab-body", "run-log-toggle", "studio-view"
     ):
         assert expected in toggled, (
             f"the extraction no longer sees .{expected}, which IS hidden-toggled in app.js — a "
@@ -1289,3 +1306,33 @@ def test_the_chat_composer_is_frozen_while_an_overview_generates():
     )
     # The THREAD is never cleared — history must not be destroyed to signal a transient state.
     assert "state.turns = []" not in body and "history.textContent" not in body
+
+
+def test_both_steps_pills_open_the_trajectory_drawer():
+    """There are TWO "⌁ N steps" affordances and they are different components: `runStatus`'s LIVE
+    log during a run, and `renderTickerAffordance`'s PERSISTED pill under a finished artifact (a
+    chat answer, the overview, a Guide result, the podcast).
+
+    Moving only the live one into the drawer left the persisted one still expanding the model's
+    reasoning prose inline — a user hard-reloaded, pressed it, and reported the drawer as missing.
+    It was a different component, and the first diagnosis (a stale cached `app.js`) was wrong.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    # The live one.
+    assert 'logToggle.addEventListener("click", () => openTrajectory(runIds));' in js
+
+    # The persisted one — and it must not rebuild an inline log of its own.
+    fn = re.search(r"function renderTickerAffordance\(runId\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert fn, "renderTickerAffordance is gone"
+    body = fn.group(1)
+    assert "openTrajectory([runId])" in body, (
+        "the persisted steps pill no longer opens the drawer — it is the one a reader presses on a "
+        "finished answer, which is most of the time"
+    )
+    assert "ticker-detail" not in body, "the inline reasoning panel is back under finished artifacts"
+    assert "ticker-row" not in body, "the flat event rows are back"
+    # Nothing may be left styling an element nobody builds.
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    assert not re.search(r"\.ticker-detail\s*\{", css), "dead CSS for a removed element"
+    assert not re.search(r"\.ticker-row\s*\{", css), "dead CSS for a removed element"
