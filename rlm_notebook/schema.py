@@ -159,6 +159,20 @@ class KeyInsight(BaseModel):
 #: reproducible from what is on disk — and `notebooks/` cannot confirm or refute it either way.)
 PodcastLength = Literal["short", "default", "long"]
 
+#: How much WALL CLOCK each tier is allowed, as a multiple of `NotebookConfig.run_timeout_seconds`.
+#:
+#: Not a tuning knob — a defect report. A `long` episode timed out at the 300s default backstop with
+#: a trace holding three events: the run started, the model read two skills at 6.8s, and nothing
+#: else was ever written before `killpg`. On the same notebook and the same model, an ordinary chat
+#: answer took 77s across 4-5 planner turns, with one single turn costing 54s. A tier asking for
+#: 60-90 utterances ACCUMULATED ACROSS REPL TURNS (invariant 64) needs many more turns than that, so
+#: 300s could not have been enough and the tier shipped unable to finish under its own default.
+#:
+#: The backstop exists to catch a RUNAWAY, not to cap work the reader explicitly asked for — so it
+#: scales with what was asked for. Lives NEXT TO the tier literal on purpose: adding a fourth tier
+#: without deciding its budget should be impossible, and a tripwire test asserts every tier has one.
+PODCAST_TIMEOUT_FACTOR: dict[str, float] = {"short": 1.0, "default": 2.0, "long": 5.0}
+
 Speaker = Literal["host_a", "host_b"]
 
 

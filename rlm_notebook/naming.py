@@ -49,6 +49,10 @@ Rules:
   Coordinator", it is what those four have in common.
 - If the sources genuinely share no theme, say what the biggest one is about rather than inventing
   a connection between them.
+- Keep proper nouns as the sources write them. A project, product, person or standard called
+  "Trinity" stays "Trinity" in a Chinese title — translating the WORD gives a reader a term they
+  cannot search for, and a name that is not a common word in the target language reads as a
+  mistranslation. Everything around the name still follows `language`.
 - Ignore the `[[SRC:...]]` markers themselves; they are separators, never part of the title.
 """
 
@@ -105,15 +109,23 @@ def clean_title(raw: str, origins: list[str]) -> str:
 _LANGUAGE_INSTRUCTIONS = """\
 Decide which language this person wants their research notebook WRITTEN IN.
 
-You are given three signals, and they often disagree:
-- `accept_language`: the reader's browser preference. Useful, but it answers "what language should
+You are given four signals, and they often disagree:
+- `interface_language`: the language this person explicitly PICKED for the app's interface. A
+  strong signal, because they chose it — someone who set the interface to Traditional Chinese is
+  telling you which language they read comfortably. Not decisive on its own either: a reader may
+  deliberately want an English interface over Japanese papers, or the reverse.
+- `accept_language`: the reader's browser preference. Weaker than the one above, because it was
+  INHERITED from the operating system rather than chosen here. It answers "what language should
   this browser's interface be in", NOT "what language does this person want to read research in" —
-  an English-locale machine reading Japanese papers is exactly where the two diverge. Do not treat
-  it as decisive on its own.
+  an English-locale machine reading Japanese papers is exactly where the two diverge.
 - `sources_excerpt`: what the documents are written in. The WEAKEST signal — reading a paper in one
   language says nothing about wanting notes in it.
 - `questions`: anything this person has actually typed. The STRONGEST signal when present, because
-  it is the one place they chose a language for themselves rather than inheriting one.
+  it is the one place they chose a language for THIS notebook rather than for the app in general.
+
+When `interface_language` and `questions` agree, that is as clear as this gets. When only
+`interface_language` is present, prefer it over the documents' own language: a reader who set the
+interface to their own language is unlikely to want their notes in a foreign one.
 
 Answer with the language's name in English, two or three words at most: "Traditional Chinese",
 "Japanese", "Brazilian Portuguese", "English". No explanation, no punctuation, no alternatives.
@@ -137,14 +149,20 @@ class SuggestLanguage:
     """
 
     async def arun(
-        self, *, accept_language: str = "", sources_excerpt: str = "", questions: str = ""
+        self,
+        *,
+        accept_language: str = "",
+        sources_excerpt: str = "",
+        questions: str = "",
+        interface_language: str = "",
     ) -> str | None:
         try:
             import dspy
 
             predictor = dspy.Predict(
                 dspy.Signature(
-                    "accept_language: str, sources_excerpt: str, questions: str -> language: str",
+                    "accept_language: str, sources_excerpt: str, questions: str, "
+                    "interface_language: str -> language: str",
                     _LANGUAGE_INSTRUCTIONS,
                 )
             )
@@ -152,6 +170,7 @@ class SuggestLanguage:
                 accept_language=accept_language or "(not provided)",
                 sources_excerpt=(sources_excerpt or "")[:_EXCERPT_CHARS],
                 questions=questions or "(none asked yet)",
+                interface_language=interface_language or "(not provided)",
             )
             return clean_language(getattr(result, "language", ""))
         except Exception:  # noqa: BLE001 — a language guess is never worth failing the request

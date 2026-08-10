@@ -117,6 +117,7 @@ from .notebook import (
 from .parsers.web import FetchError
 from .schema import (
     FAQ,
+    PODCAST_TIMEOUT_FACTOR,
     Answer,
     ChatTurn,
     Citation,
@@ -131,6 +132,7 @@ from .schema import (
 )
 from .task import AnswerQuestion
 from .traces import prune_traces
+from .trajectory import build_trajectory
 from .tts import TTSError, get_tts_provider, spoken_script
 
 #: Same registry `cli.py` keeps (`_GUIDE_TASKS`) — kept as a SEPARATE copy rather than imported
@@ -1076,6 +1078,14 @@ async def _resolve_language(
             _dotted(SuggestLanguage),
             {
                 "accept_language": request.headers.get("accept-language", ""),
+                # The interface language the reader PICKED, carried in a header rather than in five
+                # request bodies — `_resolve_language` is reached from every run-taking endpoint and
+                # a header covers them all without a schema change each. Invariant 48 keeps the two
+                # settings SEPARATE (a Chinese interface over English papers stays expressible, and
+                # an explicit output-language setting still wins outright); what changes here is
+                # that the chosen interface language is now a SIGNAL to the guess, ranked above
+                # `Accept-Language` because it was chosen rather than inherited.
+                "interface_language": request.headers.get("x-rlm-interface-language", ""),
                 "sources_excerpt": excerpt,
                 "questions": questions,
             },
@@ -1096,7 +1106,12 @@ async def _resolve_language(
 
 
 async def _run_isolated(
-    notebook_id: str, dotted_task: str, kwargs: dict, config: NotebookConfig, run_id: str
+    notebook_id: str,
+    dotted_task: str,
+    kwargs: dict,
+    config: NotebookConfig,
+    run_id: str,
+    timeout: float | None = None,
 ) -> dict:
     """Start an isolated subprocess run for `notebook_id` under the given `run_id`, track it in
     `_ACTIVE_RUNS`/`_RUN_PROCESSES` so `POST .../cancel` and `GET .../stream` can each reach it, and
@@ -1145,7 +1160,11 @@ async def _run_isolated(
     _ACTIVE_RUNS[notebook_id] = run
     _RUN_PROCESSES[run_id] = run.process
     try:
-        return await runner.wait_result(run, timeout=config.run_timeout_seconds)
+        # `timeout` overrides the configured backstop for work that legitimately takes longer —
+        # only the podcast passes one (see `PODCAST_TIMEOUT_FACTOR`). It is a per-REQUEST value, not
+        # a second config knob: an operator who sets `RN_RUN_TIMEOUT_SECONDS` still moves every
+        # tier, because the factor multiplies whatever they chose.
+        return await runner.wait_result(run, timeout=timeout or config.run_timeout_seconds)
     except runner.RunError as exc:
         raise HTTPException(502, str(exc)) from exc
     finally:
@@ -1562,6 +1581,10 @@ async def audio(
         },
         config,
         run_id,
+        # A `long` episode cannot finish inside the backstop a chat turn needs — measured, see
+        # `PODCAST_TIMEOUT_FACTOR`. Scaling here rather than raising the global default keeps a
+        # runaway CHAT turn bounded at the value it always had.
+        timeout=config.run_timeout_seconds * PODCAST_TIMEOUT_FACTOR[body.length],
     )
     script = PodcastScript.model_validate(result)
 
@@ -1932,6 +1955,50 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
             if marker in json.dumps(payload, ensure_ascii=False):
                 return {"step_id": event.get("step_id"), "type": event.get("type"), "payload": payload}
     raise HTTPException(404, f"marker for source {source_id!r} locator {locator!r} not found in this trace")
+
+
+@app.get("/notebooks/{notebook_id}/runs/{run_id}/trajectory")
+async def run_trajectory(notebook_id: str, run_id: str) -> dict:
+    """The whole run, decomposed for the Trajectory drawer (`trajectory.build_trajectory`).
+
+    Same ownership check and same 404-on-missing-trace posture as `citation_turn` above: a trace is
+    only as durable as `traces.prune_traces` keeps it, and losing one must degrade this ONE
+    affordance rather than break the page.
+
+    **Readable while the run is still going.** The trace file is appended live, so this returns
+    whatever has been written so far — which is the point: the drawer is how a reader watches a
+    long podcast run, not only how they inspect a finished one. A half-written last line is skipped
+    rather than raising, because reading concurrently with the writer is the NORMAL case here, not
+    an error (`json.JSONDecodeError` on the final line means the writer is mid-flush).
+
+    Reads in a THREAD: a long run's trace is megabytes and this is a blocking read on the event
+    loop otherwise — the same reasoning `_mutate_or_http` uses for a blocking `flock`.
+    """
+    if not run_id.startswith(f"{slug(notebook_id)}-"):
+        raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
+    trace_path = _TRACE_DIR / f"{run_id}.jsonl"
+    if not trace_path.exists():
+        raise HTTPException(404, f"no trace found for run {run_id!r}")
+
+    def _read() -> list[dict]:
+        events: list[dict] = []
+        with trace_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except json.JSONDecodeError:
+                    # The writer is mid-flush on the final line. Everything before it is complete.
+                    break
+        return events
+
+    events = await asyncio.to_thread(_read)
+    result = build_trajectory(events)
+    result["run_id"] = run_id
+    result["running"] = run_id in _RUN_PROCESSES
+    return result
 
 
 #: The web UI, mounted LAST so every explicit API route above wins a path collision — Starlette
