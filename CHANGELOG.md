@@ -1956,3 +1956,76 @@ questions with verifiable citations, and get a distilled research artifact out.
   it does not state; and the skills work was framed as content MOVED out of prompts when almost
   nothing was — both skills are new material, and the two rules that appear in a prompt and a skill
   are there deliberately, the prompt stating a must-apply rule and the skill carrying its reason.
+
+- **A user's overview came back with five red "unverified" badges, and the cause was not what the
+  badge said.** Every web source is one block with locator `whole`; the model had written the
+  section heading it was citing into `locator` instead. The chat turns on the same notebook were
+  12/12 clean, so this was a per-task behaviour, not a corpus problem.
+
+  The pre-SUBMIT validator now checks each citation's coordinate against the markers that actually
+  occur in the blob this run was given — the same ground truth the server checks afterwards, applied
+  while the model can still fix it. Its rejection shows a REAL coordinate, because a message that
+  only says "wrong" invites the model to compose a different sentence.
+
+  That needed a per-run value, which a class-level tool list cannot hold, so the six tasks share one
+  base class now. It deleted six byte-identical `__init__`s and six per-task validator declarations
+  — and exposed six test functions that asserted "no network tool is ever registered" against a
+  ClassVar that is now empty, i.e. against nothing.
+
+  The reader-facing half was fixed too: a reference card now explains what "unverified" MEANS (the
+  coordinate could not be found — the quote may be fine and filed at the wrong address), shows the
+  server's own reason, and no longer renders an empty box for the one citation someone most wants to
+  inspect. A long locator can no longer stretch the card until the rest of the row falls out of it.
+
+- **`long` podcasts could not finish.** One 502'd at the 300s default backstop with a trace holding
+  three events: started, read two skills at 6.8s, then nothing for 293 seconds until `killpg`. An
+  ordinary chat answer on the same notebook and model took 77s across 4-5 turns, one of them 54s
+  alone — so the tier shipped unable to complete under its own default. The backstop scales with the
+  requested tier now; a runaway chat turn stays bounded where it always was.
+
+- **A Traditional-Chinese interface produced an English notebook title.** The one place the reader
+  had actually said which language they read was never sent — language resolution weighed the OS's
+  `Accept-Language`, the sources, and any typed questions. The interface language is a fourth signal
+  now, ranked above `Accept-Language` because it was chosen rather than inherited. The two settings
+  stay separate: a Chinese interface over English papers is still expressible, just stated rather
+  than default.
+
+  And no artifact translates a proper noun any more. "Trinity" stays "Trinity" — a translated name
+  is the one term a reader then cannot search for. One shared rule, in every task and the titler.
+
+- **The run's reasoning moved out of the chat bubble into a Trajectory drawer.** The inline step log
+  put the planner's own prose inside the answer, which a user reported as unreadable and
+  space-consuming. Full parity with the sibling `nuclei-forge/studio`'s drawer, at the user's
+  explicit choice: turn nav, a tool timeline whose segment width tracks real elapsed time, a detail
+  pane, search, and a replay that dwells on each turn for the time it really took.
+
+  The decomposition is server-side and keeps the run's two clocks apart — per-turn timing is
+  reported only when the trace was live-stamped, never invented for an older one. It reads a trace
+  that is still being written, which is the point for a run that takes minutes. Verified with a DOM
+  shim under `node` against a real 12-turn trace, since this project has no JS test runner.
+
+- **Scrollbars are themed.** The UA paints them from the OS theme, not the page's, so the dark theme
+  had a near-white bar down the middle of every scroller. Both spellings ship, because neither
+  covers the other's browsers.
+
+- **A citation's hover says what the source IS.** It read `s1 · whole` — the interface's own filing
+  system. Clicking one now OPENS its reference card at the quote that was clicked, rather than
+  scrolling to a collapsed row and leaving the reader to work out which of its quotes was theirs.
+
+- **The independent review of this batch found the podcast-timeout fix revertible with a green
+  suite.** Its tripwire asserted the tier factors were monotonic, which is true of an all-equal
+  table — i.e. of no scaling at all, the exact state that 502'd the reported episode. Flattening it
+  to `{1.0, 1.0, 1.0}` passed 539 tests. The same review disabled descent into nested models in the
+  new coordinate check and the suite stayed green too, which would have silently unguarded FAQ,
+  Timeline and the podcast — three of the six tasks, including the one the marker check had already
+  spent a slice living only on.
+
+  Three real UI defects came out of the same pass. The drawer's live poll rebuilt everything every
+  four seconds, throwing away the reader's selection and search box — in the one case reading a
+  live trace exists to serve. The backdrop kept eating clicks for the 280ms of its own fade-out, a
+  short-lived form of the failure invariant 36 records. And five new controls carried both
+  `data-tip` and the native `title`, which invariant 47 had removed for showing two tooltips.
+
+  Every one of those is pinned now, and each mutation was replayed to confirm it fails — including
+  one where the first fix was itself defeated: a token check on `markWantedQuote` passed with the
+  function's body replaced by `return;`.

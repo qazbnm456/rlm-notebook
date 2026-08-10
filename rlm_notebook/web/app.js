@@ -88,7 +88,13 @@ function updateToggleGlyph() {
 // --- API helpers --------------------------------------------------------------------------------
 
 async function api(path, options) {
-  const resp = await fetch(path, options);
+  // Every request carries the interface language the reader PICKED. One choke point rather than a
+  // field in five request bodies — `_resolve_language` is reached from every run-taking endpoint,
+  // and a header covers them all without a schema change each. See `i18n.js`'s header for why this
+  // does not merge the two language settings.
+  const opts = { ...(options || {}) };
+  opts.headers = { ...(opts.headers || {}), "X-RLM-Interface-Language": uiLangName() };
+  const resp = await fetch(path, opts);
   if (!resp.ok) {
     let detail = resp.statusText;
     try {
@@ -271,11 +277,10 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
   stop.textContent = t("run.stop", "\u23f9 Stop");
   node.appendChild(stop);
 
-  // An expandable LOG of every step, under the counters. "Starting up…" sitting alone for a minute
-   // was reported as uninformative — a single current-activity line cannot say which stage is slow,
-   // only which one is now. The log answers "where is it stuck": each step keeps its own elapsed
-   // stamp, so a long gap is visible rather than inferred. Collapsed by default, because the whole
-   // point of the one-line summary is that most of the time nobody needs the rest.
+  // The step list still exists — it is what counts the steps for the pill and what tracks which
+  // one is current — but it is NEVER shown inside the chat any more. It is built detached and the
+  // pill opens the Trajectory drawer instead. Keeping the element (rather than only a counter) is
+  // what lets the live "current step" logic below stay exactly as it was.
   const log = document.createElement("div");
   log.className = "run-log";
   log.hidden = true;
@@ -284,10 +289,11 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
   logToggle.type = "button";
   logToggle.className = "run-log-toggle";
   logToggle.hidden = true;
-  logToggle.addEventListener("click", () => {
-    log.hidden = !log.hidden;
-    logToggle.classList.toggle("is-open", !log.hidden);
-  });
+  // Opens the Trajectory drawer for THIS run rather than unfolding the log in place. The inline
+  // version put the planner's own reasoning prose inside the chat bubble, which a user reported as
+  // unreadable and space-consuming; the drawer is the same information somewhere a reader opts
+  // into, with the tool calls and the real per-turn timing the inline log never had.
+  logToggle.addEventListener("click", () => openTrajectory(runIds));
 
   //: When the previous step landed, so each row can show how long IT took rather than only when it
   //: started. "Where is it stuck" is a question about durations, and a column of absolute stamps
@@ -412,7 +418,8 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
 
   const started = Date.now();
   node.appendChild(logToggle);
-  node.appendChild(log);
+  // NOT appended. `log` stays detached — it is the step bookkeeping, not a panel. Appending it is
+  // what put the model's reasoning prose in the chat bubble; the pill above opens the drawer.
 
   // "Is it stuck?" — a user had to ask, and the honest answer was no: the run finished fine, but
   // the model's FIRST response took four minutes and the trace has nothing to emit until a step
@@ -2033,7 +2040,12 @@ function renderAnswerWithCitations(text, citations, runId) {
     // it. `.citation.is-focused` has been in the stylesheet promising that since the References
     // view landed, with nothing ever setting it — found by an independent review.
     span.dataset.refKey = referenceKey(match.citation);
-    span.title = `${match.citation.source_id} · ${match.citation.locator}`;
+    // The SOURCE, not the raw coordinate. It used to read `s1 · whole`, which is the interface's
+    // own filing system — a user pointed out that nobody can tell what `s1` is. `sourceLabel` is
+    // the same title the reference card shows, so hovering a stroke and reading its row agree.
+    // The locator is appended only when it says something a reader can use (a page, a timestamp);
+    // `whole` means "this source has one block" and is pure noise here.
+    span.title = citationHoverLabel(match.citation);
     span.textContent = slice;
     // The other half of the reciprocal highlight: pointing at a stroke lights up its reference row,
     // exactly as pointing at the row lights up the stroke. Registered whether or not the stroke is
@@ -2118,6 +2130,19 @@ function sourceLabel(source) {
   const preview = source.preview || {};
   if (preview.title) return preview.title;
   return sourceDisplayName(source);
+}
+
+// What a reader should see when they point at a citation: the source's own name, plus a locator
+// ONLY when it locates something (`page:3`, `ts:04:10`). `whole` is the locator every single-block
+// source gets, so showing it says nothing and crowds out the part that does.
+function citationHoverLabel(citation) {
+  const source = (state.sources || []).find((s) => s.id === citation.source_id);
+  const name = source ? sourceLabel(source) : citation.source_id;
+  const locator = citation.locator && citation.locator !== "whole" ? citation.locator : "";
+  const label = locator ? `${name} · ${locator}` : name;
+  return citation.verified
+    ? label
+    : t("cite.unverifiedHover", `${label} — coordinate not found in this source`, { label });
 }
 
 function renderTurn(turn) {
@@ -3574,6 +3599,11 @@ function renderReferenceView() {
       locator.textContent = reference.locator;
       meta.appendChild(locator);
     }
+    // NOTE the locator above is model output and can be arbitrarily long. A run was observed
+    // writing a whole section heading into it, which stretched this flex row until the rest of the
+    // meta line was pushed out of the card — the "broken render" half of the same report the
+    // pre-SUBMIT coordinate check now prevents at the source. `.reference-locator` clamps it, so a
+    // future bad value is ugly in one chip instead of destroying the row.
     const uses = document.createElement("span");
     uses.className = "ref-card-uses";
     uses.textContent = t("references.uses", `${reference.uses}\u00d7`, { n: reference.uses });
@@ -3607,20 +3637,45 @@ function renderReferenceView() {
     cardBody.hidden = true;
 
     // Opening the row reveals every passage cited from this coordinate, then the original text with
-    // the first one highlighted — the whole loop, still inside this view rather than over the page.
-    head.addEventListener("click", async () => {
-      if (!cardBody.hidden) {
-        cardBody.hidden = true;
-        item.classList.remove("is-open");
-        return;
-      }
+    // the relevant one highlighted — the whole loop, still inside this view rather than over the
+    // page. `wanted` is the quote the reader actually clicked, when they arrived by clicking a
+    // stroke: a source cited eight times has eight quotes here, and landing on the card without
+    // being told WHICH one was meant is the "還是得自己點開並慢慢追" a user reported.
+    const openCard = async (wanted) => {
       item.classList.add("is-open");
       cardBody.hidden = false;
-      if (cardBody.dataset.loaded) return;
+      const target = reference.quotes.includes(wanted) ? wanted : reference.quotes[0] || null;
+      if (cardBody.dataset.loaded) {
+        markWantedQuote(cardBody, target);
+        return;
+      }
       cardBody.textContent = "";
+      // An unverified reference explains ITSELF, here, in the one place a reader who wants to know
+      // is already looking. The badge in the row above says only "unverified", which a user
+      // reasonably asked the meaning of — and the answer matters, because it is narrow: the
+      // COORDINATE could not be found (invariant 5 verifies coordinates, never faithfulness), so
+      // the quote below may still be a perfectly good quote that was filed under the wrong address.
+      if (!reference.verified) {
+        const why = document.createElement("p");
+        why.className = "ref-card-why";
+        why.textContent = t(
+          "cite.unverifiedWhy",
+          "This citation points at a place that does not exist in this source, so we could not " +
+            "check it. The passage below may still be accurate — what failed is the address, not " +
+            "necessarily the claim.",
+        );
+        cardBody.appendChild(why);
+        if (reference.reason) {
+          const detail = document.createElement("p");
+          detail.className = "ref-card-why-detail";
+          detail.textContent = reference.reason;
+          cardBody.appendChild(detail);
+        }
+      }
       reference.quotes.forEach((quote) => {
         const blockquote = document.createElement("blockquote");
         blockquote.className = "reference-quote";
+        blockquote.dataset.quote = quote;
         blockquote.textContent = quote;
         cardBody.appendChild(blockquote);
       });
@@ -3628,23 +3683,34 @@ function renderReferenceView() {
       passage.className = "ref-card-passage";
       passage.textContent = t("cite.loading", "Loading\u2026");
       cardBody.appendChild(passage);
+      markWantedQuote(cardBody, target);
       try {
         const data = await api(
           `/notebooks/${encodeURIComponent(state.notebookId)}/sources/${encodeURIComponent(reference.source_id)}`
         );
         passage.textContent = "";
         passage.appendChild(renderSourceMeta(data));
-        (data.blocks || [])
-          .filter((block) => block.locator === reference.locator)
-          .forEach((block) => {
-            passage.appendChild(
-              renderTextWithOptionalHighlight(block.text, reference.quotes[0] || null)
-            );
-          });
+        const blocks = (data.blocks || []).filter((block) => block.locator === reference.locator);
+        // An unverified coordinate matches NO block, so filtering by it would render the source
+        // meta and then nothing at all — the reader gets an empty box for the citation they most
+        // wanted to inspect. Fall back to the whole source and let the quote highlight find itself.
+        (blocks.length ? blocks : data.blocks || []).forEach((block) => {
+          passage.appendChild(renderTextWithOptionalHighlight(block.text, target));
+        });
         cardBody.dataset.loaded = "1";
       } catch (err) {
         passage.textContent = t("err.generic", `(error) ${err.message}`, { message: err.message });
       }
+    };
+    item._openCard = openCard;
+
+    head.addEventListener("click", () => {
+      if (!cardBody.hidden) {
+        cardBody.hidden = true;
+        item.classList.remove("is-open");
+        return;
+      }
+      openCard(null);
     });
 
     item.appendChild(cardBody);
@@ -3654,11 +3720,22 @@ function renderReferenceView() {
 
 // Clicking a citation in the chat opens the References view and takes the reader to that entry,
 // rather than expanding a panel inside the answer they are reading.
+// Which of a card's quotes the reader asked about. A card is re-openable and already-loaded, so
+// this is a separate re-stampable step rather than something decided while building the list.
+function markWantedQuote(cardBody, quote) {
+  cardBody.querySelectorAll(".reference-quote").forEach((el) => {
+    el.classList.toggle("is-wanted", quote != null && el.dataset.quote === quote);
+  });
+}
+
 function focusReference(citation) {
   showStudioView("references");
   const key = referenceKey(citation);
   const card = document.querySelector(`.ref-card[data-ref-key="${CSS.escape(key)}"]`);
   if (!card) return;
+  // OPEN it, rather than only scrolling to it. Arriving at a collapsed row still left the reader
+  // to click it and then work out which of its quotes was theirs.
+  if (card._openCard) card._openCard(citation.quote || null);
   document.querySelectorAll(".ref-card.is-focused, .citation.is-focused")
     .forEach((el) => el.classList.remove("is-focused"));
   card.classList.add("is-focused");
@@ -3701,3 +3778,405 @@ initPodcastPlayer();
 initSourceViewer();
 initNotesPanel();
 initStudioRail();
+
+// --- Trajectory drawer ---------------------------------------------------------------------------
+//
+// A bottom sheet that replays one RLM run: the sibling `nuclei-forge/studio`'s shape, brought here
+// because the inline step log put the planner's own reasoning PROSE inside the chat bubble, where a
+// user reported it as unreadable and space-consuming ("文鄒鄒的看不懂"). Reasoning belongs somewhere
+// a reader opts into, not in the middle of the answer they came for.
+//
+// TWO views on the run's two clocks (`trajectory.py` explains why they are different): the left nav
+// walks the planner's REPL turns, the top strip is the tool timeline where segment width is
+// proportional to real elapsed time — so a slow call is visibly wide rather than a number to
+// compare. Works on a RUNNING trace as well as a finished one, which is the point for a `long`
+// podcast that takes minutes.
+
+const TRAJ_SPEEDS = [1, 2, 4, 8, 16, 32, 64];
+const TRAJ_DWELL_FLOOR_MS = 50;    // a stop never dwells less than this, so a tiny turn still shows
+const TRAJ_NOMINAL_MS = 1500;      // a stop with no live timing gets a brief nominal length
+
+let trajData = null;      // the fetched decomposition
+let trajRunIds = [];      // every run id this drawer was opened for (an overview fires two)
+let trajSel = null;       // {kind: "init"|"turn"|"tool", index}
+let trajSpeed = 2;
+let trajPlayTimer = null;
+let trajPoll = null;      // while the run is live, re-fetch so the drawer keeps up
+let trajMatches = [];
+let trajMatchCur = -1;
+let trajCloseTimer = null;
+
+const trajEl = {};
+
+function trajInit() {
+  [
+    "backdrop", "drawer", "stat", "run", "note", "timeline", "axis-end", "search", "search-count",
+    "prev", "play", "next", "speed", "steps", "detail", "expand", "close",
+  ].forEach((name) => {
+    trajEl[name.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(`traj-${name}`);
+  });
+  if (!trajEl.drawer) return;
+  trajEl.close.addEventListener("click", closeTrajectory);
+  trajEl.backdrop.addEventListener("click", closeTrajectory);
+  trajEl.expand.addEventListener("click", () => {
+    const full = trajEl.drawer.classList.toggle("is-full");
+    trajEl.expand.textContent = full ? "⤡" : "⤢";
+  });
+  trajEl.prev.addEventListener("click", () => trajStep(-1));
+  trajEl.next.addEventListener("click", () => trajStep(1));
+  trajEl.play.addEventListener("click", trajTogglePlay);
+  trajEl.speed.addEventListener("click", () => {
+    trajSpeed = TRAJ_SPEEDS[(TRAJ_SPEEDS.indexOf(trajSpeed) + 1) % TRAJ_SPEEDS.length];
+    trajEl.speed.textContent = `${trajSpeed}×`;
+  });
+  trajEl.run.addEventListener("change", () => openTrajectory(trajRunIds, trajEl.run.value));
+  trajEl.search.addEventListener("input", () => trajSearch(trajEl.search.value));
+  trajEl.search.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") trajCycleMatch();
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key === "Escape" && !trajEl.drawer.hidden) closeTrajectory();
+  });
+}
+
+async function openTrajectory(runIds, wanted) {
+  if (!trajEl.drawer || !state.notebookId) return;
+  trajRunIds = (runIds || []).filter(Boolean);
+  const runId = wanted || trajRunIds[0];
+  if (!runId) return;
+  try {
+    trajData = await api(
+      `/notebooks/${encodeURIComponent(state.notebookId)}/runs/${encodeURIComponent(runId)}/trajectory`
+    );
+  } catch (err) {
+    // A trace is only as durable as retention keeps it (invariant 34). Losing one must degrade
+    // THIS affordance, never the page — so say so in the drawer instead of throwing.
+    trajData = null;
+    trajEl.stat.textContent = t("traj.missing", `No trajectory for this run (${err.message})`, {
+      message: err.message,
+    });
+    trajEl.steps.textContent = "";
+    trajEl.detail.textContent = "";
+    trajEl.timeline.textContent = "";
+  }
+  trajShowDrawer();
+  if (trajData) renderTrajectory(runId);
+}
+
+function trajShowDrawer() {
+  clearTimeout(trajCloseTimer);
+  trajEl.backdrop.hidden = false;
+  trajEl.drawer.hidden = false;
+  // Flush the unhide before animating: coming from `display: none`, a transition has no start
+  // frame and would jump straight to its end.
+  void trajEl.drawer.offsetHeight;
+  trajEl.backdrop.classList.add("is-shown");
+  trajEl.drawer.classList.add("is-open");
+}
+
+function closeTrajectory() {
+  trajStopPlay();
+  clearInterval(trajPoll);
+  trajPoll = null;
+  trajEl.drawer.classList.remove("is-open", "is-full");
+  trajEl.backdrop.classList.remove("is-shown");
+  trajEl.expand.textContent = "⤢";
+  // ≥ the drawer's own transform transition, so the slide-out is never cut short by `hidden`.
+  trajCloseTimer = setTimeout(() => {
+    trajEl.drawer.hidden = true;
+    trajEl.backdrop.hidden = true;
+  }, 280);
+}
+
+function renderTrajectory(runId) {
+  const turns = trajData.iterations || [];
+  const line = trajData.timeline || [];
+  trajEl.stat.textContent = t(
+    "traj.stat",
+    `${turns.length} turns · ${line.length} tool calls${
+      trajData.total_s != null ? ` · ${formatTimecode(trajData.total_s)}` : ""
+    }`,
+    { turns: turns.length, tools: line.length }
+  );
+
+  // The run picker only earns its space when there IS more than one — an overview fires a summary
+  // run and an FAQ run, and landing in one with no way to reach the other is the same
+  // "which one did I just watch" problem the notebook picker has.
+  trajEl.run.hidden = trajRunIds.length < 2;
+  trajEl.run.textContent = "";
+  trajRunIds.forEach((id) => {
+    const option = document.createElement("option");
+    option.value = id;
+    // The distinguishing tail (`-summary`, `-faq`, `-lang`), not the whole slug-plus-uuid.
+    option.textContent = id.split("-").slice(-1)[0];
+    option.selected = id === runId;
+    trajEl.run.appendChild(option);
+  });
+
+  // Built from the BOOLEAN, not from the server's sentence. `timing_note` is English prose written
+  // in `trajectory.py`, and rendering it verbatim put an English line in the middle of a Chinese
+  // drawer — interface copy belongs to the interface (invariant 48), and the server's job here is
+  // to say WHICH case holds.
+  trajEl.note.hidden = false;
+  trajEl.note.textContent = trajData.per_turn_timing
+    ? t("traj.timingLive", "Per-turn timing is live — captured as each turn was parsed.")
+    : t(
+        "traj.timingStale",
+        "Per-turn timing isn't available for this trace; the tool timeline still carries real times.",
+      );
+  trajEl.note.className = `traj-note ${trajData.per_turn_timing ? "is-live" : "is-info"}`;
+  trajEl.axisEnd.textContent = trajData.total_s != null ? formatTimecode(trajData.total_s) : "";
+
+  // A LIVE run re-renders every few seconds, so the rebuild must not throw away where the reader
+  // is. Resetting unconditionally sent someone watching a long podcast back to "Start" with an
+  // empty search box every 4 seconds — in the one case the live read exists to serve. Restore the
+  // selection and the query; fall back to the start only when there was no prior selection.
+  const priorSel = trajSel;
+  const priorQuery = trajEl.search.value;
+  renderTrajTimeline(line);
+  renderTrajSteps(turns);
+  trajSearch(priorQuery);
+  const stillThere =
+    priorSel &&
+    (priorSel.kind === "init" ||
+      (priorSel.kind === "turn" && priorSel.index < turns.length) ||
+      (priorSel.kind === "tool" && priorSel.index < line.length));
+  trajSelect(stillThere ? priorSel.kind : "init", stillThere ? priorSel.index : 0);
+  trajRefreshTransport();
+
+  // A running trace grows under us. Poll rather than reuse the SSE ticker: the ticker carries
+  // translated one-line events (invariant 52) and this view needs the decomposition, which is a
+  // different shape from a different endpoint.
+  clearInterval(trajPoll);
+  trajPoll = trajData.running
+    ? setInterval(() => {
+        if (trajEl.drawer.hidden) return;
+        openTrajectory(trajRunIds, runId);
+      }, 4000)
+    : null;
+}
+
+function renderTrajTimeline(line) {
+  trajEl.timeline.textContent = "";
+  const total = trajData.total_s || line.reduce((m, e) => Math.max(m, e.rel_s || 0), 0) || 1;
+  line.forEach((entry) => {
+    const seg = document.createElement("button");
+    seg.type = "button";
+    seg.className = `traj-seg fam-${entry.label || "tool"}${entry.ok === false || entry.passed === false ? " is-bad" : ""}`;
+    // Width PROPORTIONAL to real elapsed time, which is the whole reason this strip exists: a slow
+    // call is visibly wide instead of a number the reader has to compare against its neighbours.
+    seg.style.flexGrow = String(Math.max(0.02, (entry.duration_s || 0) / total));
+    seg.dataset.tip = `${entry.label}${entry.target ? ` ${entry.target}` : ""} · ${trajSecs(entry.duration_s)}`;
+    seg.addEventListener("click", () => trajSelect("tool", entry.seq));
+    trajEl.timeline.appendChild(seg);
+  });
+}
+
+function trajSecs(s) {
+  if (s == null) return "";
+  if (s < 1) return `${Math.round(s * 1000)}ms`;
+  return s < 60 ? `${s.toFixed(1)}s` : formatTimecode(s);
+}
+
+function renderTrajSteps(turns) {
+  trajEl.steps.textContent = "";
+  trajEl.steps.appendChild(trajStepRow("init", 0, t("traj.init", "Start"), ""));
+  turns.forEach((turn) => {
+    trajEl.steps.appendChild(
+      trajStepRow(
+        "turn",
+        turn.index,
+        t("traj.turn", `Turn ${turn.index + 1}`, { n: turn.index + 1 }),
+        trajSecs(turn.duration_s)
+      )
+    );
+  });
+}
+
+function trajStepRow(kind, index, label, meta) {
+  const row = document.createElement("button");
+  row.type = "button";
+  row.className = "traj-step";
+  row.dataset.kind = kind;
+  row.dataset.index = String(index);
+  const name = document.createElement("span");
+  name.className = "traj-step-name";
+  name.textContent = label;
+  row.appendChild(name);
+  const time = document.createElement("span");
+  time.className = "traj-step-time";
+  time.textContent = meta;
+  row.appendChild(time);
+  row.addEventListener("click", () => {
+    trajStopPlay();
+    trajSelect(kind, index);
+  });
+  return row;
+}
+
+function trajSelect(kind, index) {
+  trajSel = { kind, index };
+  trajEl.steps.querySelectorAll(".traj-step").forEach((row) => {
+    row.classList.toggle(
+      "is-current",
+      row.dataset.kind === kind && Number(row.dataset.index) === index
+    );
+  });
+  trajEl.timeline.querySelectorAll(".traj-seg").forEach((seg, i) => {
+    seg.classList.toggle("is-current", kind === "tool" && i === index);
+  });
+  const current = trajEl.steps.querySelector(".traj-step.is-current");
+  if (current) current.scrollIntoView({ block: "nearest" });
+  renderTrajDetail();
+}
+
+function renderTrajDetail() {
+  const host = trajEl.detail;
+  host.textContent = "";
+  if (!trajData || !trajSel) return;
+  if (trajSel.kind === "init") {
+    trajField(host, t("traj.task", "Task"), (trajData.initial || {}).task || "");
+    Object.entries((trajData.initial || {}).meta || {}).forEach(([key, value]) => {
+      if (key !== "task") trajField(host, key, String(value));
+    });
+    if (trajData.error) trajField(host, t("traj.error", "Error"), trajData.error);
+    return;
+  }
+  if (trajSel.kind === "turn") {
+    const turn = (trajData.iterations || [])[trajSel.index];
+    if (!turn) return;
+    trajField(host, t("traj.reasoning", "Reasoning"), turn.reasoning);
+    trajField(host, t("traj.code", "Code"), turn.code, true);
+    trajField(host, t("traj.output", "Output"), turn.output, true);
+    return;
+  }
+  const entry = (trajData.timeline || [])[trajSel.index];
+  if (!entry) return;
+  trajField(host, t("traj.tool", "Tool"), `${entry.label}${entry.target ? ` · ${entry.target}` : ""}`);
+  if (entry.verdict) trajField(host, t("traj.verdict", "Verdict"), entry.verdict);
+  if (entry.content) trajField(host, t("traj.result", "Result"), entry.content, true);
+  if (entry.input) trajField(host, t("traj.input", "Input"), entry.input, true);
+  if (entry.output) trajField(host, t("traj.output", "Output"), entry.output, true);
+  if (entry.error) trajField(host, t("traj.error", "Error"), entry.error);
+  Object.entries(entry.fields || {}).forEach(([key, value]) => trajField(host, key, String(value)));
+}
+
+function trajField(host, label, value, mono) {
+  if (value == null || value === "") return;
+  const wrap = document.createElement("div");
+  wrap.className = "traj-field";
+  const name = document.createElement("div");
+  name.className = "traj-field-name";
+  name.textContent = label;
+  wrap.appendChild(name);
+  const body = document.createElement("div");
+  // `textContent`, always — every string here came out of a model that has been reading source
+  // content an attacker may have written (invariant 29's rule, at the surface it matters most).
+  body.className = mono ? "traj-field-body is-mono" : "traj-field-body";
+  body.textContent = value;
+  wrap.appendChild(body);
+  host.appendChild(wrap);
+}
+
+// ---- replay transport ----------------------------------------------------------------------
+// Dwell on each stop for the time it REALLY took, divided by the speed — so watching at 1× is
+// watching the run happen. A stop with no live timing gets a brief nominal length rather than
+// being skipped, which would silently drop every turn of a finalize-flushed trace.
+
+function trajStops() {
+  return [{ kind: "init", index: 0 }].concat(
+    (trajData?.iterations || []).map((turn) => ({ kind: "turn", index: turn.index }))
+  );
+}
+
+function trajRealMs(stop) {
+  if (stop.kind === "turn" && trajData?.per_turn_timing) {
+    const turn = (trajData.iterations || [])[stop.index];
+    return Math.max(0, (turn?.duration_s || 0) * 1000);
+  }
+  return TRAJ_NOMINAL_MS;
+}
+
+function trajStep(direction) {
+  trajStopPlay();
+  const stops = trajStops();
+  // A TOOL selection is not a walkable stop, so stepping from one starts at its own turn — the
+  // reader keeps moving through the run instead of being bounced back to the start.
+  const from = trajSel && trajSel.kind === "tool"
+    ? stops.findIndex((s) => s.kind === "turn" && s.index === trajToolTurn(trajSel.index))
+    : stops.findIndex((s) => trajSel && s.kind === trajSel.kind && s.index === trajSel.index);
+  const at = from < 0 ? 0 : from;
+  const next = stops[Math.min(stops.length - 1, Math.max(0, at + direction))];
+  if (next) trajSelect(next.kind, next.index);
+}
+
+function trajToolTurn(seq) {
+  const entry = (trajData?.timeline || [])[seq];
+  return entry && entry.turn_index != null ? entry.turn_index : 0;
+}
+
+function trajTogglePlay() {
+  if (trajPlayTimer) return trajStopPlay();
+  trajEl.play.textContent = "⏸";
+  trajAdvance(true);
+}
+
+function trajAdvance(first) {
+  const stops = trajStops();
+  let at = stops.findIndex((s) => trajSel && s.kind === trajSel.kind && s.index === trajSel.index);
+  if (at < 0) at = 0;
+  if (!first) at += 1;
+  if (at >= stops.length) return trajStopPlay();
+  trajSelect(stops[at].kind, stops[at].index);
+  const dwell = Math.max(TRAJ_DWELL_FLOOR_MS, trajRealMs(stops[at]) / Math.max(1e-9, trajSpeed));
+  trajPlayTimer = setTimeout(() => trajAdvance(false), dwell);
+}
+
+function trajStopPlay() {
+  clearTimeout(trajPlayTimer);
+  trajPlayTimer = null;
+  if (trajEl.play) trajEl.play.textContent = "▶";
+}
+
+function trajRefreshTransport() {
+  const off = trajStops().length <= 1;
+  [trajEl.prev, trajEl.play, trajEl.next].forEach((b) => {
+    if (b) b.disabled = off;
+  });
+  if (off) trajStopPlay();
+}
+
+// ---- search --------------------------------------------------------------------------------
+
+function trajSearch(query) {
+  const needle = (query || "").trim().toLowerCase();
+  trajMatches = [];
+  trajMatchCur = -1;
+  trajEl.steps.querySelectorAll(".traj-step").forEach((row) => {
+    const kind = row.dataset.kind;
+    const index = Number(row.dataset.index);
+    let hay = "";
+    if (kind === "turn") {
+      const turn = (trajData?.iterations || [])[index] || {};
+      hay = `${turn.reasoning || ""}\n${turn.code || ""}\n${turn.output || ""}`;
+    } else {
+      hay = JSON.stringify(trajData?.initial || {});
+    }
+    const hit = needle !== "" && hay.toLowerCase().includes(needle);
+    row.classList.toggle("is-match", hit);
+    if (hit) trajMatches.push({ kind, index });
+  });
+  trajEl.searchCount.textContent = needle === ""
+    ? ""
+    : t("traj.matches", `${trajMatches.length} matches`, { n: trajMatches.length });
+}
+
+function trajCycleMatch() {
+  if (!trajMatches.length) return;
+  trajMatchCur = (trajMatchCur + 1) % trajMatches.length;
+  const target = trajMatches[trajMatchCur];
+  trajStopPlay();
+  trajSelect(target.kind, target.index);
+}
+
+trajInit();

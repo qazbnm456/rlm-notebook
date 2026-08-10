@@ -2132,8 +2132,19 @@ body.is-resizing .cols {
   border-bottom-color: var(--accent);
 }
 
+/* `flex: none` was right while a locator was `whole` / `page:3` / `ts:04:10` and wrong the moment
+   one was not: a locator is MODEL OUTPUT, and a run was observed writing a whole section heading
+   into it, which an unshrinkable chip then stretched until the rest of the meta row was pushed out
+   of the card. It shrinks and clamps now — a bad value is ugly in one chip instead of breaking the
+   row around it. (The pre-SUBMIT coordinate check stops that value being produced; this stops the
+   next unforeseen one from costing the reader the row.) */
 .reference-locator {
-  flex: none;
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 16rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 0.72rem;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
@@ -3196,3 +3207,403 @@ body.is-resizing .studio-grip {
   margin-top: 0.42em;
 }
 
+
+/* --- Scrollbars ---------------------------------------------------------------------------------
+   The UA scrollbar is painted from the OS theme, not the page's, so on the dark theme every
+   scroller here showed a near-white track with a grey thumb — a bright vertical bar down the middle
+   of the app, reported from a screenshot. Both spellings are needed and they are NOT alternatives:
+   `scrollbar-color`/`-width` is the standard (Firefox, and Chromium 121+), `::-webkit-scrollbar` is
+   what Safari and older Chromium read, and neither covers the other's browsers.
+
+   Deliberately an OVERLAY look — a transparent track and a thumb inset by a transparent border with
+   `background-clip: padding-box` — so a scroller gains no visible chrome when it has nothing to
+   scroll, and the gutter width stops mattering to the layout. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: padding-box;
+  border-radius: 999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-faint);
+  background-clip: padding-box;
+}
+
+/* The corner where two scrollbars meet: without this it paints the UA's own colour and reappears as
+   a bright square in the bottom-right of any box that scrolls both ways. */
+::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+/* Why a reference says "unverified", where a reader who wants to know is already looking. The
+   badge in the row is a label; this is the sentence. Deliberately NOT a tooltip: `.col` is
+   `overflow-y: auto` and would clip one anchored this deep (invariant 54's ancestor case). */
+.ref-card-why {
+  margin: 0 0 0.4rem;
+  padding: 0.4rem 0.5rem;
+  border-left: 2px solid var(--bad);
+  border-radius: 0 var(--radius) var(--radius) 0;
+  background: color-mix(in oklch, var(--bad) 10%, var(--surface-1));
+  color: var(--text-dim);
+  font-size: 0.74rem;
+  line-height: 1.5;
+}
+
+/* The server's own reason string — a coordinate and the locators that DO exist. Diagnostic rather
+   than prose, so it is set apart from the sentence above rather than blended into it. */
+.ref-card-why-detail {
+  margin: -0.2rem 0 0.5rem;
+  padding: 0 0.5rem;
+  color: var(--text-faint);
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+/* The quote the reader actually clicked, among the several a repeatedly-cited source carries.
+   Owns `border-color` + a bar; `.reference-quote` itself owns background, so the two never fight
+   over one property (the collision invariants 44 and 58 both record). */
+.reference-quote.is-wanted {
+  border-color: var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+
+/* --- Trajectory drawer --------------------------------------------------------------------------
+   A bottom sheet replaying one RLM run — the sibling `nuclei-forge/studio`'s shape. It exists
+   because the inline step log put the planner's own reasoning prose inside the chat bubble, where
+   a user reported it as unreadable and space-consuming.
+
+   Every `hidden`-toggled class here pairs its author `display` with a LONGER `[hidden]` selector,
+   so the guard wins on specificity regardless of source order — invariant 36, whose tripwire
+   compares by class name and would happily accept a guard that loses the cascade. */
+/* `pointer-events` is NOT decoration here. `closeTrajectory` only sets `hidden` after the 280ms
+   slide-out, so between losing `.is-shown` and that timer the backdrop is still full-viewport,
+   `z-index: 900` and hit-testable — closing the drawer and immediately clicking a Studio tab ate
+   the click. A shorter-lived instance of exactly what invariant 36 records for `.modal-overlay`. */
+.traj-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 900;
+  background: oklch(0% 0 0 / 0.45);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 240ms ease;
+}
+
+.traj-backdrop.is-shown {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.traj-backdrop[hidden] {
+  display: none;
+}
+
+.traj-drawer {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 901;
+  height: min(56vh, 34rem);
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-1);
+  border-top: 1px solid var(--border-strong);
+  border-radius: var(--radius) var(--radius) 0 0;
+  box-shadow: 0 -8px 32px oklch(0% 0 0 / 0.28);
+  transform: translateY(100%);
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), height 200ms ease;
+}
+
+.traj-drawer.is-open {
+  transform: translateY(0);
+}
+
+.traj-drawer.is-full {
+  height: 94vh;
+}
+
+.traj-drawer[hidden] {
+  display: none;
+}
+
+.traj-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.traj-title {
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.traj-stat,
+.traj-axis-end,
+.traj-search-count {
+  color: var(--text-faint);
+  font-size: 0.72rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.traj-spacer {
+  flex: 1 1 auto;
+}
+
+.traj-run {
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 0.72rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.traj-run[hidden] {
+  display: none;
+}
+
+.traj-icon {
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  cursor: pointer;
+  font-size: 0.9rem;
+  padding: 0.1rem 0.3rem;
+}
+
+.traj-icon:hover {
+  color: var(--text);
+}
+
+.traj-note {
+  padding: 0.3rem 0.75rem;
+  font-size: 0.7rem;
+  color: var(--text-faint);
+  border-bottom: 1px solid var(--border);
+}
+
+.traj-note.is-live {
+  color: var(--accent);
+}
+
+/* The other half of the pair. It was set by the JS and never defined here, so a trace with no live
+   timing rendered a state that did not exist — harmless, and exactly the kind of half-wired class
+   that reads as intentional to the next person. */
+.traj-note.is-info {
+  color: var(--text-faint);
+}
+
+.traj-note[hidden] {
+  display: none;
+}
+
+/* The tool timeline. Segment width is PROPORTIONAL to real elapsed time (`flex-grow` from
+   `duration_s`), which is the entire reason this strip exists: a slow call is visibly wide rather
+   than a number the reader has to compare. */
+.traj-timeline-wrap {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.traj-timeline {
+  flex: 1 1 auto;
+  display: flex;
+  gap: 2px;
+  height: 0.85rem;
+  min-width: 0;
+}
+
+.traj-seg {
+  flex: 1 1 0;
+  min-width: 3px;
+  border: none;
+  border-radius: 2px;
+  background: var(--border-strong);
+  cursor: pointer;
+  padding: 0;
+}
+
+.traj-seg.fam-skill {
+  background: color-mix(in oklch, var(--accent) 65%, var(--surface-2));
+}
+
+.traj-seg.fam-validate {
+  background: color-mix(in oklch, var(--good, var(--accent)) 55%, var(--surface-2));
+}
+
+.traj-seg.fam-lifeline {
+  background: color-mix(in oklch, var(--warn, var(--accent)) 55%, var(--surface-2));
+}
+
+.traj-seg.is-bad {
+  background: var(--bad);
+}
+
+.traj-seg.is-current {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.traj-transport {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.traj-search {
+  flex: 0 1 16rem;
+  min-width: 0;
+  background: var(--surface-2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.2rem 0.4rem;
+  font: inherit;
+  font-size: 0.74rem;
+}
+
+.traj-btn {
+  padding: 0.15rem 0.5rem;
+  font-size: 0.75rem;
+}
+
+.traj-speed {
+  font-variant-numeric: tabular-nums;
+  min-width: 2.6rem;
+}
+
+.traj-body {
+  flex: 1 1 auto;
+  display: flex;
+  min-height: 0;
+}
+
+.traj-steps {
+  flex: 0 0 12rem;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  padding: 0.3rem;
+}
+
+.traj-step {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  width: 100%;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: left;
+  padding: 0.25rem 0.4rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.traj-step:hover {
+  background: var(--surface-2);
+}
+
+/* Current owns `background` + a bar; match owns `border-color`. Disjoint properties, because the
+   two can be true at once and equal specificity would otherwise make the later rule win outright —
+   the collision invariants 44 and 58 each record once. */
+.traj-step.is-current {
+  background: color-mix(in oklch, var(--accent) 16%, var(--surface-2));
+  box-shadow: inset 2px 0 0 var(--accent);
+  color: var(--text);
+}
+
+.traj-step.is-match {
+  border: 1px solid var(--accent);
+  padding: calc(0.25rem - 1px) calc(0.4rem - 1px);
+}
+
+.traj-step-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.traj-step-time {
+  flex: none;
+  color: var(--text-faint);
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.traj-detail {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem;
+  min-width: 0;
+}
+
+.traj-field {
+  margin-bottom: 0.7rem;
+}
+
+.traj-field-name {
+  color: var(--text-faint);
+  font-size: 0.66rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  margin-bottom: 0.2rem;
+}
+
+.traj-field-body {
+  color: var(--text-dim);
+  font-size: 0.78rem;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.traj-field-body.is-mono {
+  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+  font-size: 0.72rem;
+  background: var(--surface-2);
+  border-radius: var(--radius);
+  padding: 0.4rem 0.5rem;
+  max-height: 22rem;
+  overflow: auto;
+}
+
+@media (max-width: 720px) {
+  .traj-body {
+    flex-direction: column;
+  }
+
+  .traj-steps {
+    flex: 0 0 8rem;
+    border-right: none;
+    border-bottom: 1px solid var(--border);
+  }
+}

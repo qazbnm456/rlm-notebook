@@ -977,3 +977,193 @@ def test_the_run_status_line_wraps_rather_than_truncating():
         "reader watching a slow run is actually reading"
     )
     assert "text-overflow: ellipsis" not in body
+
+
+def test_the_scrollbar_is_themed_in_both_spellings():
+    """The UA paints a scrollbar from the OS theme, not the page's, so the dark theme showed a
+    near-white track down the middle of every scroller — reported from a screenshot.
+
+    Both spellings are REQUIRED and are not alternatives: `scrollbar-color` is the standard
+    (Firefox, Chromium 121+), `::-webkit-scrollbar` is Safari and older Chromium. Shipping one
+    leaves the other's users looking at the bug."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    assert "scrollbar-color:" in css and "scrollbar-width:" in css
+    assert "::-webkit-scrollbar-thumb" in css and "::-webkit-scrollbar-track" in css
+    # The colours must come from the palette, or the fix reintroduces the bug on the other theme.
+    thumb = re.search(r"::-webkit-scrollbar-thumb\s*\{([^}]*)\}", css)
+    assert thumb and "var(--" in thumb.group(1), thumb.group(1) if thumb else "no thumb rule"
+
+
+def test_a_citation_hover_names_the_source_not_the_raw_coordinate():
+    """It read `s1 · whole` — the interface's own filing system. A user pointed out that nobody can
+    tell what `s1` is."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "span.title = citationHoverLabel(match.citation);" in js
+    assert re.search(
+        r"span\.title\s*=\s*`\$\{match\.citation\.source_id\}", js
+    ) is None, "the raw coordinate is back in the hover label"
+    # And the helper must drop a `whole` locator, which is what every single-block source carries.
+    helper = re.search(r"function citationHoverLabel\(citation\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert helper and '!== "whole"' in helper.group(1), "a `whole` locator is shown as if it located"
+
+
+def test_clicking_a_citation_opens_its_reference_card_at_the_right_quote():
+    """Arriving at a collapsed row left the reader to click it and then work out which of its
+    quotes was theirs — "還是得自己點開並慢慢追", reported verbatim."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    focus = re.search(r"function focusReference\(citation\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert focus, "focusReference is gone"
+    assert "_openCard(citation.quote" in focus.group(1), (
+        "focusReference no longer opens the card at the clicked quote"
+    )
+    # The card must actually honour the requested quote rather than always highlighting the first.
+    assert "reference.quotes.includes(wanted) ? wanted : reference.quotes[0]" in js
+    # ...and the marker must still DO something. A review replaced this function's body with
+    # `return;` — killing the whole reported behaviour — and every assertion above still passed.
+    marker = re.search(r"function markWantedQuote\(cardBody, quote\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert marker, "markWantedQuote is gone"
+    body = marker.group(1)
+    assert "is-wanted" in body, "markWantedQuote no longer marks anything"
+    # ...and the toggle must be REACHABLE. A token check alone is defeated by an early `return`,
+    # which is exactly the mutation an independent review used to gut this function while leaving
+    # the token in place. A source-tree test cannot prove reachability in general; asserting the
+    # body does not OPEN with an unconditional return catches the whole class that matters here.
+    first = next(
+        (ln.strip() for ln in body.splitlines()
+         if ln.strip() and not ln.strip().startswith(("//", "/*", "*"))),
+        "",
+    )
+    assert not re.match(r"^return\s*;?$", first), f"markWantedQuote returns before it marks: {first!r}"
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    assert ".reference-quote.is-wanted" in css, "the marked quote has no styling to show for it"
+
+
+def test_an_unverified_reference_explains_itself_rather_than_only_labelling_itself():
+    """A user asked what "未通過驗證" means. The answer is narrow and matters: the COORDINATE could
+    not be found (invariant 5 verifies coordinates, never faithfulness), so the quote may be fine
+    and filed under the wrong address. A label that never says that is a label nobody can act on."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "cite.unverifiedWhy" in js
+    assert "reference.reason" in js, "the server's own reason is never shown"
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    assert ".ref-card-why" in css
+    # An unverified coordinate matches no block; filtering by it alone would render an empty box.
+    assert "blocks.length ? blocks : data.blocks" in js, (
+        "an unverified citation's card would show source meta and no passage at all"
+    )
+
+
+def test_a_long_locator_cannot_break_the_reference_row():
+    """A locator is MODEL OUTPUT. One run wrote a whole section heading into it, and `flex: none`
+    made the chip unshrinkable, so it pushed the rest of the meta row out of the card."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    rule = re.search(r"\.reference-locator\s*\{([^}]*)\}", css)
+    assert rule, ".reference-locator is gone"
+    body = rule.group(1)
+    assert "flex: none" not in body, "an unshrinkable locator chip is back"
+    assert "min-width: 0" in body and "text-overflow: ellipsis" in body, body
+
+
+def test_the_chat_bubble_no_longer_carries_the_reasoning_log():
+    """The whole point of the drawer. A user reported the expanded steps as unreadable prose taking
+    up the answer's space; leaving the log appended would mean shipping the drawer AND the problem
+    it was built to remove."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "node.appendChild(logToggle);" in js, "the steps pill is gone entirely"
+    # BOTH spellings. A review re-shipped the log with `node.append(log)` and the first version of
+    # this test passed — it only knew the name of the method that happened to be used before.
+    assert re.search(r"^\s*node\.append(Child)?\(\s*log\s*\)", js, re.MULTILINE) is None, (
+        "the inline reasoning log is being appended into the chat again"
+    )
+    # And the pill must open the drawer rather than unfold in place.
+    assert "logToggle.addEventListener(\"click\", () => openTrajectory(runIds));" in js
+
+
+def test_the_trajectory_drawer_guards_every_hidden_toggled_display():
+    """Invariant 36, at the surface most likely to trip it: a drawer is `hidden`-toggled AND needs
+    `display: flex` for its own layout, which is exactly the pairing that shipped broken twice."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    for cls in (".traj-drawer", ".traj-backdrop", ".traj-note", ".traj-run"):
+        assert re.search(rf"{re.escape(cls)}\[hidden\]\s*\{{[^}}]*display:\s*none", css), (
+            f"{cls} is hidden-toggled with no [hidden] guard — the UA rule loses to any author "
+            f"display, which is how the modal overlay swallowed every click on the page"
+        )
+
+
+def test_the_timeline_segment_width_tracks_real_time():
+    """The strip's only reason to exist. A row of equal segments is a decoration; width
+    proportional to `duration_s` is what makes a slow call visible without reading numbers."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    grow = re.search(r"seg\.style\.flexGrow\s*=\s*String\(([^)]*\))?", js)
+    assert grow, "timeline segments no longer size themselves"
+    assert "entry.duration_s" in grow.group(0), grow.group(0)
+
+
+def test_the_replay_dwell_is_the_real_duration_divided_by_speed():
+    """"Replay" that steps at a fixed interval is a slideshow. Dwelling for the time a turn really
+    took is what makes 1× mean "watch the run happen"."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "trajRealMs(stops[at]) / Math.max(1e-9, trajSpeed)" in js
+    # A stop with no live timing must still be walkable, or a finalize-flushed trace replays as
+    # nothing at all.
+    real = re.search(r"function trajRealMs\(stop\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert real and "TRAJ_NOMINAL_MS" in real.group(1), "an untimed stop is skipped"
+
+
+def test_the_trajectory_detail_is_built_with_textcontent():
+    """Every string in this drawer came out of a model that has been reading source content an
+    attacker may have written (invariant 6), and this is the one view that renders raw REPL output
+    and tool results. Invariant 29's rule where it matters most."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    field = re.search(r"function trajField\(host, label, value, mono\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert field, "trajField is gone"
+    assert "body.textContent = value;" in field.group(1)
+    assert "innerHTML" not in field.group(1)
+
+
+def test_the_interface_language_is_actually_sent():
+    """The reading side is pinned in `test_api.py`; the SENDING side was not. A review deleted the
+    one line that sets the header and the whole suite stayed green — with the user's original
+    report (Chinese interface, English title) fully restored."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    api_fn = re.search(r"async function api\(path, options\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert api_fn, "the api() choke point is gone"
+    body = api_fn.group(1)
+    assert '"X-RLM-Interface-Language": uiLangName()' in body, body
+    # It must reach fetch: building `opts` and then passing `options` sends nothing.
+    assert "fetch(path, opts)" in body, body
+
+
+def test_no_control_carries_both_data_tip_and_title():
+    """Invariant 47 replaced the native `title=` with this project's own instant tooltip. Carrying
+    both shows the styled tip at 120ms and the OS one on top of it a second later — two tooltips
+    for one control, which is the regression that invariant records fixing."""
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    doubled = re.findall(r'data-tip="[^"]*"\s+title="[^"]*"', html)
+    assert not doubled, f"{len(doubled)} controls carry both: {doubled[:3]}"
+
+
+def test_the_trajectory_backdrop_cannot_eat_clicks_while_it_fades_out():
+    """`closeTrajectory` sets `hidden` only after the 280ms slide-out, so without this the backdrop
+    stays full-viewport and hit-testable for that window — close the drawer, click a Studio tab,
+    and the click is swallowed. The short-lived form of invariant 36's `.modal-overlay` failure."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    base = re.search(r"\.traj-backdrop\s*\{([^}]*)\}", css)
+    shown = re.search(r"\.traj-backdrop\.is-shown\s*\{([^}]*)\}", css)
+    assert base and "pointer-events: none" in base.group(1), base.group(1) if base else "no rule"
+    assert shown and "pointer-events: auto" in shown.group(1), "the open backdrop cannot be clicked"
+
+
+def test_a_live_trajectory_poll_keeps_the_readers_place():
+    """The drawer re-fetches every few seconds while a run is live — the one case reading a live
+    trace exists to serve. Rebuilding unconditionally sent a reader watching a long podcast back to
+    "Start" with an emptied search box every 4 seconds."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    render = re.search(r"function renderTrajectory\(runId\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert render, "renderTrajectory is gone"
+    body = render.group(1)
+    assert "const priorSel = trajSel;" in body and "trajSearch(priorQuery)" in body, body[-400:]
+    assert re.search(r'trajEl\.search\.value\s*=\s*""', body) is None, (
+        "the live poll clears the reader's search box again"
+    )
+    assert 'trajSelect("init", 0);' not in body, "the live poll resets the selection unconditionally"

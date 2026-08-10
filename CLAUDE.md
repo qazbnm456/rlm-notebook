@@ -2409,4 +2409,125 @@ them exist because an earlier design discussion mentioned them.
     line is simply UNMEASURED. The fallback is justified by the default provider, where the failure
     is measured — not by a second one where it was assumed.
 
+67. **The pre-SUBMIT validator checks each citation's COORDINATE against the corpus this run was
+    given, and the six tasks share ONE base class instead of six identical `__init__`s.** A user
+    reported red "unverified" badges on their overview. All five of its citations had failed, and
+    the cause was specific: every web source is one block with locator `whole`, and the model had
+    written the SECTION HEADING it was citing into `locator` — `'Making findings you can trust'`
+    where `'whole'` was the only legal value. The chat turns on the same notebook were 12/12 clean,
+    so this is a per-task behaviour, not a corpus problem.
+
+    **`citations.verify_citations` remains the guarantee (invariant 5); this is the early warning.**
+    The same ground truth, computed from the SAME blob, applied while the model can still fix it
+    rather than after the reader has found it. `instructions.coordinates_in` extracts every
+    `source_id|locator` pair that actually occurs as a marker; `_cited_coordinates` walks the output
+    model STRUCTURALLY (anything carrying both fields) rather than importing `Citation`, so a future
+    citation-shaped model is covered without anyone remembering this function.
+
+    **The rejection shows a REAL coordinate, not just which ones are wrong.** The observed failure
+    is a model composing a locator out of the passage's own wording, and a message that only says
+    "wrong" invites it to compose a different sentence. It lists up to four markers from this
+    corpus, so the shape is visible.
+
+    **It fails OPEN when the blob yields no markers at all**, and that is deliberate rather than an
+    oversight of invariant 66's "a guard that fails open is worse than no guard". An empty set means
+    "we do not know what is valid here"; rejecting every citation of a legitimate run is a far worse
+    outcome than letting server-side verification catch an invented one. The trigger is stated and
+    tested, which is the difference from the silent kind.
+
+    **`instructions.GroundedTask` is the base all six tasks now share.** The check needs a per-RUN
+    value, which a `ClassVar` tool list composed at import time cannot hold: `arun` captures the
+    blob before the model can cite anything, and the validator is built per instance from
+    `output_model`. That deleted six byte-identical `__init__`s AND six
+    `tools: ClassVar = [make_grounded_validator(X)]` lines — six chances for one task to be given a
+    weaker validator than the others, which is exactly how the marker check spent a slice living
+    only on the podcast.
+
+    **Consequence worth stating: `Task.tools` is now EMPTY at class level.** SIX test functions
+    (twelve cases, the Guide pair being parametrised over four tasks) asserted invariant 1 — "no
+    fetch/network tool is ever registered", plus `assert_repl_safe` — against that ClassVar, and
+    would have passed against a tuple of nothing: checking precisely what a run does not use. They
+    construct an instance now, which makes them stronger than before, not merely repaired.
+
+68. **A wall-clock backstop scales with the work that was asked for
+    (`schema.PODCAST_TIMEOUT_FACTOR`).** A `long` episode 502'd at the 300s default with a trace
+    holding three events: the run started, the model read two skills at 6.8s, and nothing else was
+    ever written before `killpg`. On the same notebook and model an ordinary chat answer took 77s
+    across 4-5 planner turns, one of them 54s alone — so a tier asking for 60-90 utterances
+    ACCUMULATED ACROSS TURNS (invariant 64) could not have fitted, and invariant 63 shipped a tier
+    unable to finish under its own default.
+
+    The backstop exists to catch a RUNAWAY, not to cap work a reader explicitly requested. Scaling
+    per request rather than raising the global default keeps a runaway CHAT turn bounded at the
+    value it always had, and an operator's `RN_RUN_TIMEOUT_SECONDS` still moves every tier because
+    the factor multiplies whatever they chose. The table lives NEXT TO the tier literal and a
+    tripwire asserts every tier has one and that the factors never decrease — adding a fourth tier
+    without deciding its budget should not be possible.
+
+69. **The INTERFACE language is a SIGNAL to output-language resolution — a fourth one, ranked above
+    `Accept-Language` — which narrows invariant 48 without merging it.** A user running a
+    Traditional-Chinese interface got a notebook titled "LLM Harnesses for Bug Hunting" and asked,
+    reasonably, why. Nothing was sending it: `naming.SuggestLanguage` weighed the browser's
+    `Accept-Language`, the sources' language and any questions asked, and the one place this person
+    had actually SAID which language they read was invisible to it.
+
+    **Chosen beats inherited.** `Accept-Language` comes from the operating system; the interface
+    language was picked in this app. That ordering is the whole justification, and it is the same
+    reasoning invariant 39 already uses to weight typed questions highest. Invariant 48's separation
+    survives: the settings page still carries both rows, an explicit output-language setting still
+    wins outright, and a Chinese interface over English papers is still expressible — it is now a
+    thing you state rather than the default.
+
+    **Carried in a header (`X-RLM-Interface-Language`), added once in `app.js`'s `api()`.**
+    `_resolve_language` is reached from every run-taking endpoint, so a body field would be five
+    schema changes and a sixth one forgotten. The value sent is the language's ENGLISH NAME, not
+    `zh-Hant`: the model answers in English language names, so sending a code or a word in the very
+    language it is identifying makes it parse rather than weigh. `i18n.js`'s header used to say
+    "Nothing here ever reaches a prompt"; that stopped being true and says so.
+
+    **A proper noun is never translated (`instructions.PROPER_NOUNS`), and this is the other half of
+    the same report.** "Trinity" must stay "Trinity" — translating the WORD hands a reader a term
+    they cannot search for, which is the opposite of what a research notebook is for. Composed into
+    BOTH `chat_language_rule` and `artifact_language_rule` from one constant (invariant 13), plus
+    the title prompt, which is a plain `dspy.Predict` and shares nothing. This generalises invariant
+    45's reversal — that one dropped transliteration for the PODCAST because the transcript is what
+    a listener falls back on; the same argument applies to every artifact a reader might search from.
+
+70. **The Trajectory drawer (`trajectory.py` + `GET .../runs/{run_id}/trajectory`) is where a run's
+    reasoning lives — NOT the chat bubble.** The inline step log put the planner's own prose inside
+    the answer, and a user reported it as unreadable and space-consuming. Full parity with the
+    sibling `nuclei-forge/studio`'s drawer, at the user's explicit choice between three scopes: turn
+    nav, a tool timeline whose segment width is proportional to real elapsed time, a detail pane,
+    search, and a replay transport that dwells on each turn for the time it REALLY took divided by
+    the speed.
+
+    **The decomposition is server-side and the two clocks are kept apart.** `iterations` (planner
+    turns) carries per-turn timing ONLY when the trace was live-stamped; an older trace flushed
+    every `main_step` at finalize, so their timestamps cluster and durations are OMITTED rather than
+    invented. `timeline` (tool and sub-LM calls) is always real. Conflating them would produce
+    confident numbers that are not measurements.
+
+    **Server-side because a trace can hold full ingested source text.** Invariant 29 already records
+    the trace endpoints as a materially different exposure than the rest of this no-auth API; the
+    per-field caps here are what keep a multi-megabyte REPL output from being shipped to a page that
+    renders a preview of it. This endpoint inherits invariant 25's posture as the FIFTH such surface.
+
+    **It reads a trace that is still being written**, which is the point for a run that takes
+    minutes: a torn final line means the writer is mid-flush and is skipped, not raised on. The read
+    happens in a thread, for the reason `_mutate_or_http` uses one.
+
+    **A `validate_*` call surfaces its VERDICT**, because on a failed run that is the single most
+    useful fact in the whole trace: exactly what the model was told to fix, and how many rounds it
+    took. That is the tool invariant 67 just taught to reject an invented coordinate.
+
+    **Interface copy is built from the BOOLEAN, not from the server's sentence.** `timing_note` is
+    English prose written in Python, and rendering it verbatim put an English line in the middle of
+    a Chinese drawer. The server says WHICH case holds; the interface says it in the reader's
+    language (invariant 48).
+
+    **Verified with a DOM shim under `node` against a real 12-turn trace**, since this project still
+    has no JS test runner (invariant 29) — 13 step rows, per-turn durations, proportional segment
+    widths, turn and tool details, search matching two turns, and stepping from a tool selection
+    landing on that tool's own turn rather than bouncing to the start.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

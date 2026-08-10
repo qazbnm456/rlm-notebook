@@ -2717,3 +2717,206 @@ def test_an_empty_skills_directory_wires_nothing_at_all(tmp_path):
     finally:
         if previous is not None:
             rt._CONFIG = previous
+
+
+def test_every_podcast_tier_has_a_wall_clock_allowance():
+    """A tier added without deciding its budget is a tier that ships unable to finish under the
+    default backstop — which is exactly what `long` did: it timed out at 300s with a trace holding
+    three events, on a notebook whose ordinary chat answer took 77s. Keeping the factors NEXT TO
+    the literal only helps if something fails when they drift apart."""
+    from typing import get_args
+
+    from rlm_notebook.schema import PODCAST_TIMEOUT_FACTOR, PodcastLength
+
+    assert set(get_args(PodcastLength)) == set(PODCAST_TIMEOUT_FACTOR)
+    factors = [PODCAST_TIMEOUT_FACTOR[t] for t in get_args(PodcastLength)]
+    assert factors == sorted(factors), factors
+    assert factors[0] >= 1.0, "no tier may get a SHORTER backstop than a chat turn"
+    # NON-DEGENERATE. Monotonicity alone is true of an all-equal table — i.e. of no scaling at all,
+    # which is precisely the state that 502'd the reported `long` episode. An independent review
+    # flattened this table to {1.0, 1.0, 1.0} and watched the whole suite stay green.
+    assert factors[-1] > factors[0], (
+        f"every tier gets the same backstop ({factors}) — that is the bug invariant 68 fixed"
+    )
+
+
+def test_the_podcast_run_gets_the_tier_scaled_backstop_not_the_default():
+    """Pins the WIRING. The factor table existing proves nothing if the handler still passes the
+    unscaled `config.run_timeout_seconds` — the reported 502 came from precisely that value
+    reaching `wait_result`."""
+    import inspect
+
+    from rlm_notebook import api
+
+    src = inspect.getsource(api.audio)
+    assert "PODCAST_TIMEOUT_FACTOR[body.length]" in src, (
+        "the podcast run no longer scales its wall-clock backstop by the requested tier"
+    )
+    # And the override actually reaches wait_result rather than being computed and dropped.
+    isolated = inspect.getsource(api._run_isolated)
+    assert "timeout=timeout or config.run_timeout_seconds" in isolated, isolated[-400:]
+
+
+def test_the_interface_language_reaches_language_resolution_as_a_signal():
+    """A user set the interface to Traditional Chinese and their notebook still came back titled
+    "LLM Harnesses for Bug Hunting". The chosen interface language is a real signal about what a
+    person reads and it was not being sent at all — only `Accept-Language`, which the OS chose."""
+    import inspect
+
+    from rlm_notebook import api, naming
+
+    src = inspect.getsource(api._resolve_language)
+    assert '"interface_language": request.headers.get("x-rlm-interface-language", "")' in src, src
+
+    # The receiving end must actually declare it, or the kwarg is silently accepted and ignored
+    # (invariant 39 records that exact asymmetry as the reason its own tripwire exists).
+    sig = inspect.signature(naming.SuggestLanguage.arun)
+    assert "interface_language" in sig.parameters
+    body = inspect.getsource(naming.SuggestLanguage.arun)
+    assert "interface_language: str -> language: str" in body, "not declared on the dspy signature"
+    assert "interface_language=interface_language" in body, "declared but never passed"
+
+
+def test_every_grounded_task_tells_the_model_to_keep_proper_nouns():
+    """"Trinity" must not become a translation of the word "trinity" — a translated name is the one
+    term a reader then cannot search for. Shared from ONE constant like every other language rule
+    (invariant 13), so it cannot land on some tasks and not others."""
+    from rlm_notebook.instructions import PROPER_NOUNS, artifact_language_rule, chat_language_rule
+
+    assert "Trinity" in PROPER_NOUNS
+    for rule in (chat_language_rule("Traditional Chinese"), artifact_language_rule("Japanese")):
+        assert PROPER_NOUNS in rule, "a language rule dropped the proper-noun paragraph"
+
+
+def _trace_events():
+    """A run with two turns, a skill read, a FAILED validate and a passing one — the shape a real
+    failed-then-fixed run has, which is exactly what a reader opens the drawer to understand."""
+    return [
+        {"type": "run_start", "step_id": 0, "ts": 1000.0, "payload": {"meta": {"task": "x:Y"}}},
+        {
+            "type": "main_step",
+            "step_id": 1,
+            "ts": 1002.0,
+            "payload": {"turn": 0, "reasoning": "look for it", "code": "find(...)", "output": "hit"},
+        },
+        {
+            "type": "tool_call",
+            "step_id": 2,
+            "ts": 1003.0,
+            "payload": {"tool": "read_skill", "args": {"name": "corpus-navigation"}, "result_len": 9},
+        },
+        {
+            "type": "tool_call",
+            "step_id": 3,
+            "ts": 1005.0,
+            "payload": {"tool": "validate_summary", "result": "Validation failed: bad coordinate"},
+        },
+        {
+            "type": "main_step",
+            "step_id": 4,
+            "ts": 1010.0,
+            "payload": {"turn": 1, "reasoning": "fix it", "code": "SUBMIT", "output": ""},
+        },
+        {"type": "run_end", "step_id": 5, "ts": 1014.0, "payload": {"ok": True, "error": None}},
+    ]
+
+
+def test_the_trajectory_separates_the_two_clocks_a_run_actually_has():
+    from rlm_notebook.trajectory import build_trajectory
+
+    traj = build_trajectory(_trace_events())
+    assert traj["total_s"] == 14.0
+    assert traj["ok"] is True
+    assert traj["per_turn_timing"] is True, "two turns 8s apart is live timing, not finalize-flush"
+
+    turns = traj["iterations"]
+    assert [t["index"] for t in turns] == [0, 1]
+    # Turn 0 runs until turn 1 starts; the LAST turn runs until the run ends.
+    assert turns[0]["duration_s"] == 8.0
+    assert turns[1]["duration_s"] == 4.0
+    assert turns[0]["rel_s"] == 2.0
+
+    line = traj["timeline"]
+    assert [e["label"] for e in line] == ["skill", "validate"]
+    # A call is attributed to the turn whose code produced it, never to the next one.
+    assert {e["turn_index"] for e in line} == {0}
+    # `duration_s` is the gap since the PREVIOUS live event, so three equal values would hide a bug.
+    assert [e["duration_s"] for e in line] == [3.0, 2.0]
+    assert [e["rel_s"] for e in line] == [3.0, 5.0]
+
+
+def test_a_failed_validate_surfaces_its_verdict_because_that_is_the_useful_part():
+    """A failed run's single most useful fact is what the validator told the model to fix — an
+    invented coordinate, a marker in prose, a shape error — and how many rounds it took."""
+    from rlm_notebook.trajectory import build_trajectory
+
+    entry = next(
+        e for e in build_trajectory(_trace_events())["timeline"] if e["label"] == "validate"
+    )
+    assert entry["passed"] is False
+    assert entry["verdict"] == "Validation failed: bad coordinate"
+    assert entry["target"] == "summary"
+
+
+def test_a_trace_with_no_run_end_still_decomposes():
+    """A run that was cancelled or timed out has no `run_end` — and is exactly the run someone most
+    wants to look at. The reported 502 produced precisely this shape: run_start, two tool calls,
+    then nothing."""
+    from rlm_notebook.trajectory import build_trajectory
+
+    traj = build_trajectory(_trace_events()[:4])
+    assert traj["ok"] is None and traj["total_s"] is None
+    assert len(traj["timeline"]) == 2
+    assert traj["iterations"][0]["turn"] == 0
+
+
+def test_finalize_flushed_timestamps_are_not_reported_as_per_turn_timing():
+    """An older trace wrote every `main_step` at finalize, so their timestamps cluster at one
+    instant. Reporting those as durations would invent numbers; the tool timeline is still real."""
+    from rlm_notebook.trajectory import build_trajectory
+
+    events = _trace_events()
+    for event in events:
+        if event["type"] == "main_step":
+            event["ts"] = 1013.9
+    traj = build_trajectory(events)
+    assert traj["per_turn_timing"] is False
+    assert all("duration_s" not in t for t in traj["iterations"])
+    assert all("turn_index" not in e for e in traj["timeline"])
+    assert [e["duration_s"] for e in traj["timeline"]] == [3.0, 2.0], "tool timing is still real"
+
+
+def test_the_trajectory_endpoint_refuses_a_run_id_from_another_notebook(tmp_path, monkeypatch):
+    """Same ownership check `stream_run`/`citation_turn` apply, and applied on the SLUG — invariant
+    38 records that comparing the raw id made every trace link dead for a non-Latin notebook."""
+    from fastapi.testclient import TestClient
+
+    from rlm_notebook import api
+
+    monkeypatch.setattr(api, "_TRACE_DIR", tmp_path)
+    with TestClient(api.app) as client:
+        resp = client.get("/notebooks/mine/runs/theirs-abc/trajectory")
+        assert resp.status_code == 404
+        assert "does not belong" in resp.json()["detail"]
+
+
+def test_the_trajectory_endpoint_reads_a_trace_that_is_still_being_written(tmp_path, monkeypatch):
+    """The drawer is how a reader watches a LONG run, not only how they inspect a finished one — a
+    `long` podcast is minutes of wall clock. The writer is appending while this reads, so a
+    half-written final line is the normal case, not an error."""
+    from fastapi.testclient import TestClient
+
+    from rlm_notebook import api
+    from rlm_notebook.notebook import slug
+
+    monkeypatch.setattr(api, "_TRACE_DIR", tmp_path)
+    run_id = f"{slug('nb1')}-abc"
+    lines = [json.dumps(e) for e in _trace_events()[:3]]
+    # ...plus a torn final line, exactly as a concurrent flush leaves it.
+    (tmp_path / f"{run_id}.jsonl").write_text("\n".join(lines) + '\n{"type": "main_ste', "utf-8")
+
+    with TestClient(api.app) as client:
+        body = client.get(f"/notebooks/nb1/runs/{run_id}/trajectory").json()
+    assert body["run_id"] == run_id
+    assert body["ok"] is None, "an unfinished run must not report an outcome"
+    assert len(body["iterations"]) == 1 and len(body["timeline"]) == 1

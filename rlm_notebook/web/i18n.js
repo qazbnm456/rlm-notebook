@@ -3,15 +3,33 @@
 // `RN_OUTPUT_LANGUAGE` / `Notebook.output_language` (invariant 39) decide what the MODEL writes —
 // answers, summaries, a podcast script. This decides what the BUTTONS say. They are different
 // questions with different right answers: a reader in Taiwan may well want a Chinese interface over
-// English papers, and folding the two together makes that combination unexpressible. Nothing here
-// ever reaches a prompt.
+// English papers, and folding the two together makes that combination unexpressible.
+//
+// The choice IS now sent to the server, as one SIGNAL among four that `naming.SuggestLanguage`
+// weighs when a notebook has no output language yet (`X-RLM-Interface-Language`, added in `api()`).
+// That is not the two settings merging: an explicit output-language setting still wins outright and
+// the settings page still carries both rows. It is that a reader who picked Traditional Chinese for
+// the interface has told us something real about what they read, and ranking it ABOVE
+// `Accept-Language` — which was inherited from the OS, not chosen here — is what a user asked for
+// after their notebook came back titled in English. An earlier version of this comment said nothing
+// here ever reaches a prompt; that stopped being true and is stated rather than left to be found.
 //
 // Zero-build, same as the rest of `web/`: a plain script defining globals, loaded before `app.js`.
 
 const UI_LANGUAGES = [
-  { code: "en", label: "English" },
-  { code: "zh-Hant", label: "繁體中文" },
+  // `name` is the ENGLISH name, and is what travels to the server as the language SIGNAL — the
+  // model weighing it answers in English language names ("Traditional Chinese"), so sending
+  // `zh-Hant` or `繁體中文` would make it parse a code or a word in the very language it is trying
+  // to identify. `label` stays in the language itself, because that is what a picker should show.
+  { code: "en", label: "English", name: "English" },
+  { code: "zh-Hant", label: "繁體中文", name: "Traditional Chinese" },
 ];
+
+// The English name of the interface language currently in force, for the request header.
+function uiLangName() {
+  const found = UI_LANGUAGES.find((l) => l.code === uiLang());
+  return found ? found.name : "";
+}
 
 const STRINGS = {
   en: {},  // the source language: every key falls back to `index.html`/`app.js`'s own text
@@ -99,7 +117,30 @@ const STRINGS = {
     "references.sub": "這個筆記本裡所有被引用過的段落，集中在一處。",
     "references.empty": "還沒有任何引用。先提問，或產生一份概覽。",
     "references.uses": "引用 {n} 次",
-    "cite.unverifiedShort": "未通過驗證",
+    // --- trajectory drawer
+    "traj.title": "執行軌跡",
+    "traj.search": "搜尋回合…",
+    "traj.stat": "{turns} 個回合 · {tools} 次工具呼叫",
+    "traj.init": "起始",
+    "traj.turn": "第 {n} 回合",
+    "traj.task": "任務",
+    "traj.reasoning": "推理",
+    "traj.code": "程式碼",
+    "traj.output": "輸出",
+    "traj.tool": "工具",
+    "traj.verdict": "驗證結果",
+    "traj.result": "結果",
+    "traj.input": "輸入",
+    "traj.error": "錯誤",
+    "traj.matches": "{n} 筆符合",
+    "traj.missing": "找不到這次執行的軌跡（{message}）",
+    "traj.timingLive": "每回合的耗時是即時記錄的 —— 在每個回合被解析時就寫下。",
+    "traj.timingStale": "這份軌跡沒有每回合的耗時（回合不是即時標記的，或這次執行太短）；上方的工具時間軸仍是真實時間。",
+    "cite.unverifiedShort": "座標對不上",
+    "cite.unverifiedHover": "{label} — 這個座標在來源中找不到",
+    "cite.unverifiedWhy":
+      "這則引用指向的位置在這個來源裡不存在，所以我們無法查核它。下面的引文本身仍可能是正確的 —— " +
+      "對不上的是位址，不一定是內容。",
     "studio.sub": "從你的來源產出的東西。這裡沒有任何操作會自動執行。",
     "studio.tab.summary": "摘要",
     "studio.tab.faq": "問答",
