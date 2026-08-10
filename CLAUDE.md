@@ -1732,6 +1732,19 @@ them exist because an earlier design discussion mentioned them.
     handler re-runs the panel renders. A renderer added later is translated by construction instead
     of by somebody remembering to subscribe.
 
+48.5 **The model must not number its own citations.** A real overview came back carrying `[1]`
+    through `[8]` in its prose while holding six citations, so the page showed two numbering systems
+    side by side and they disagreed — a superscript 3 next to a literal `[5]`. The interface numbers
+    citations itself, from the order it renders them in (invariant 60's `renumberStrokes`), and
+    draws each as a highlight on the span the model named; a number written into the sentence is a
+    second, competing scheme by construction.
+
+    **Prompt-only, deliberately.** A display-layer strip is what invariant 62 does for
+    `[[SRC:...]]`, which is unambiguous — nothing else produces that token. A bare `[1]` is not:
+    `arr[1]` is ordinary prose in this project's own subject matter, and stripping it would corrupt
+    a quote or a code snippet to tidy a number. Same residual-risk hedge as invariants 4 and 11: the
+    offline suite drives a scripted LM and can demonstrate nothing about compliance.
+
 49. **`Citation.answer_span` is the model pointing at its OWN prose, and it exists because locating
     the highlight by `quote` stopped being possible.** The UI's signature interaction — a citation
     drawn as a highlighter stroke through the sentence it backs — used to find its span with
@@ -2558,6 +2571,22 @@ them exist because an earlier design discussion mentioned them.
     readable minimum WIDTH and scroll rather than squash, a 226px turn nav of cards each with a
     preview line and a duration bar, and a detail pane that sets the model's own reasoning as PROSE
     with a quote rule instead of another monospace dump.
+
+    **A timeline segment is sized `flex: <duration> 0 <floor>px`, and BOTH halves fix the other's
+    failure.** Reimplementing the sibling's sizing from memory got it wrong twice, in opposite
+    directions: `flex-grow` against the strip's TOTAL divided it into slivers nothing could be read
+    in, and a fixed `width` then left a run with ONE tool call sitting at 316px beside empty space.
+    Grow makes a short run fill the strip; the basis is a floor so a fast call stays legible and the
+    strip SCROLLS rather than squashing. Reading the sibling's `renderTimeline` — rather than its
+    stylesheet alone — is what settled it, and is what should have happened first.
+
+    **A segment's label is the TARGET, not the family.** `skill corpus-navigation` repeats in words
+    what the icon and the segment's own colour already say; a user asked why the prefix was there.
+    The family, the offset and the owning turn moved to the detail pane, which is where clicking a
+    segment lands anyway — and where they are not clipped. A `data-tip` on a `.seg` is doomed twice
+    over: the segment clips itself, and `.traj-timeline` is an `overflow-x` ancestor, which is
+    invariant 54's explicitly-uncovered case. The tripwire caught the first half the moment it was
+    added.
 
     **A fixed-height box with `overflow: hidden` needs its line-heights DECLARED, and that is
     arithmetic rather than taste.** A timeline segment stacks an icon, a label and a duration in a

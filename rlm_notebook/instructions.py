@@ -306,7 +306,13 @@ it usable:
 Pick the smallest stretch that carries the claim: a sentence is usually right, a whole paragraph is
 too coarse to be useful, and three words are too little to find reliably. If a citation supports
 something you cannot point at that precisely, leave `answer_span` out — an absent span costs the
-reader a highlight, and a wrong one sends them to the wrong sentence.\
+reader a highlight, and a wrong one sends them to the wrong sentence.
+
+Do NOT number your citations in your own prose. No `[1]`, no `[2]`, no superscript markers written
+into the sentence. The interface numbers them, from the order it renders them in, and draws each one
+as a highlight on the exact span you named — so a number you write yourself becomes a SECOND
+numbering next to that one, and the two disagree the moment they count differently. Write the
+sentence as a sentence; the `citations` list is what carries the pointer.\
 """
 
 #: The carve-out every language instruction composes with. Kept SEPARATE from the language rules

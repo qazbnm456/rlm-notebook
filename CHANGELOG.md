@@ -2132,3 +2132,20 @@ questions with verifiable citations, and get a distilled research artifact out.
   size and every short scalar input the run was given: the question, the resolved language, the
   requested podcast tier. The corpus text never goes in, only its size; credentials never go in at
   all. Verified against a real run rather than assumed.
+
+- **The timeline's sizing was reimplemented from memory and wrong twice, in opposite directions.**
+  `flex-grow` against the strip's total made slivers; a fixed width then left a run with one tool
+  call sitting at 316px beside empty space, which a user reported. It is `flex: <duration> 0
+  <floor>px` now — the sibling's own sizing, read out of its `renderTimeline` rather than guessed
+  from its stylesheet. Grow fills a short run's strip; the floor keeps a fast call legible and lets
+  a long run scroll instead of squashing.
+
+  A segment's label is the TARGET now (`corpus-navigation`), not `skill corpus-navigation` — the
+  family is already the icon and the colour. Its offset and owning turn moved to the detail pane,
+  where clicking a segment lands anyway and where nothing clips them: a tooltip on a segment is
+  clipped by the segment AND by the scroller around it.
+
+- **The model was numbering its own citations.** One overview carried `[1]`..`[8]` in its prose
+  while holding six citations, so the page showed two numbering systems and they disagreed. The
+  interface numbers them; the prompt now says so. Prompt-only on purpose — `arr[1]` is ordinary
+  prose here, so a display-layer strip would corrupt real text to tidy a number.

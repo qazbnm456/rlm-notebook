@@ -3919,6 +3919,10 @@ function closeTrajectory() {
 
 //: Family colour + glyph per timeline segment. `--fam` is what the `.seg` rules tint themselves
 //: from, so one assignment drives border, background, hover and the current-state ring together.
+//: A segment never narrows past this, whatever its share of the run — the strip scrolls instead.
+//: Squashing every call into a sliver is what made the first version unreadable.
+const TRAJ_SEG_MIN_PX = 108;
+
 const TRAJ_FAMILIES = {
   skill: { color: "var(--accent)", glyph: "\u25a4" },
   validate: { color: "var(--ok)", glyph: "\u2713" },
@@ -4039,7 +4043,7 @@ function renderTrajTimeline(line, turns) {
     trajEl.timeline.appendChild(empty);
     return;
   }
-  const longest = line.reduce((m, e) => Math.max(m, e.duration_s || 0), 0) || 1;
+  const total = line.reduce((sum, e) => sum + (e.duration_s || 0), 0) || 1;
   let markedTurn = -1;
   line.forEach((entry) => {
     // A "from here = Turn N" marker wherever the owning turn changes, so the strip and the nav are
@@ -4049,8 +4053,14 @@ function renderTrajTimeline(line, turns) {
       const mark = document.createElement("button");
       mark.type = "button";
       mark.className = "turn-mark";
-      mark.textContent = `T${entry.turn_index}`;
-      mark.dataset.tip = t("traj.turn", `Turn ${entry.turn_index + 1}`, { n: entry.turn_index + 1 });
+      const markLabel = document.createElement("span");
+      markLabel.className = "tm-lab";
+      markLabel.textContent = `T${entry.turn_index}`;
+      mark.appendChild(markLabel);
+      const markArrow = document.createElement("span");
+      markArrow.className = "tm-arrow";
+      markArrow.textContent = "\u25b8";
+      mark.appendChild(markArrow);
       mark.addEventListener("click", () => {
         trajStopPlay();
         trajSelect("turn", entry.turn_index);
@@ -4063,10 +4073,14 @@ function renderTrajTimeline(line, turns) {
     seg.type = "button";
     seg.className = "seg";
     seg.style.setProperty("--fam", family.color);
-    // Width PROPORTIONAL to real elapsed time against the LONGEST call, with a readable floor. The
-    // first version used `flex-grow`, which divided the strip into slivers nothing could be read in.
-    const share = Math.max(0.12, (entry.duration_s || 0) / longest);
-    seg.style.width = `${Math.round(96 + share * 220)}px`;
+    // `flex: <duration> 0 <floor>px`, which is the sibling's own sizing and the part a first pass
+    // reimplemented from scratch and got wrong twice. GROW is what makes a run with one tool call
+    // fill the strip instead of sitting at a fixed width beside empty space (reported), and the
+    // basis is a floor so a fast call stays readable rather than collapsing to a sliver (also
+    // reported, from the version before that, which grew against the strip's total with no basis).
+    const dur = Math.max(entry.duration_s || 0, 0);
+    const basis = Math.max(TRAJ_SEG_MIN_PX, Math.round((dur / total) * 720));
+    seg.style.flex = `${Math.max(dur, 0.01).toFixed(3)} 0 ${basis}px`;
 
     const icon = document.createElement("span");
     icon.className = "seg-ic";
@@ -4075,13 +4089,17 @@ function renderTrajTimeline(line, turns) {
 
     const label = document.createElement("span");
     label.className = "seg-lab";
-    label.textContent = entry.target ? `${entry.label} ${entry.target}` : entry.label;
+    // The TARGET is the name a reader recognises — `corpus-navigation`, not `skill
+    // corpus-navigation`. The family is already carried by the icon and the segment's own colour,
+    // so repeating it in words is the redundancy a user asked about. It falls back to the family
+    // for a call that has no target, and the tooltip keeps both.
+    label.textContent = entry.target || entry.label;
     seg.appendChild(label);
 
-    const dur = document.createElement("span");
-    dur.className = "seg-dur";
-    dur.textContent = trajSecs(entry.duration_s);
-    seg.appendChild(dur);
+    const durEl = document.createElement("span");
+    durEl.className = "seg-dur";
+    durEl.textContent = trajSecs(entry.duration_s);
+    seg.appendChild(durEl);
 
     seg.addEventListener("click", () => {
       trajStopPlay();
@@ -4237,10 +4255,20 @@ function renderTrajDetail() {
 
   const entry = (trajData.timeline || [])[trajSel.index];
   if (!entry) return;
+  // The facts a tooltip would have carried live HERE — a `.seg` clips its own tip and sits inside
+  // an `overflow-x` scroller besides (invariant 54), and clicking one lands on this pane anyway.
   trajDetailHead(
     host,
     entry.target ? `${entry.label} \u00b7 ${entry.target}` : entry.label,
-    trajSecs(entry.duration_s)
+    [
+      entry.rel_s != null ? `+${trajSecs(entry.rel_s)}` : "",
+      trajSecs(entry.duration_s),
+      entry.turn_index != null
+        ? t("traj.turn", `Turn ${entry.turn_index + 1}`, { n: entry.turn_index + 1 })
+        : "",
+    ]
+      .filter(Boolean)
+      .join(" \u00b7 ")
   );
   if (entry.verdict) trajField(host, t("traj.verdict", "Verdict"), entry.verdict);
   if (entry.content) trajField(host, t("traj.result", "Result"), entry.content);

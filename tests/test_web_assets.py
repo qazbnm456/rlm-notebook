@@ -1134,14 +1134,26 @@ def test_the_timeline_segment_width_tracks_real_time():
     """The strip's only reason to exist. A row of equal segments is a decoration; width
     proportional to `duration_s` is what makes a slow call visible without reading numbers."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    share = re.search(r"const share = ([^;]*);", js)
-    assert share and "entry.duration_s" in share.group(1) and "longest" in share.group(1), (
-        f"timeline segments no longer size themselves from real time: {share and share.group(1)!r}"
+    # `flex: <duration> 0 <floor>px` — the sibling's own sizing, and reimplementing it from scratch
+    # got it wrong TWICE. Both halves are load-bearing and each fixes the other's failure:
+    #   GROW  — a run with ONE tool call fills the strip instead of sitting at a fixed width
+    #           beside empty space.
+    #   BASIS — a fast call keeps a readable minimum instead of collapsing to a sliver.
+    flex = re.search(r"seg\.style\.flex = `([^`]*)`", js)
+    assert flex, "timeline segments no longer size themselves"
+    assert "dur" in flex.group(1), f"the grow factor is not the call's duration: {flex.group(1)}"
+    assert "${basis}px" in flex.group(1), f"no flex-basis floor: {flex.group(1)}"
+    basis = re.search(r"const basis = ([^;]*);", js)
+    assert basis and "TRAJ_SEG_MIN_PX" in basis.group(1), "the floor is gone"
+    # ...and the constant must EXIST. An earlier edit landed the use without the declaration and
+    # this assertion passed on the spelling alone, while the drawer threw `ReferenceError` on every
+    # open. A source-tree test sees names, not bindings, unless it is told to look for both.
+    assert re.search(r"^const TRAJ_SEG_MIN_PX = \d+;", js, re.MULTILINE), (
+        "TRAJ_SEG_MIN_PX is used but never declared"
     )
-    # WIDTH, not flex-grow. Growing against the strip's total is what produced slivers nothing
-    # could be read in — the reported complaint. A floor keeps the shortest call legible.
-    assert re.search(r"seg\.style\.width\s*=", js), "segments size by flex again"
-    assert "Math.max(0.12" in share.group(1), "a fast call can shrink to an unreadable sliver"
+    assert "entry.duration_s" in re.search(r"const dur = ([^;]*);", js).group(1)
+    # And nothing may pin a width alongside it, which would freeze the grow.
+    assert not re.search(r"seg\.style\.width\s*=", js), "a fixed width is back, so grow is dead"
 
 
 def test_the_replay_dwell_is_the_real_duration_divided_by_speed():

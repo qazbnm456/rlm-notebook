@@ -3047,3 +3047,39 @@ def test_a_runs_inputs_reach_its_trace_but_the_corpus_never_does():
     assert "output_language" not in _input_meta({"output_language": "   "})
     # And the podcast's tier, which is exactly the "why is this 80 turns" answer.
     assert _input_meta({"target_length": "long"})["target_length"] == "long"
+
+
+def test_every_grounded_task_forbids_the_model_numbering_its_own_citations():
+    """A real overview came back with `[1]`..`[8]` written into its prose while carrying six
+    citations. The interface numbers citations itself, from the order it renders them in, so the
+    reader saw two numbering systems side by side — a superscript 3 next to a literal `[5]`.
+
+    Prompt-only, deliberately. A display-layer strip is what invariant 62 does for `[[SRC:...]]`,
+    which is unambiguous; a bare `[1]` is not — `arr[1]` is ordinary prose in this project's own
+    subject matter, and stripping it would corrupt a quote or a code snippet to tidy a number.
+    """
+    from rlm_harness import RLMConfig
+    from rlm_harness import runtime as rt
+
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
+    from rlm_notebook.task import AnswerQuestion
+
+    previous = getattr(rt, "_CONFIG", None)
+    rt.configure(RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False))
+    try:
+        for task_cls in (
+            AnswerQuestion,
+            GenerateSummary,
+            GenerateFAQ,
+            GenerateTimeline,
+            GenerateKeyInsight,
+            GeneratePodcastScript,
+        ):
+            instructions = task_cls(skills_dir=None).instructions
+            assert "Do NOT number your citations in your own prose" in instructions, (
+                f"{task_cls.__name__} does not carry the no-self-numbering rule"
+            )
+    finally:
+        if previous is not None:
+            rt._CONFIG = previous

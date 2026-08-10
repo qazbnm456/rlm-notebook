@@ -3532,8 +3532,10 @@ body.is-resizing .studio-grip {
   padding-bottom: 4px;
 }
 
+/* Sized INLINE as `flex: <duration> 0 <floor>px` (see `renderTrajTimeline`), so a run with one
+   tool call fills the strip and a run with twenty scrolls instead of squashing. No `flex` here:
+   the inline shorthand is the whole sizing model and a competing rule would only ever fight it. */
 .seg {
-  flex-shrink: 0;
   overflow: hidden;
   cursor: pointer;
   display: flex;
@@ -3610,6 +3612,11 @@ body.is-resizing .studio-grip {
 .turn-mark:hover {
   color: var(--accent);
   border-left-color: var(--accent);
+}
+
+.tm-arrow {
+  font-size: 0.6rem;
+  opacity: 0.7;
 }
 
 .traj-empty {
