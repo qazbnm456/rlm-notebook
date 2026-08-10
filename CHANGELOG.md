@@ -2121,3 +2121,14 @@ questions with verifiable citations, and get a distilled research artifact out.
   The worker also records what the run was configured with — model names and budgets, never
   credentials — because the "Initial state" panel was built from a meta holding only the task name,
   which the header already showed.
+
+- **A timeline segment was slicing its own label in half.** Three stacked lines in a 72px box with
+  `overflow: hidden`, and at the browser's default line-height they measured 74.3px. A test now
+  recomputes that sum from the stylesheet and fails when it exceeds the box, so the next size change
+  cannot reintroduce it quietly.
+
+- **"Initial state" carries the run's real metadata now.** It held the task name — which the drawer
+  already shows as its headline — and nothing else. It carries the models, the budgets, the corpus
+  size and every short scalar input the run was given: the question, the resolved language, the
+  requested podcast tier. The corpus text never goes in, only its size; credentials never go in at
+  all. Verified against a real run rather than assumed.

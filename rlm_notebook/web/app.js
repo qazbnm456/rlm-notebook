@@ -3925,6 +3925,23 @@ const TRAJ_FAMILIES = {
   lifeline: { color: "var(--warn)", glyph: "\u21d7" },
 };
 
+//: Chip labels for `run_start`'s meta. A raw key is the wire format, not a name a reader chose —
+//: and `source_chars` in particular means nothing until it says what it counts.
+const TRAJ_META_LABELS = {
+  main_model: "planner",
+  sub_model: "sub-LM",
+  max_iterations: "max turns",
+  max_tokens: "max tokens",
+  max_retries: "retries",
+  source_chars: "corpus chars",
+  output_language: "language",
+  language: "language",   // `naming.SuggestTitle` names it this way
+  target_length: "length",
+  question: "question",
+  accept_language: "Accept-Language",
+  interface_language: "interface",
+};
+
 function trajFamily(entry) {
   if (entry.ok === false || entry.passed === false) return { color: "var(--bad)", glyph: "\u2715" };
   return TRAJ_FAMILIES[entry.label] || { color: "var(--text-dim)", glyph: "\u25c6" };
@@ -4172,9 +4189,13 @@ function renderTrajDetail() {
       const chip = document.createElement("span");
       chip.className = "ini-chip";
       const name = document.createElement("b");
-      name.textContent = key;
+      name.textContent = TRAJ_META_LABELS[key] || key;
       chip.appendChild(name);
-      chip.appendChild(document.createTextNode(` ${value}`));
+      chip.appendChild(
+        document.createTextNode(
+          key === "source_chars" ? ` ${Number(value).toLocaleString()}` : ` ${value}`
+        )
+      );
       chips.appendChild(chip);
     });
     if (chips.children.length) {

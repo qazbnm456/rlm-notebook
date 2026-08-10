@@ -1341,3 +1341,39 @@ def test_both_steps_pills_open_the_trajectory_drawer():
     css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
     assert not re.search(r"\.ticker-detail\s*\{", css), "dead CSS for a removed element"
     assert not re.search(r"\.ticker-row\s*\{", css), "dead CSS for a removed element"
+
+
+def test_a_timeline_segment_cannot_clip_its_own_label():
+    """`.seg` is a fixed-height box with `overflow: hidden` and three stacked lines. Left to the
+    browser's ~1.5 default line-height they measured 74.3px inside a 72px box, so the MIDDLE line —
+    the label — was sliced through the letterforms. Reported from a screenshot showing
+    "skill corpus-navigation" cut in half.
+
+    Arithmetic, not taste: the height is the constraint, so every line has to declare what it costs.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    box = re.search(r"\.traj-timeline\s*\{([^}]*)\}", css)
+    assert box, ".traj-timeline is gone"
+    height = re.search(r"height:\s*(\d+)px", box.group(1))
+    assert height, f"the timeline no longer sets a height: {box.group(1)}"
+
+    total = 0.0
+    for cls, size in (("seg-ic", None), ("seg-lab", None), ("seg-dur", None)):
+        rule = re.search(rf"\.{cls}\s*\{{([^}}]*)\}}", css)
+        assert rule, f".{cls} is gone"
+        font = re.search(r"font-size:\s*([\d.]+)rem", rule.group(1))
+        lh = re.search(r"line-height:\s*([\d.]+)", rule.group(1))
+        assert font and lh, (
+            f".{cls} must declare BOTH font-size and line-height — an undeclared line-height "
+            f"defaults to about 1.5 and is what overflowed the box: {rule.group(1)}"
+        )
+        total += float(font.group(1)) * 16 * float(lh.group(1))
+
+    seg = re.search(r"\.seg\s*\{([^}]*)\}", css)
+    pad = re.search(r"padding:\s*(\d+)px", seg.group(1))
+    gap = re.search(r"gap:\s*(\d+)px", seg.group(1))
+    total += 2 * int(pad.group(1)) + 2 * int(gap.group(1))
+    assert total <= int(height.group(1)), (
+        f"a segment's content measures {total:.1f}px inside a {height.group(1)}px box — "
+        f"`.seg`'s own overflow:hidden will slice a line in half"
+    )

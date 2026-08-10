@@ -3561,13 +3561,21 @@ body.is-resizing .studio-grip {
   box-shadow: inset 0 0 0 1px var(--fam, var(--text-dim));
 }
 
+/* Every line in a segment declares its own `line-height`, and that is arithmetic rather than
+   taste. Left to the browser's ~1.5 default these three lines plus their gaps and padding measured
+   74.3px inside a 72px box, so `.seg`'s own `overflow: hidden` sliced the MIDDLE one in half —
+   which is precisely the label. Reported from a screenshot showing "skill corpus-navigation" cut
+   through the letterforms. At 1.25/1.3/1.3 the same content measures 64.6px and the box has room
+   to spare; the height is the constraint, so the lines have to be told what they cost. */
 .seg-ic {
   font-size: 0.8rem;
+  line-height: 1.25;
   color: var(--fam, var(--text-dim));
 }
 
 .seg-lab {
   font-size: 0.74rem;
+  line-height: 1.3;
   font-weight: 700;
   color: var(--text);
   overflow: hidden;
@@ -3576,6 +3584,7 @@ body.is-resizing .studio-grip {
 
 .seg-dur {
   font-size: 0.64rem;
+  line-height: 1.3;
   color: var(--text-faint);
   font-variant-numeric: tabular-nums;
 }

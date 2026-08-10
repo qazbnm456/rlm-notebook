@@ -110,6 +110,38 @@ def _render(exc: BaseException) -> str:
         return f"{type(exc).__name__}: <unprintable>"
 
 
+#: Kwargs whose VALUE must never reach a trace: the corpus blob and its relatives are megabytes,
+#: and a trace is the most exposed artifact this project writes (CLAUDE.md invariant 29). Their SIZE
+#: is recorded instead, which is the part that tells a reader what the run was working against —
+#: the same reasoning invariant 52 gives for streaming a step's output size and not its text.
+_BULKY_INPUTS = frozenset({"sources", "sources_excerpt", "history", "questions", "origins"})
+
+#: Above this, a value is prose rather than a setting, and belongs in the run itself.
+_INPUT_MAX = 200
+
+
+def _input_meta(kwargs: dict) -> dict:
+    """The run's own INPUTS, reduced to what a person needs to see in the Trajectory drawer's
+    "Initial state": every short scalar argument by name, plus the size of the corpus it was given.
+
+    Without this the panel held the task name and the budgets — nothing about what this PARTICULAR
+    run was asked to do. The question that was asked, the language it was told to write in, the
+    podcast length that was requested: each is one short string, each answers "why did it produce
+    that", and none of them is derivable afterwards from a notebook that has since moved on.
+    """
+    meta: dict = {}
+    sources = kwargs.get("sources") or kwargs.get("sources_excerpt")
+    if isinstance(sources, str):
+        meta["source_chars"] = len(sources)
+    for name, value in kwargs.items():
+        if name in _BULKY_INPUTS or not isinstance(value, (str, int, float, bool)):
+            continue
+        if isinstance(value, str) and (not value.strip() or len(value) > _INPUT_MAX):
+            continue
+        meta[name] = value
+    return meta
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv[1:] if argv is None else argv
     if len(argv) != 3:
@@ -152,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
         "max_iterations": config.max_iterations,
         "max_tokens": config.max_tokens,
         "max_retries": config.max_retries,
+        **_input_meta(kwargs),
     }
 
     try:

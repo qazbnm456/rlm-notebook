@@ -2559,12 +2559,22 @@ them exist because an earlier design discussion mentioned them.
     preview line and a duration bar, and a detail pane that sets the model's own reasoning as PROSE
     with a quote rule instead of another monospace dump.
 
-    **`worker.py` records what the run was configured with**, because the "Initial state" panel was
-    built from a meta holding only `task` — which is the drawer's own headline, so the panel
-    repeated it and said nothing. Model names and budgets go in; `api_key` and `base_url` never do.
-    A trace is already the most exposed artifact this project writes, so what goes into one is a
-    decision rather than a convenience. An older trace carries none of it and the panel says so
-    rather than rendering blank.
+    **A fixed-height box with `overflow: hidden` needs its line-heights DECLARED, and that is
+    arithmetic rather than taste.** A timeline segment stacks an icon, a label and a duration in a
+    72px box; left to the browser's ~1.5 default they measured 74.3px and the box sliced the MIDDLE
+    line — the label — through its letterforms. A test recomputes the sum from the stylesheet and
+    fails when it exceeds the height, so the next size change cannot reintroduce it silently.
+
+    **`worker.py` records what the run was configured with AND what it was asked to do**, because
+    the "Initial state" panel was built from a meta holding only `task` — the drawer's own headline,
+    so the panel repeated it and said nothing. Model names, budgets, the corpus SIZE, and every
+    short scalar input by name: the question, the resolved language, the requested podcast tier.
+    Each answers "why did it produce that" and none is derivable afterwards from a notebook that has
+    since moved on. The corpus TEXT never goes in — its size does, the same reasoning invariant 52
+    gives for streaming a step's output size rather than its text — and neither do `api_key` or
+    `base_url`. A trace is already the most exposed artifact this project writes, so what goes into
+    one is a decision rather than a convenience. An older trace carries none of it and the panel
+    says so rather than rendering blank.
 
     **Verified with a DOM shim under `node` against a real 12-turn trace**, since this project still
     has no JS test runner (invariant 29) — 13 step rows, per-turn durations, proportional segment

@@ -3012,3 +3012,38 @@ def test_the_run_records_what_it_was_configured_with_and_no_secrets():
         assert f'"{key}"' in meta, f"{key} is no longer recorded: {meta}"
     for secret in ("api_key", "base_url", "RN_API_KEY"):
         assert secret not in meta, f"{secret} would be written into a world-readable trace"
+
+
+def test_a_runs_inputs_reach_its_trace_but_the_corpus_never_does():
+    """The Trajectory drawer's "Initial state" held the task name and the budgets and nothing about
+    what THIS run was asked to do. The question, the language, the requested podcast length — each
+    is one short string, each answers "why did it produce that", and none is derivable afterwards
+    from a notebook that has since moved on.
+
+    The corpus itself is megabytes and a trace is the most exposed artifact this project writes
+    (invariant 29), so its SIZE goes in and its TEXT never does — the same reasoning invariant 52
+    gives for streaming a step's output size rather than its text."""
+    from rlm_notebook.worker import _input_meta
+
+    blob = "[[SRC:s1|whole]]\n" + ("corpus " * 20_000)
+    meta = _input_meta(
+        {
+            "sources": blob,
+            "history": "a very long prior conversation " * 400,
+            "question": "How do harnesses change bug hunting?",
+            "output_language": "Traditional Chinese",
+        }
+    )
+    assert meta["source_chars"] == len(blob)
+    assert meta["question"] == "How do harnesses change bug hunting?"
+    assert meta["output_language"] == "Traditional Chinese"
+    # The blob and the history are never carried, at any size.
+    assert "sources" not in meta and "history" not in meta
+    assert not any(isinstance(v, str) and "corpus " in v for v in meta.values())
+
+    # A long free-text argument is prose, not a setting: it belongs in the run, not in the header.
+    assert "question" not in _input_meta({"question": "q" * 500})
+    # An empty one is noise.
+    assert "output_language" not in _input_meta({"output_language": "   "})
+    # And the podcast's tier, which is exactly the "why is this 80 turns" answer.
+    assert _input_meta({"target_length": "long"})["target_length"] == "long"
