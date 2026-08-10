@@ -2603,4 +2603,21 @@ them exist because an earlier design discussion mentioned them.
     state. Every exit thaws it — cancel, success, error, and a notebook switch, which strands the
     run rather than ending it and would otherwise leave the NEW notebook's composer frozen.
 
+72. **The web assets are served `Cache-Control: no-cache`, because a zero-build app has no other
+    way to stop a browser running last week's JavaScript.** Starlette's `StaticFiles` sends `ETag`
+    and `Last-Modified` and NO `Cache-Control`, which leaves the browser on heuristic caching — free
+    to reuse a stale copy without asking. Invariant 29's zero-build choice (no framework, no build
+    step) means the filenames carry no content hash either, so there is no cache-busting URL to fall
+    back on.
+
+    A user pressed the steps pill after an update and got the OLD inline reasoning log — the exact
+    thing the Trajectory drawer had replaced. The server was serving the new `app.js`; their browser
+    was running the previous one, and nothing on the page could have told them. Verified by fetching
+    the served asset and finding the new code in it while the screenshot showed the old behaviour.
+
+    **`no-cache` is NOT `no-store`.** The copy stays in the cache and the ETag short-circuits the
+    transfer, so an unchanged asset costs one conditional request and a 304 with no body — measured.
+    `no-store` would turn every navigation into a full re-download of a ~190KB script, which is why
+    the test asserts the ETag and the 304 as well as the header.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

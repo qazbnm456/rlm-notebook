@@ -2009,4 +2009,29 @@ async def run_trajectory(notebook_id: str, run_id: str) -> dict:
 #: the web-UI blueprint's audit note gives for why these assets live under
 #: `rlm_notebook/web/` rather than a top-level `web/`: a wheel installed elsewhere on disk must still
 #: find them.
-app.mount("/", StaticFiles(directory=Path(__file__).parent / "web", html=True), name="web")
+class _RevalidatingStatics(StaticFiles):
+    """`StaticFiles` that tells the browser to REVALIDATE before reusing anything it cached.
+
+    Starlette sends `ETag` and `Last-Modified` but no `Cache-Control`, which leaves the browser on
+    HEURISTIC caching — free to reuse a stale copy without asking. This is a zero-build app whose
+    assets have no content hash in their filenames (invariant 29: no framework, no build step), so
+    there is no cache-busting URL to fall back on either.
+
+    A user hit exactly that: after an update they pressed the steps pill and got the OLD inline
+    reasoning log — the thing the Trajectory drawer had replaced — because their browser was still
+    running the previous `app.js`. The server was serving the new one; nothing on the page could
+    have told them otherwise.
+
+    `no-cache` is NOT `no-store`: the copy stays in the cache and the ETag still short-circuits the
+    transfer, so an unchanged asset costs one conditional request and a 304 with no body. That is
+    the right trade for a local/trusted-network app (invariant 25) whose correctness depends on the
+    HTML, JS and CSS being the same generation as the API they talk to.
+    """
+
+    def file_response(self, *args, **kwargs):
+        response = super().file_response(*args, **kwargs)
+        response.headers.setdefault("Cache-Control", "no-cache")
+        return response
+
+
+app.mount("/", _RevalidatingStatics(directory=Path(__file__).parent / "web", html=True), name="web")

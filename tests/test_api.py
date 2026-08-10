@@ -2960,3 +2960,34 @@ def test_every_grounded_task_carries_the_build_across_turns_rule():
     finally:
         if previous is not None:
             rt._CONFIG = previous
+
+
+def test_the_web_assets_tell_the_browser_to_revalidate():
+    """Starlette's `StaticFiles` sends `ETag`/`Last-Modified` but NO `Cache-Control`, which leaves a
+    browser on HEURISTIC caching — free to reuse a stale copy without asking. This is a zero-build
+    app whose assets carry no content hash in their filenames (invariant 29), so there is no
+    cache-busting URL to fall back on either.
+
+    A user hit exactly that: after an update they pressed the steps pill and got the OLD inline
+    reasoning log, the very thing the Trajectory drawer had replaced, because their browser was
+    still running the previous `app.js`. The server was serving the new one and nothing on the page
+    could have told them otherwise.
+    """
+    from fastapi.testclient import TestClient
+
+    from rlm_notebook import api
+
+    with TestClient(api.app) as client:
+        for path in ("/", "/app.js", "/style.css", "/i18n.js"):
+            resp = client.get(path)
+            assert resp.status_code == 200, path
+            assert resp.headers.get("cache-control") == "no-cache", (
+                f"{path} may be served from a browser cache without revalidating"
+            )
+            # `no-cache` is NOT `no-store`: the copy stays cached and the ETag short-circuits the
+            # transfer, so revalidation costs a 304 with no body. Losing the ETag would turn every
+            # navigation into a full re-download of a 190KB script.
+            assert resp.headers.get("etag"), f"{path} has no ETag, so revalidation re-sends the body"
+
+        etag = client.get("/app.js").headers["etag"]
+        assert client.get("/app.js", headers={"If-None-Match": etag}).status_code == 304

@@ -2088,3 +2088,10 @@ questions with verifiable citations, and get a distilled research artifact out.
 
   The composer only. Clearing the conversation was the offered alternative and is the one thing not
   to do: it would destroy history to signal a transient state.
+
+- **A user pressed the steps pill and got the old inline reasoning log back.** Their browser was
+  running the previous `app.js`; the server was serving the new one. Starlette's static files carry
+  an ETag but no `Cache-Control`, so the browser was on heuristic caching — and this is a zero-build
+  app whose filenames carry no content hash, so there was no cache-busting URL either. The assets
+  now say `no-cache`, which means revalidate rather than don't store: unchanged assets still cost
+  one conditional request and a 304 with no body.
