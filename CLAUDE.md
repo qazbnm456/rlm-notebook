@@ -2548,6 +2548,24 @@ them exist because an earlier design discussion mentioned them.
     four existing routes were blind to (the drawer is reached as `trajEl.drawer.hidden = …`, a
     property on an object built in a loop, which no `const x = getElementById(...)` pattern matches).
 
+    **The PRESENTATION was ported too, on a second pass, and the first pass is the lesson.** The
+    data model went across faithfully and then a cramped UI was invented for it — 0.75rem rows, a
+    0.85rem-tall bar strip, `flex-grow` segments that divided the strip into unreadable slivers. A
+    user put the two side by side and rejected it: every fact was present and none of it was
+    legible. The sibling's own structure and proportions are what shipped on the second pass —
+    header with the task name and the run's totals, transport as one segmented control, the timing
+    note as a labelled callout, 72px timeline BLOCKS carrying icon/label/duration that keep a
+    readable minimum WIDTH and scroll rather than squash, a 226px turn nav of cards each with a
+    preview line and a duration bar, and a detail pane that sets the model's own reasoning as PROSE
+    with a quote rule instead of another monospace dump.
+
+    **`worker.py` records what the run was configured with**, because the "Initial state" panel was
+    built from a meta holding only `task` — which is the drawer's own headline, so the panel
+    repeated it and said nothing. Model names and budgets go in; `api_key` and `base_url` never do.
+    A trace is already the most exposed artifact this project writes, so what goes into one is a
+    decision rather than a convenience. An older trace carries none of it and the panel says so
+    rather than rendering blank.
+
     **Verified with a DOM shim under `node` against a real 12-turn trace**, since this project still
     has no JS test runner (invariant 29) — 13 step rows, per-turn durations, proportional segment
     widths, turn and tool details, search matching two turns, and stepping from a tool selection

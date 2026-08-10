@@ -3839,8 +3839,8 @@ const trajEl = {};
 
 function trajInit() {
   [
-    "backdrop", "drawer", "stat", "run", "note", "timeline", "axis-end", "search", "search-count",
-    "prev", "play", "next", "speed", "steps", "detail", "expand", "close",
+    "backdrop", "drawer", "name", "stat", "run", "note", "timeline", "axis-end", "search",
+    "search-count", "prev", "play", "next", "speed", "steps", "detail", "expand", "close",
   ].forEach((name) => {
     trajEl[name.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(`traj-${name}`);
   });
@@ -3917,13 +3917,29 @@ function closeTrajectory() {
   }, 280);
 }
 
+//: Family colour + glyph per timeline segment. `--fam` is what the `.seg` rules tint themselves
+//: from, so one assignment drives border, background, hover and the current-state ring together.
+const TRAJ_FAMILIES = {
+  skill: { color: "var(--accent)", glyph: "\u25a4" },
+  validate: { color: "var(--ok)", glyph: "\u2713" },
+  lifeline: { color: "var(--warn)", glyph: "\u21d7" },
+};
+
+function trajFamily(entry) {
+  if (entry.ok === false || entry.passed === false) return { color: "var(--bad)", glyph: "\u2715" };
+  return TRAJ_FAMILIES[entry.label] || { color: "var(--text-dim)", glyph: "\u25c6" };
+}
+
 function renderTrajectory(runId) {
   const turns = trajData.iterations || [];
   const line = trajData.timeline || [];
+
+  // The run's own NAME, not a slug: the reader started this action and knows it by what it makes.
+  trajEl.name.textContent = trajTaskLabel(trajData.initial?.task);
   trajEl.stat.textContent = t(
     "traj.stat",
-    `${turns.length} turns · ${line.length} tool calls${
-      trajData.total_s != null ? ` · ${formatTimecode(trajData.total_s)}` : ""
+    `${turns.length} turns \u00b7 ${line.length} tool calls${
+      trajData.total_s != null ? ` \u00b7 ${formatTimecode(trajData.total_s)}` : ""
     }`,
     { turns: turns.length, tools: line.length }
   );
@@ -3936,7 +3952,6 @@ function renderTrajectory(runId) {
   trajRunIds.forEach((id) => {
     const option = document.createElement("option");
     option.value = id;
-    // The distinguishing tail (`-summary`, `-faq`, `-lang`), not the whole slug-plus-uuid.
     option.textContent = id.split("-").slice(-1)[0];
     option.selected = id === runId;
     trajEl.run.appendChild(option);
@@ -3947,22 +3962,31 @@ function renderTrajectory(runId) {
   // drawer — interface copy belongs to the interface (invariant 48), and the server's job here is
   // to say WHICH case holds.
   trajEl.note.hidden = false;
-  trajEl.note.textContent = trajData.per_turn_timing
-    ? t("traj.timingLive", "Per-turn timing is live — captured as each turn was parsed.")
+  trajEl.note.textContent = "";
+  const tag = document.createElement("span");
+  tag.className = "note-tag";
+  tag.textContent = trajData.per_turn_timing
+    ? t("traj.timingTag", "\u25cf per-turn timing")
+    : t("traj.timingTagOff", "\u24d8 timing");
+  const noteBody = document.createElement("span");
+  noteBody.className = "note-body";
+  noteBody.textContent = trajData.per_turn_timing
+    ? t("traj.timingLive", "Per-turn timing is live \u2014 captured as each turn was parsed.")
     : t(
         "traj.timingStale",
         "Per-turn timing isn't available for this trace; the tool timeline still carries real times.",
       );
+  trajEl.note.appendChild(tag);
+  trajEl.note.appendChild(noteBody);
   trajEl.note.className = `traj-note ${trajData.per_turn_timing ? "is-live" : "is-info"}`;
   trajEl.axisEnd.textContent = trajData.total_s != null ? formatTimecode(trajData.total_s) : "";
 
   // A LIVE run re-renders every few seconds, so the rebuild must not throw away where the reader
   // is. Resetting unconditionally sent someone watching a long podcast back to "Start" with an
-  // empty search box every 4 seconds — in the one case the live read exists to serve. Restore the
-  // selection and the query; fall back to the start only when there was no prior selection.
+  // empty search box every 4 seconds — in the one case the live read exists to serve.
   const priorSel = trajSel;
   const priorQuery = trajEl.search.value;
-  renderTrajTimeline(line);
+  renderTrajTimeline(line, turns);
   renderTrajSteps(turns);
   trajSearch(priorQuery);
   const stillThere =
@@ -3973,9 +3997,6 @@ function renderTrajectory(runId) {
   trajSelect(stillThere ? priorSel.kind : "init", stillThere ? priorSel.index : 0);
   trajRefreshTransport();
 
-  // A running trace grows under us. Poll rather than reuse the SSE ticker: the ticker carries
-  // translated one-line events (invariant 52) and this view needs the decomposition, which is a
-  // different shape from a different endpoint.
   clearInterval(trajPoll);
   trajPoll = trajData.running
     ? setInterval(() => {
@@ -3985,18 +4006,70 @@ function renderTrajectory(runId) {
     : null;
 }
 
-function renderTrajTimeline(line) {
+// `rlm_notebook.guide:GenerateSummary` -> `GenerateSummary`. The dotted path is how the worker is
+// addressed, not what the reader asked for.
+function trajTaskLabel(task) {
+  if (!task) return "";
+  return String(task).split(":").pop();
+}
+
+function renderTrajTimeline(line, turns) {
   trajEl.timeline.textContent = "";
-  const total = trajData.total_s || line.reduce((m, e) => Math.max(m, e.rel_s || 0), 0) || 1;
+  if (!line.length) {
+    const empty = document.createElement("div");
+    empty.className = "traj-empty";
+    empty.textContent = t("traj.noTools", "This run made no tool calls.");
+    trajEl.timeline.appendChild(empty);
+    return;
+  }
+  const longest = line.reduce((m, e) => Math.max(m, e.duration_s || 0), 0) || 1;
+  let markedTurn = -1;
   line.forEach((entry) => {
+    // A "from here = Turn N" marker wherever the owning turn changes, so the strip and the nav are
+    // one story rather than two lists to correlate by eye.
+    if (entry.turn_index != null && entry.turn_index !== markedTurn) {
+      markedTurn = entry.turn_index;
+      const mark = document.createElement("button");
+      mark.type = "button";
+      mark.className = "turn-mark";
+      mark.textContent = `T${entry.turn_index}`;
+      mark.dataset.tip = t("traj.turn", `Turn ${entry.turn_index + 1}`, { n: entry.turn_index + 1 });
+      mark.addEventListener("click", () => {
+        trajStopPlay();
+        trajSelect("turn", entry.turn_index);
+      });
+      trajEl.timeline.appendChild(mark);
+    }
+
+    const family = trajFamily(entry);
     const seg = document.createElement("button");
     seg.type = "button";
-    seg.className = `traj-seg fam-${entry.label || "tool"}${entry.ok === false || entry.passed === false ? " is-bad" : ""}`;
-    // Width PROPORTIONAL to real elapsed time, which is the whole reason this strip exists: a slow
-    // call is visibly wide instead of a number the reader has to compare against its neighbours.
-    seg.style.flexGrow = String(Math.max(0.02, (entry.duration_s || 0) / total));
-    seg.dataset.tip = `${entry.label}${entry.target ? ` ${entry.target}` : ""} · ${trajSecs(entry.duration_s)}`;
-    seg.addEventListener("click", () => trajSelect("tool", entry.seq));
+    seg.className = "seg";
+    seg.style.setProperty("--fam", family.color);
+    // Width PROPORTIONAL to real elapsed time against the LONGEST call, with a readable floor. The
+    // first version used `flex-grow`, which divided the strip into slivers nothing could be read in.
+    const share = Math.max(0.12, (entry.duration_s || 0) / longest);
+    seg.style.width = `${Math.round(96 + share * 220)}px`;
+
+    const icon = document.createElement("span");
+    icon.className = "seg-ic";
+    icon.textContent = family.glyph;
+    seg.appendChild(icon);
+
+    const label = document.createElement("span");
+    label.className = "seg-lab";
+    label.textContent = entry.target ? `${entry.label} ${entry.target}` : entry.label;
+    seg.appendChild(label);
+
+    const dur = document.createElement("span");
+    dur.className = "seg-dur";
+    dur.textContent = trajSecs(entry.duration_s);
+    seg.appendChild(dur);
+
+    seg.addEventListener("click", () => {
+      trajStopPlay();
+      trajSelect("tool", entry.seq);
+    });
     trajEl.timeline.appendChild(seg);
   });
 }
@@ -4009,33 +4082,55 @@ function trajSecs(s) {
 
 function renderTrajSteps(turns) {
   trajEl.steps.textContent = "";
-  trajEl.steps.appendChild(trajStepRow("init", 0, t("traj.init", "Start"), ""));
+  trajEl.steps.appendChild(
+    trajStepRow("init", 0, t("traj.init", "Init"), t("traj.initSub", "input + env"), null, 1)
+  );
+  const longest = turns.reduce((m, tn) => Math.max(m, tn.duration_s || 0), 0) || 1;
   turns.forEach((turn) => {
     trajEl.steps.appendChild(
       trajStepRow(
         "turn",
         turn.index,
         t("traj.turn", `Turn ${turn.index + 1}`, { n: turn.index + 1 }),
-        trajSecs(turn.duration_s)
+        turn.reasoning || turn.code || "",
+        trajSecs(turn.duration_s),
+        (turn.duration_s || 0) / longest
       )
     );
   });
 }
 
-function trajStepRow(kind, index, label, meta) {
+function trajStepRow(kind, index, name, preview, duration, share) {
   const row = document.createElement("button");
   row.type = "button";
-  row.className = "traj-step";
+  row.className = "tstep";
   row.dataset.kind = kind;
   row.dataset.index = String(index);
-  const name = document.createElement("span");
-  name.className = "traj-step-name";
-  name.textContent = label;
-  row.appendChild(name);
-  const time = document.createElement("span");
-  time.className = "traj-step-time";
-  time.textContent = meta;
-  row.appendChild(time);
+
+  const title = document.createElement("span");
+  title.className = "tstep-name";
+  title.textContent = name;
+  row.appendChild(title);
+
+  if (preview) {
+    const line = document.createElement("span");
+    line.className = "tstep-preview";
+    line.textContent = preview;
+    row.appendChild(line);
+  }
+  if (duration) {
+    const dur = document.createElement("span");
+    dur.className = "tstep-dur";
+    dur.textContent = duration;
+    row.appendChild(dur);
+    // The bar is the point: a column of numbers makes the reader compare, a bar makes the slow turn
+    // findable at a glance. Only where there IS a duration — an untimed trace gets no fake bars.
+    const bar = document.createElement("span");
+    bar.className = "tstep-bar";
+    bar.style.width = `${Math.max(4, Math.round((share || 0) * 100))}%`;
+    row.appendChild(bar);
+  }
+
   row.addEventListener("click", () => {
     trajStopPlay();
     trajSelect(kind, index);
@@ -4045,16 +4140,18 @@ function trajStepRow(kind, index, label, meta) {
 
 function trajSelect(kind, index) {
   trajSel = { kind, index };
-  trajEl.steps.querySelectorAll(".traj-step").forEach((row) => {
+  trajEl.steps.querySelectorAll(".tstep").forEach((row) => {
     row.classList.toggle(
       "is-current",
       row.dataset.kind === kind && Number(row.dataset.index) === index
     );
   });
-  trajEl.timeline.querySelectorAll(".traj-seg").forEach((seg, i) => {
-    seg.classList.toggle("is-current", kind === "tool" && i === index);
+  let seen = -1;
+  trajEl.timeline.querySelectorAll(".seg").forEach((seg) => {
+    seen += 1;
+    seg.classList.toggle("is-current", kind === "tool" && seen === index);
   });
-  const current = trajEl.steps.querySelector(".traj-step.is-current");
+  const current = trajEl.steps.querySelector(".tstep.is-current");
   if (current) current.scrollIntoView({ block: "nearest" });
   renderTrajDetail();
 }
@@ -4063,45 +4160,102 @@ function renderTrajDetail() {
   const host = trajEl.detail;
   host.textContent = "";
   if (!trajData || !trajSel) return;
+
   if (trajSel.kind === "init") {
-    trajField(host, t("traj.task", "Task"), (trajData.initial || {}).task || "");
+    trajDetailHead(host, t("traj.initTitle", "Initial state"), t("traj.initSub", "input + env"));
+    const chips = document.createElement("div");
+    chips.className = "ini-chips";
     Object.entries((trajData.initial || {}).meta || {}).forEach(([key, value]) => {
-      if (key !== "task") trajField(host, key, String(value));
+      // `task` is already the drawer's headline. A chip repeating it is the whole reason this panel
+      // read as empty when it was the only key there was.
+      if (key === "task") return;
+      const chip = document.createElement("span");
+      chip.className = "ini-chip";
+      const name = document.createElement("b");
+      name.textContent = key;
+      chip.appendChild(name);
+      chip.appendChild(document.createTextNode(` ${value}`));
+      chips.appendChild(chip);
     });
+    if (chips.children.length) {
+      host.appendChild(chips);
+    } else {
+      // A trace written before the worker recorded its configuration carries only `task`, which is
+      // already the headline. Say so rather than rendering an empty panel — a blank box reads as
+      // broken, and "this run predates it" is a true and useful thing to know.
+      const note = document.createElement("div");
+      note.className = "det-sub";
+      note.textContent = t(
+        "traj.noMeta",
+        "This run predates the recording of its own configuration.",
+      );
+      host.appendChild(note);
+    }
     if (trajData.error) trajField(host, t("traj.error", "Error"), trajData.error);
     return;
   }
+
   if (trajSel.kind === "turn") {
     const turn = (trajData.iterations || [])[trajSel.index];
     if (!turn) return;
-    trajField(host, t("traj.reasoning", "Reasoning"), turn.reasoning);
-    trajField(host, t("traj.code", "Code"), turn.code, true);
-    trajField(host, t("traj.output", "Output"), turn.output, true);
+    trajDetailHead(
+      host,
+      t("traj.turn", `Turn ${turn.index + 1}`, { n: turn.index + 1 }),
+      trajSecs(turn.duration_s)
+    );
+    if (turn.reasoning) {
+      const reason = document.createElement("div");
+      reason.className = "det-reason";
+      reason.textContent = turn.reasoning;
+      host.appendChild(reason);
+    }
+    trajField(host, t("traj.code", "Code"), turn.code);
+    trajField(host, t("traj.output", "Output"), turn.output);
     return;
   }
+
   const entry = (trajData.timeline || [])[trajSel.index];
   if (!entry) return;
-  trajField(host, t("traj.tool", "Tool"), `${entry.label}${entry.target ? ` · ${entry.target}` : ""}`);
+  trajDetailHead(
+    host,
+    entry.target ? `${entry.label} \u00b7 ${entry.target}` : entry.label,
+    trajSecs(entry.duration_s)
+  );
   if (entry.verdict) trajField(host, t("traj.verdict", "Verdict"), entry.verdict);
-  if (entry.content) trajField(host, t("traj.result", "Result"), entry.content, true);
-  if (entry.input) trajField(host, t("traj.input", "Input"), entry.input, true);
-  if (entry.output) trajField(host, t("traj.output", "Output"), entry.output, true);
+  if (entry.content) trajField(host, t("traj.result", "Result"), entry.content);
+  if (entry.input) trajField(host, t("traj.input", "Input"), entry.input);
+  if (entry.output) trajField(host, t("traj.output", "Output"), entry.output);
   if (entry.error) trajField(host, t("traj.error", "Error"), entry.error);
   Object.entries(entry.fields || {}).forEach(([key, value]) => trajField(host, key, String(value)));
 }
 
-function trajField(host, label, value, mono) {
+function trajDetailHead(host, title, sub) {
+  const head = document.createElement("div");
+  head.className = "det-head";
+  const h = document.createElement("h3");
+  h.textContent = title;
+  head.appendChild(h);
+  if (sub) {
+    const s = document.createElement("span");
+    s.className = "det-sub";
+    s.textContent = sub;
+    head.appendChild(s);
+  }
+  host.appendChild(head);
+}
+
+function trajField(host, label, value) {
   if (value == null || value === "") return;
   const wrap = document.createElement("div");
-  wrap.className = "traj-field";
+  wrap.className = "det-field";
   const name = document.createElement("div");
-  name.className = "traj-field-name";
+  name.className = "det-field-name";
   name.textContent = label;
   wrap.appendChild(name);
   const body = document.createElement("div");
   // `textContent`, always — every string here came out of a model that has been reading source
   // content an attacker may have written (invariant 29's rule, at the surface it matters most).
-  body.className = mono ? "traj-field-body is-mono" : "traj-field-body";
+  body.className = "det-field-body";
   body.textContent = value;
   wrap.appendChild(body);
   host.appendChild(wrap);
@@ -4181,7 +4335,7 @@ function trajSearch(query) {
   const needle = (query || "").trim().toLowerCase();
   trajMatches = [];
   trajMatchCur = -1;
-  trajEl.steps.querySelectorAll(".traj-step").forEach((row) => {
+  trajEl.steps.querySelectorAll(".tstep").forEach((row) => {
     const kind = row.dataset.kind;
     const index = Number(row.dataset.index);
     let hay = "";

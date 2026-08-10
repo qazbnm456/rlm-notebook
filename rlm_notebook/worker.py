@@ -131,12 +131,31 @@ def main(argv: list[str] | None = None) -> int:
         _emit({"ok": False, "error": f"cannot resolve task {dotted!r}: {type(exc).__name__}: {exc}"})
         return 2
 
-    setup(NotebookConfig.from_env())
+    config = NotebookConfig.from_env()
+    setup(config)
 
     from rlm_harness.trace import TraceRecorder
 
+    # What the run was actually configured with, stamped once at the top of its own trace. The
+    # Trajectory drawer's "Initial state" panel is built from this, and with only `task` in it that
+    # panel said nothing the header did not already say. These are the answers to "which model, and
+    # how much rope did it have" — the first two questions anyone asks of a run that went wrong, and
+    # the ones the values in `config.py` cannot answer after the fact because the environment moves.
+    #
+    # No secrets: the model NAMES and the budgets, never `api_key` or `base_url`. A trace is already
+    # the most exposed artifact this project writes (invariant 29), so what goes in it is a decision
+    # rather than a convenience.
+    meta = {
+        "task": dotted,
+        "main_model": config.main_model,
+        "sub_model": config.sub_model,
+        "max_iterations": config.max_iterations,
+        "max_tokens": config.max_tokens,
+        "max_retries": config.max_retries,
+    }
+
     try:
-        with TraceRecorder(trace_path, run_id=run_id, meta={"task": dotted}):
+        with TraceRecorder(trace_path, run_id=run_id, meta=meta):
             result = asyncio.run(_run(task_cls, kwargs))
     except Exception as exc:  # noqa: BLE001 — surfaced as a JSON error line, this is a process boundary
         _emit({"ok": False, "error": _describe(exc)})

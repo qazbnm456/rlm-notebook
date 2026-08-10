@@ -1123,7 +1123,7 @@ def test_the_trajectory_drawer_guards_every_hidden_toggled_display():
     """Invariant 36, at the surface most likely to trip it: a drawer is `hidden`-toggled AND needs
     `display: flex` for its own layout, which is exactly the pairing that shipped broken twice."""
     css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
-    for cls in (".traj-drawer", ".traj-backdrop", ".traj-note", ".traj-run"):
+    for cls in (".traj-drawer", ".traj-backdrop", ".traj-note", ".traj-pick"):
         assert re.search(rf"{re.escape(cls)}\[hidden\]\s*\{{[^}}]*display:\s*none", css), (
             f"{cls} is hidden-toggled with no [hidden] guard — the UA rule loses to any author "
             f"display, which is how the modal overlay swallowed every click on the page"
@@ -1134,9 +1134,14 @@ def test_the_timeline_segment_width_tracks_real_time():
     """The strip's only reason to exist. A row of equal segments is a decoration; width
     proportional to `duration_s` is what makes a slow call visible without reading numbers."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    grow = re.search(r"seg\.style\.flexGrow\s*=\s*String\(([^)]*\))?", js)
-    assert grow, "timeline segments no longer size themselves"
-    assert "entry.duration_s" in grow.group(0), grow.group(0)
+    share = re.search(r"const share = ([^;]*);", js)
+    assert share and "entry.duration_s" in share.group(1) and "longest" in share.group(1), (
+        f"timeline segments no longer size themselves from real time: {share and share.group(1)!r}"
+    )
+    # WIDTH, not flex-grow. Growing against the strip's total is what produced slivers nothing
+    # could be read in — the reported complaint. A floor keeps the shortest call legible.
+    assert re.search(r"seg\.style\.width\s*=", js), "segments size by flex again"
+    assert "Math.max(0.12" in share.group(1), "a fast call can shrink to an unreadable sliver"
 
 
 def test_the_replay_dwell_is_the_real_duration_divided_by_speed():
@@ -1155,7 +1160,7 @@ def test_the_trajectory_detail_is_built_with_textcontent():
     attacker may have written (invariant 6), and this is the one view that renders raw REPL output
     and tool results. Invariant 29's rule where it matters most."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    field = re.search(r"function trajField\(host, label, value, mono\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    field = re.search(r"function trajField\(host, label, value\)\s*\{(.*?)\n\}", js, re.DOTALL)
     assert field, "trajField is gone"
     assert "body.textContent = value;" in field.group(1)
     assert "innerHTML" not in field.group(1)

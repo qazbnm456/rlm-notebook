@@ -2991,3 +2991,24 @@ def test_the_web_assets_tell_the_browser_to_revalidate():
 
         etag = client.get("/app.js").headers["etag"]
         assert client.get("/app.js", headers={"If-None-Match": etag}).status_code == 304
+
+
+def test_the_run_records_what_it_was_configured_with_and_no_secrets():
+    """The Trajectory drawer's "Initial state" panel is built from `run_start`'s meta. With only
+    `task` in it, that panel repeated the drawer's own headline and said nothing else — while
+    "which model, and how much rope did it have" are the first two questions anyone asks of a run
+    that went wrong, and `config.py` cannot answer them after the fact because the environment
+    moves.
+
+    A trace is already the most exposed artifact this project writes (invariant 29), so what goes
+    into it is a decision: model NAMES and budgets, never credentials."""
+    import inspect
+
+    from rlm_notebook import worker
+
+    src = inspect.getsource(worker.main)
+    meta = src[src.index("meta = {") : src.index("}", src.index("meta = {")) + 1]
+    for key in ("task", "main_model", "sub_model", "max_iterations", "max_tokens", "max_retries"):
+        assert f'"{key}"' in meta, f"{key} is no longer recorded: {meta}"
+    for secret in ("api_key", "base_url", "RN_API_KEY"):
+        assert secret not in meta, f"{secret} would be written into a world-readable trace"

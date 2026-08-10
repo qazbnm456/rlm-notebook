@@ -3273,25 +3273,23 @@ body.is-resizing .studio-grip {
 }
 
 /* --- Trajectory drawer --------------------------------------------------------------------------
-   A bottom sheet replaying one RLM run — the sibling `nuclei-forge/studio`'s shape. It exists
-   because the inline step log put the planner's own reasoning prose inside the chat bubble, where
-   a user reported it as unreadable and space-consuming.
+   Ported from the sibling `nuclei-forge/studio`'s own drawer, structure and proportions included —
+   a first pass kept its DATA MODEL faithfully and then invented a cramped presentation for it
+   (0.75rem rows, a 0.85rem-tall bar strip), which a user compared side by side and rejected. The
+   information was all there and none of it was legible.
 
    Every `hidden`-toggled class here pairs its author `display` with a LONGER `[hidden]` selector,
-   so the guard wins on specificity regardless of source order — invariant 36, whose tripwire
-   compares by class name and would happily accept a guard that loses the cascade. */
-/* `pointer-events` is NOT decoration here. `closeTrajectory` only sets `hidden` after the 280ms
-   slide-out, so between losing `.is-shown` and that timer the backdrop is still full-viewport,
-   `z-index: 900` and hit-testable — closing the drawer and immediately clicking a Studio tab ate
-   the click. A shorter-lived instance of exactly what invariant 36 records for `.modal-overlay`. */
+   so the guard wins on specificity regardless of source order (invariant 36). */
 .traj-backdrop {
   position: fixed;
   inset: 0;
   z-index: 900;
-  background: oklch(0% 0 0 / 0.45);
+  background: oklch(0% 0 0 / 0.5);
   opacity: 0;
+  /* NOT decoration: `closeTrajectory` sets `hidden` only after the 280ms slide-out, so without this
+     the backdrop stays full-viewport and hit-testable for that window and eats the next click. */
   pointer-events: none;
-  transition: opacity 240ms ease;
+  transition: opacity 260ms ease;
 }
 
 .traj-backdrop.is-shown {
@@ -3309,15 +3307,17 @@ body.is-resizing .studio-grip {
   right: 0;
   bottom: 0;
   z-index: 901;
-  height: min(56vh, 34rem);
+  height: 80vh;
+  max-height: 80vh;
   display: flex;
   flex-direction: column;
+  padding: 0 24px 14px;
   background: var(--surface-1);
-  border-top: 1px solid var(--border-strong);
-  border-radius: var(--radius) var(--radius) 0 0;
-  box-shadow: 0 -8px 32px oklch(0% 0 0 / 0.28);
+  border-top: 2px solid var(--border-strong);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  box-shadow: 0 -10px 40px oklch(0% 0 0 / 0.4);
   transform: translateY(100%);
-  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1), height 200ms ease;
+  transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .traj-drawer.is-open {
@@ -3325,7 +3325,9 @@ body.is-resizing .studio-grip {
 }
 
 .traj-drawer.is-full {
-  height: 94vh;
+  height: 100dvh;
+  max-height: 100dvh;
+  border-radius: 0;
 }
 
 .traj-drawer[hidden] {
@@ -3335,263 +3337,488 @@ body.is-resizing .studio-grip {
 .traj-head {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  padding: 0.5rem 0.75rem;
+  gap: 14px;
+  flex-wrap: wrap;
+  padding: 13px 0 11px;
   border-bottom: 1px solid var(--border);
 }
 
-.traj-title {
-  font-weight: 600;
-  font-size: 0.85rem;
+.traj-id {
+  display: flex;
+  align-items: baseline;
+  gap: 9px;
+  min-width: 0;
 }
 
-.traj-stat,
-.traj-axis-end,
-.traj-search-count {
+.traj-tag {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
   color: var(--text-faint);
-  font-size: 0.72rem;
+}
+
+.traj-name {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.traj-stat {
+  font-size: 0.74rem;
+  color: var(--text-dim);
   font-variant-numeric: tabular-nums;
 }
 
-.traj-spacer {
-  flex: 1 1 auto;
-}
-
-.traj-run {
+.traj-pick {
+  padding: 0.15rem 0.35rem;
+  border-radius: var(--radius);
   background: var(--surface-2);
-  color: var(--text);
   border: 1px solid var(--border);
-  border-radius: 4px;
+  color: var(--text);
   font-size: 0.72rem;
-  padding: 0.1rem 0.3rem;
 }
 
-.traj-run[hidden] {
+.traj-pick[hidden] {
   display: none;
 }
 
-.traj-icon {
+.traj-tools {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* Transport as ONE segmented control rather than four loose buttons — it is a single idea (move
+   through the run) and reads as one. */
+.traj-transport {
+  display: inline-flex;
+  border: 1px solid var(--border-strong);
+  border-radius: 5px;
+  overflow: hidden;
+  background: var(--surface-2);
+}
+
+.tctl {
+  width: 34px;
+  height: 30px;
+  cursor: pointer;
+  font-size: 0.82rem;
+  line-height: 1;
+  background: transparent;
   border: none;
-  background: none;
+  border-right: 1px solid var(--border);
   color: var(--text-dim);
+  transition: color 120ms ease, background 120ms ease;
+}
+
+.tctl:last-child {
+  border-right: none;
+}
+
+.tctl:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--surface-3);
+}
+
+.tctl:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.tctl-speed {
+  width: auto;
+  padding: 0 9px;
+  font-variant-numeric: tabular-nums;
+}
+
+.traj-icon {
+  width: 30px;
+  height: 30px;
+  border-radius: var(--radius);
   cursor: pointer;
   font-size: 0.9rem;
-  padding: 0.1rem 0.3rem;
+  background: var(--surface-2);
+  border: 1px solid var(--border-strong);
+  color: var(--text-dim);
 }
 
 .traj-icon:hover {
   color: var(--text);
 }
 
+.traj-x:hover {
+  color: var(--bad);
+  border-color: var(--bad);
+}
+
+/* A labelled callout, not a stray sentence: the tag says WHICH case holds and the body says what
+   that means for the numbers below it. */
 .traj-note {
-  padding: 0.3rem 0.75rem;
-  font-size: 0.7rem;
-  color: var(--text-faint);
-  border-bottom: 1px solid var(--border);
-}
-
-.traj-note.is-live {
-  color: var(--accent);
-}
-
-/* The other half of the pair. It was set by the JS and never defined here, so a trace with no live
-   timing rendered a state that did not exist — harmless, and exactly the kind of half-wired class
-   that reads as intentional to the next person. */
-.traj-note.is-info {
-  color: var(--text-faint);
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 9px 0 2px;
+  padding: 8px 11px;
+  border-radius: 3px;
+  font-size: 0.74rem;
+  line-height: 1.45;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--text-faint);
 }
 
 .traj-note[hidden] {
   display: none;
 }
 
-/* The tool timeline. Segment width is PROPORTIONAL to real elapsed time (`flex-grow` from
-   `duration_s`), which is the entire reason this strip exists: a slow call is visibly wide rather
-   than a number the reader has to compare. */
+.note-tag {
+  flex-shrink: 0;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.6rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: var(--text-faint);
+}
+
+.note-body {
+  color: var(--text-dim);
+}
+
+.traj-note.is-live {
+  border-left-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 8%, var(--surface-2));
+}
+
+.traj-note.is-live .note-tag {
+  color: var(--accent);
+}
+
+.traj-note.is-info {
+  border-left-color: var(--warn);
+}
+
+.traj-note.is-info .note-tag {
+  color: var(--warn);
+}
+
+/* The tool timeline. Segments TILE the run and a wide one is a slow call — but each keeps a
+   readable minimum width and the strip scrolls rather than squashing them into slivers, which is
+   what the first version did and why nothing in it could be read. */
 .traj-timeline-wrap {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  padding: 0.4rem 0.75rem;
+  padding: 6px 0 12px;
   border-bottom: 1px solid var(--border);
+}
+
+.traj-axis {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 5px;
+  font-size: 0.6rem;
+  color: var(--text-faint);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-variant-numeric: tabular-nums;
 }
 
 .traj-timeline {
-  flex: 1 1 auto;
   display: flex;
-  gap: 2px;
-  height: 0.85rem;
-  min-width: 0;
+  gap: 4px;
+  height: 72px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 4px;
 }
 
-.traj-seg {
-  flex: 1 1 0;
-  min-width: 3px;
-  border: none;
-  border-radius: 2px;
-  background: var(--border-strong);
+.seg {
+  flex-shrink: 0;
+  overflow: hidden;
   cursor: pointer;
-  padding: 0;
-}
-
-.traj-seg.fam-skill {
-  background: color-mix(in oklch, var(--accent) 65%, var(--surface-2));
-}
-
-.traj-seg.fam-validate {
-  background: color-mix(in oklch, var(--good, var(--accent)) 55%, var(--surface-2));
-}
-
-.traj-seg.fam-lifeline {
-  background: color-mix(in oklch, var(--warn, var(--accent)) 55%, var(--surface-2));
-}
-
-.traj-seg.is-bad {
-  background: var(--bad);
-}
-
-.traj-seg.is-current {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-
-.traj-transport {
   display: flex;
+  flex-direction: column;
+  justify-content: center;
+  gap: 3px;
+  padding: 8px 10px;
+  text-align: left;
+  white-space: nowrap;
+  border: 1px solid color-mix(in oklch, var(--fam, var(--text-dim)) 40%, var(--border));
+  border-top: 3px solid var(--fam, var(--text-dim));
+  background: color-mix(in oklch, var(--fam, var(--text-dim)) 11%, var(--surface-2));
+  border-radius: 2px 2px 0 0;
+  color: var(--text-dim);
+  transition: background 120ms ease;
+}
+
+.seg:hover {
+  background: color-mix(in oklch, var(--fam, var(--text-dim)) 20%, var(--surface-2));
+}
+
+.seg.is-current {
+  background: color-mix(in oklch, var(--fam, var(--text-dim)) 28%, var(--surface-2));
+  color: var(--text);
+  box-shadow: inset 0 0 0 1px var(--fam, var(--text-dim));
+}
+
+.seg-ic {
+  font-size: 0.8rem;
+  color: var(--fam, var(--text-dim));
+}
+
+.seg-lab {
+  font-size: 0.74rem;
+  font-weight: 700;
+  color: var(--text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seg-dur {
+  font-size: 0.64rem;
+  color: var(--text-faint);
+  font-variant-numeric: tabular-nums;
+}
+
+/* "from here = Turn N" between turn groups, so the tool strip and the turn nav are one story. */
+.turn-mark {
+  flex: 0 0 auto;
+  align-self: stretch;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  gap: 0.4rem;
-  padding: 0.4rem 0.75rem;
-  border-bottom: 1px solid var(--border);
+  justify-content: center;
+  gap: 1px;
+  padding: 0 6px;
+  background: transparent;
+  border: none;
+  border-left: 2px solid var(--border-strong);
+  color: var(--text-faint);
+  font-size: 0.58rem;
+}
+
+.turn-mark:hover {
+  color: var(--accent);
+  border-left-color: var(--accent);
+}
+
+.traj-empty {
+  padding: 14px 0;
+  color: var(--text-faint);
+  font-size: 0.78rem;
+}
+
+.traj-main {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+  grid-template-columns: 226px minmax(0, 1fr);
+  gap: 16px;
+  padding-top: 12px;
+}
+
+.traj-nav {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.traj-search-wrap {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
 }
 
 .traj-search {
-  flex: 0 1 16rem;
+  flex: 1;
   min-width: 0;
-  background: var(--surface-2);
-  color: var(--text);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  padding: 0.2rem 0.4rem;
-  font: inherit;
+  padding: 6px 9px;
+  border-radius: 3px;
   font-size: 0.74rem;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--surface-3);
+  border: 1px solid var(--border);
+  color: var(--text);
 }
 
-.traj-btn {
-  padding: 0.15rem 0.5rem;
-  font-size: 0.75rem;
+.traj-search:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
-.traj-speed {
+.traj-search-count {
+  flex-shrink: 0;
+  font-size: 0.62rem;
+  color: var(--text-faint);
   font-variant-numeric: tabular-nums;
-  min-width: 2.6rem;
-}
-
-.traj-body {
-  flex: 1 1 auto;
-  display: flex;
-  min-height: 0;
 }
 
 .traj-steps {
-  flex: 0 0 12rem;
   overflow-y: auto;
-  border-right: 1px solid var(--border);
-  padding: 0.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding-right: 4px;
 }
 
-.traj-step {
+/* A CARD per turn: its name, a line of what it was thinking, its duration, and a bar whose width is
+   that duration against the longest — so the slow turn is findable by eye. */
+.tstep {
   display: flex;
-  align-items: baseline;
-  gap: 0.4rem;
-  width: 100%;
-  border: none;
-  background: none;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
+  cursor: pointer;
+  padding: 8px 10px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-left: 3px solid transparent;
   color: var(--text-dim);
   font: inherit;
-  font-size: 0.75rem;
-  text-align: left;
-  padding: 0.25rem 0.4rem;
-  border-radius: 4px;
-  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease;
 }
 
-.traj-step:hover {
-  background: var(--surface-2);
+.tstep:hover {
+  background: var(--surface-3);
 }
 
-/* Current owns `background` + a bar; match owns `border-color`. Disjoint properties, because the
-   two can be true at once and equal specificity would otherwise make the later rule win outright —
-   the collision invariants 44 and 58 each record once. */
-.traj-step.is-current {
-  background: color-mix(in oklch, var(--accent) 16%, var(--surface-2));
-  box-shadow: inset 2px 0 0 var(--accent);
+/* Current owns the left bar + background; a search match owns the OUTLINE. Disjoint properties, so
+   a matching current step shows both instead of one silently winning (invariants 44 and 58). */
+.tstep.is-current {
+  border-left-color: var(--accent);
+  background: color-mix(in oklch, var(--accent) 14%, var(--surface-2));
   color: var(--text);
 }
 
-.traj-step.is-match {
-  border: 1px solid var(--accent);
-  padding: calc(0.25rem - 1px) calc(0.4rem - 1px);
+.tstep.is-match {
+  outline: 1px solid var(--accent-dim);
+  outline-offset: -1px;
 }
 
-.traj-step-name {
-  flex: 1 1 auto;
-  min-width: 0;
+.tstep-name {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.tstep-preview {
+  font-size: 0.68rem;
+  line-height: 1.4;
+  color: var(--text-faint);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.traj-step-time {
-  flex: none;
+.tstep-dur {
+  font-size: 0.66rem;
   color: var(--text-faint);
-  font-size: 0.68rem;
   font-variant-numeric: tabular-nums;
 }
 
+.tstep-bar {
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: var(--accent-dim);
+}
+
 .traj-detail {
-  flex: 1 1 auto;
   overflow-y: auto;
-  padding: 0.6rem 0.75rem;
-  min-width: 0;
+  padding: 2px 4px 8px 2px;
 }
 
-.traj-field {
-  margin-bottom: 0.7rem;
+.det-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 9px;
+  border-bottom: 1px solid var(--border);
 }
 
-.traj-field-name {
+.det-head h3 {
+  margin: 0;
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+.det-sub {
+  font-size: 0.72rem;
   color: var(--text-faint);
-  font-size: 0.66rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  margin-bottom: 0.2rem;
+  font-variant-numeric: tabular-nums;
 }
 
-.traj-field-body {
-  color: var(--text-dim);
-  font-size: 0.78rem;
-  line-height: 1.55;
+/* The model's own words, set as PROSE with a quote rule — not as another monospace dump. It is the
+   one thing in this drawer a person reads rather than scans. */
+.det-reason {
+  margin-bottom: 14px;
+  padding-left: 11px;
+  border-left: 2px solid var(--border-strong);
+  font-size: 0.84rem;
+  line-height: 1.6;
+  color: var(--text);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
 
-.traj-field-body.is-mono {
-  font-family: var(--mono, ui-monospace, SFMono-Regular, Menlo, monospace);
-  font-size: 0.72rem;
+.ini-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.ini-chip {
+  padding: 4px 9px;
+  border-radius: 999px;
   background: var(--surface-2);
-  border-radius: var(--radius);
-  padding: 0.4rem 0.5rem;
-  max-height: 22rem;
+  border: 1px solid var(--border);
+  font-size: 0.7rem;
+  color: var(--text-dim);
+}
+
+.ini-chip b {
+  color: var(--accent);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-weight: 700;
+}
+
+.det-field {
+  margin-bottom: 12px;
+}
+
+.det-field-name {
+  margin-bottom: 4px;
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-faint);
+}
+
+.det-field-body {
+  padding: 9px 11px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.72rem;
+  line-height: 1.55;
+  color: var(--text-dim);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 26rem;
   overflow: auto;
 }
 
-@media (max-width: 720px) {
-  .traj-body {
-    flex-direction: column;
-  }
-
-  .traj-steps {
-    flex: 0 0 8rem;
-    border-right: none;
-    border-bottom: 1px solid var(--border);
+@media (max-width: 860px) {
+  .traj-main {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: 9rem minmax(0, 1fr);
   }
 }

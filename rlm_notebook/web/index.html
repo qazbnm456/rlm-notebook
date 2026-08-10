@@ -220,30 +220,40 @@
 <div class="traj-drawer" id="traj-drawer" role="dialog" aria-modal="true"
      aria-label="Run trajectory" hidden>
   <div class="traj-head">
-    <span class="traj-title" data-i18n="traj.title">Trajectory</span>
+    <span class="traj-id">
+      <span class="traj-tag" data-i18n="traj.title">Trajectory</span>
+      <span class="traj-name" id="traj-name"></span>
+    </span>
     <span class="traj-stat" id="traj-stat"></span>
-    <select class="traj-run" id="traj-run" aria-label="Run"></select>
-    <span class="traj-spacer"></span>
-    <button type="button" class="traj-icon" id="traj-expand" data-tip="Expand">⤢</button>
-    <button type="button" class="traj-icon" id="traj-close" aria-label="Close" title="Close">✕</button>
+    <select class="traj-pick" id="traj-run" aria-label="Run"></select>
+    <span class="traj-tools">
+      <span class="traj-transport">
+        <button type="button" class="tctl" id="traj-prev" data-tip="Previous step">⏮</button>
+        <button type="button" class="tctl" id="traj-play" data-tip="Replay at the run's real pace">▶</button>
+        <button type="button" class="tctl" id="traj-next" data-tip="Next step">⏭</button>
+        <button type="button" class="tctl tctl-speed" id="traj-speed" data-tip="Replay speed">2×</button>
+      </span>
+      <button type="button" class="traj-icon" id="traj-expand" data-tip="Expand">⤢</button>
+      <button type="button" class="traj-icon traj-x" id="traj-close" aria-label="Close">✕</button>
+    </span>
   </div>
   <div class="traj-note" id="traj-note" hidden></div>
   <div class="traj-timeline-wrap">
+    <div class="traj-axis">
+      <span data-i18n="traj.start">START</span>
+      <span id="traj-axis-end"></span>
+    </div>
     <div class="traj-timeline" id="traj-timeline"></div>
-    <span class="traj-axis-end" id="traj-axis-end"></span>
   </div>
-  <div class="traj-transport">
-    <input type="search" class="traj-search" id="traj-search"
-           data-i18n-placeholder="traj.search" placeholder="Search turns…">
-    <span class="traj-search-count" id="traj-search-count"></span>
-    <span class="traj-spacer"></span>
-    <button type="button" class="btn traj-btn" id="traj-prev" data-tip="Previous step">◀</button>
-    <button type="button" class="btn traj-btn" id="traj-play" data-tip="Replay at the run's real pace">▶</button>
-    <button type="button" class="btn traj-btn" id="traj-next" data-tip="Next step">▶|</button>
-    <button type="button" class="btn traj-btn traj-speed" id="traj-speed" data-tip="Replay speed">2×</button>
-  </div>
-  <div class="traj-body">
-    <div class="traj-steps" id="traj-steps"></div>
+  <div class="traj-main">
+    <div class="traj-nav">
+      <div class="traj-search-wrap">
+        <input type="search" class="traj-search" id="traj-search"
+               data-i18n-placeholder="traj.search" placeholder="search turns…">
+        <span class="traj-search-count" id="traj-search-count"></span>
+      </div>
+      <div class="traj-steps" id="traj-steps"></div>
+    </div>
     <div class="traj-detail" id="traj-detail"></div>
   </div>
 </div>

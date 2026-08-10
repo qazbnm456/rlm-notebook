@@ -2106,3 +2106,18 @@ questions with verifiable citations, and get a distilled research artifact out.
   invariant-36 tripwire — which had `.ticker-detail` as one of its two anti-vacuity sentinels —
   gained a route for a bare `hidden` attribute in the markup. That is the ordinary spelling of the
   very attribute the tripwire polices, and all four of its existing routes were blind to it.
+
+- **The Trajectory drawer was cramped, and the first pass is the lesson.** The sibling's data model
+  had been ported faithfully and then a UI was invented for it: 0.75rem rows, a 0.85rem-tall bar
+  strip, `flex-grow` segments that divided the strip into slivers. A user put the two side by side
+  and rejected it — every fact was present and none of it was legible.
+
+  The structure and proportions are ported now: a header carrying the task name and the run's
+  totals, transport as one segmented control, the timing note as a labelled callout, timeline
+  BLOCKS with icon/label/duration that keep a readable minimum width and scroll rather than squash,
+  a turn nav of cards each with a preview line and a duration bar, and a detail pane that sets the
+  model's reasoning as prose rather than as another monospace dump.
+
+  The worker also records what the run was configured with — model names and budgets, never
+  credentials — because the "Initial state" panel was built from a meta holding only the task name,
+  which the header already showed.
