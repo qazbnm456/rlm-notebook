@@ -1391,30 +1391,74 @@ def test_a_timeline_segment_cannot_clip_its_own_label():
     )
 
 
-def test_the_missing_metadata_note_says_when_and_what_to_do():
-    """A user asked what "this run predates the recording of its own configuration" meant. The
-    sentence was accurate and still failed: it named an internal capability and left them to work
-    out whether something was wrong, whether it applied to them, and what to do about it.
+def test_the_empty_initial_state_says_which_empty_it_is():
+    """An empty panel reads as broken, so the empty state has to name itself — and there are TWO
+    live causes, neither of which is "an old trace", which was only the first one anybody hit.
 
-    A trace written before the worker recorded its configuration is an ordinary, permanent fact
-    about that file — nothing re-writes a trace — so the note has to answer the reader's actual
-    question: when was this, and how do I see the details."""
+    `_run_isolated` reserves the trace file exclusively BEFORE spawning and `run_trajectory` stops
+    at a torn final line, so a run opened in its first moments — or one whose spawn failed, or one
+    killed instantly — has a real file with zero events. That branch stays reachable no matter how
+    many old traces are deleted, which is exactly why the wording must not name a historical cause
+    a reader can no longer hit."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    assert "trajData.started_at" in js, "the note cannot say WHEN the run happened"
-    for key in ("traj.noMeta", "traj.noMetaWhen"):
-        assert key in js, f"{key} is gone"
-    # The English fallback at the CALL SITE is what an English reader sees (invariant 48), so the
-    # actionable half has to be in it and not only in the translation table. Both fallbacks are
-    # template literals split across concatenated backtick strings, so the check spans the whole
-    # call rather than one backtick — the first version matched only the opening fragment and
-    # failed on a sentence that was in fact complete.
-    for key in ("traj.noMetaWhen", "traj.noMeta"):
-        at = js.index(f'"{key}",')
-        assert "A new run will show them" in js[at : at + 400], (
-            f"{key}'s English fallback no longer tells the reader what to do: {js[at : at + 260]!r}"
-        )
-    # And the translation carries it too, or a Chinese reader gets only half the message.
+    assert "trajData.started_at" in js, "the two empty states are no longer distinguished"
+    for key in ("traj.noMeta", "traj.notStarted"):
+        assert f'"{key}"' in js, f"{key} is gone"
+    # A run that never started must NOT be described as one that merely lacks configuration.
+    at = js.index('"traj.notStarted"')
+    assert "still be starting" in js[at : at + 300], js[at : at + 300]
     i18n = (WEB / "i18n.js").read_text(encoding="utf-8")
-    for key in ("traj.noMeta", "traj.noMetaWhen"):
-        at = i18n.index(f'"{key}":')
-        assert "重新執行" in i18n[at : at + 200], f"{key} is not translated actionably"
+    for key in ("traj.noMeta", "traj.notStarted"):
+        assert f'"{key}":' in i18n, f"{key} is not translated"
+    # The retired wording named a cause that deleting old traces makes unreachable.
+    assert "noMetaWhen" not in js and "noMetaWhen" not in i18n
+
+
+def test_only_the_last_turn_offers_to_be_regenerated():
+    """Every later answer was produced with this one in its `history` (invariant 11), so redoing a
+    turn in the middle would leave the answers after it derived from a conversation that no longer
+    exists. The server re-checks the same thing inside its lock; this is the affordance half.
+
+    A stylesheet rule rather than a flag passed into `renderTurn`, because turns reach the DOM
+    through TWO paths — `rebuildHistory` and the `chat:turnAdded` replay — and a rule that reads the
+    DOM is right for both. The same mechanism `.turn-followups` already uses."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    assert re.search(r"\.turn:not\(:last-child\)\s+\.turn-regenerate\s*\{[^}]*display:\s*none", css), (
+        "a mid-thread answer can be regenerated, invalidating every answer after it"
+    )
+    # ...and never while a question is in flight.
+    assert re.search(
+        r"\.turn-answer\.is-pending\s+\.turn-regenerate\s*\{[^}]*display:\s*none", css
+    ), "the pending row offers to redo an answer that does not exist yet"
+    # `display` here is author CSS on a class that is NOT hidden-toggled, so invariant 36's pairing
+    # does not apply — but it must stay that way, or the guard is needed.
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert ".turn-regenerate" not in js, "the class is hidden-toggled in JS now; it needs [hidden]"
+
+
+def test_regenerating_a_turn_goes_through_the_same_flow_as_asking():
+    """The pending row, the live ticker, the Stop button, the cancel path and the
+    rebuild-from-the-server's-record are what would drift between two copies — and this file has
+    already paid for a duplicated affordance once, with the two "N steps" pills."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "async function askQuestion(question, { regenerate = false } = {})" in js
+    # The composer and the button are both entry points into it, and only one of them clears input.
+    assert "void askQuestion(question);" in js
+    assert "askQuestion(question, { regenerate: true })" in js
+    # The flag has to REACH the server, or the turn is appended and the thread grows a duplicate.
+    body = re.search(r"body: JSON\.stringify\(\{ question[^}]*\}\)", js)
+    assert body and "regenerate" in body.group(0), body
+
+
+def test_regenerate_replaces_only_a_matching_last_turn():
+    """Server-side half. Checked inside the lock against the notebook as it is THEN, because the
+    snapshot the handler read may be minutes old — and a request that arrives after someone else
+    asked something new must append rather than overwrite a turn it did not mean to."""
+    import inspect
+
+    from rlm_notebook import api
+
+    src = inspect.getsource(api.ask)
+    persist = src[src.index("def _persist(") : src.index("await _mutate_or_http(notebook_id, _persist")]
+    assert "body.regenerate" in persist and "nb.turns[-1].question == body.question" in persist, persist
+    assert "nb.turns[-1] = turn" in persist and "nb.turns.append(turn)" in persist, persist

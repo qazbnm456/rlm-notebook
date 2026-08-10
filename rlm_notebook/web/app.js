@@ -2101,6 +2101,26 @@ function citationHoverLabel(citation) {
     : t("cite.unverifiedHover", `${label} — coordinate not found in this source`, { label });
 }
 
+//: "Ask this again, and replace the answer." A separate factory rather than something
+//: `renderAnswerWithCitations` grows, for the reason `saveAsNoteButton` is one: that renderer
+//: serves SIX surfaces and a Guide artifact must never sprout a chat action.
+function regenerateTurnButton(question) {
+  const wrapper = document.createElement("div");
+  wrapper.className = "turn-regenerate";
+  const button = document.createElement("button");
+  button.type = "button";
+  // The same `.ticker-toggle` shape as the steps pill beside it: one row, one weight.
+  button.className = "ticker-toggle trace-face";
+  button.textContent = t("chat.regenerateTurn", "\u21bb Regenerate");
+  button.dataset.tip = t(
+    "chat.regenerateTurnTip",
+    "Ask this question again and replace this answer. Costs a full model run.",
+  );
+  button.addEventListener("click", () => store.emit("chat:regenerate", { question }));
+  wrapper.appendChild(button);
+  return wrapper;
+}
+
 function renderTurn(turn) {
   const wrapper = document.createElement("div");
   wrapper.className = "turn";
@@ -2123,6 +2143,16 @@ function renderTurn(turn) {
     if (turn.run_id) {
       answer.appendChild(renderTickerAffordance(turn.run_id));
     }
+    // Regenerate lives in the row this answer's OTHER affordances already occupy — the references
+    // link and the steps pill — at the same quiet weight. Deliberately not a primary button:
+    // re-answering costs a full model run, so it must not be the loudest thing under an answer the
+    // reader may be perfectly happy with. The overview's own control makes the same call.
+    //
+    // The LAST turn only, hidden by a stylesheet rule rather than a flag passed in, because turns
+    // reach the DOM through two paths (`rebuildHistory` and the `chat:turnAdded` replay) and a rule
+    // that reads the DOM is right for both — the same reasoning `.turn-followups` already uses. It
+    // also handles the pending row for free: a question in flight is not a moment to redo another.
+    answer.appendChild(regenerateTurnButton(turn.question));
     // Appended HERE, by renderTurn itself — NOT inside renderAnswerWithCitations, which five OTHER
     // call sites (Guide/Podcast) also use and must never show this button (blueprint's Notes
     // addendum, audit round 1). `generateOverview` appends its own via the same factory, for the
@@ -2552,13 +2582,20 @@ function initChatPanel() {
     input.disabled = pending;
   });
 
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
+  // One flow, two entry points: the composer, and a turn's own "regenerate". Extracted rather than
+  // copied — the pending row, the live ticker, the Stop button, the cancel path and the
+  // rebuild-from-the-server's-own-record are the parts that would drift, and this file has already
+  // paid for a duplicated affordance once (the two "N steps" pills).
+  //
+  // `regenerate` REPLACES the last turn server-side when the question still matches it. Only the
+  // last: every later answer was produced with this one in its `history` (invariant 11), so
+  // regenerating mid-thread would leave the answers after it derived from a conversation that no
+  // longer exists. The button is offered on the last turn only, and the server re-checks.
+  async function askQuestion(question, { regenerate = false } = {}) {
     if (!state.notebookId) {
       alert(t("err.openNotebookFirst", "Open or name a notebook first."));
       return;
     }
-    const question = input.value.trim();
     if (!question) return;
 
     // The CLIENT picks the run id (blueprint P3.1) — a server-generated one would never reach us
@@ -2572,9 +2609,6 @@ function initChatPanel() {
     pendingTurn = { question, pending: true, run_id: runId };
     store.emit("chat:turnAdded", { turn: pendingTurn });
     store.emit("chat:pending", { pending: true });
-    input.value = "";
-    input.style.height = "auto";
-    form.classList.remove("has-text");
 
     // The same live surface the Studio actions use, mounted into the pending answer row. Chat had
     // no way to stop a question either, and a question against a large corpus is not quick.
@@ -2607,7 +2641,7 @@ function initChatPanel() {
       const result = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/ask`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question, run_id: token }),
+        body: JSON.stringify({ question, run_id: token, regenerate }),
       });
       // Re-render the whole history from the server's own record rather than mutating the
       // pending row in place — the server is the source of truth for what actually got persisted.
@@ -2635,7 +2669,22 @@ function initChatPanel() {
     } finally {
       store.emit("chat:pending", { pending: false });
     }
+  }
+
+  // The composer clears itself; `askQuestion` does not, because a regenerate has nothing to clear.
+  form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const question = input.value.trim();
+    if (!question) return;
+    input.value = "";
+    input.style.height = "auto";
+    form.classList.remove("has-text");
+    void askQuestion(question);
   });
+
+  // A turn asks to be redone. Exposed on `store` rather than threaded through `renderTurn`'s six
+  // call sites: the button is built far from here and this is the one flow that can run it.
+  store.on("chat:regenerate", ({ question }) => void askQuestion(question, { regenerate: true }));
 }
 
 // --- Studio panel: Guide tabs -----------------------------------------------------------------
@@ -4219,30 +4268,28 @@ function renderTrajDetail() {
     if (chips.children.length) {
       host.appendChild(chips);
     } else {
-      // A trace written before the worker recorded its configuration carries only `task`, which is
-      // already the headline. Say so rather than rendering an empty panel — a blank box reads as
-      // broken.
+      // An empty panel reads as broken, so the empty STATE says which one this is. Two live causes,
+      // and neither of them is "an old trace" — that was only the first one anybody hit:
       //
-      // The first wording ("this run predates the recording of its own configuration") was accurate
-      // and a user still had to ask what it meant: it named an internal capability and left them to
-      // work out whether something was wrong, whether it applied to them, and what to do. It says
-      // WHEN the run happened and what to do about it now.
+      //  - NOTHING WRITTEN YET. `_run_isolated` reserves `traces/{run_id}.jsonl` exclusively BEFORE
+      //    spawning (invariant 29), and `run_trajectory` stops at a torn final line because the
+      //    writer is mid-flush. So a run opened in its first moments, or one whose spawn failed, or
+      //    one killed instantly, has a real file with zero events. `traces._is_ours` accepts an
+      //    empty file for exactly this reason.
+      //  - NO CONFIGURATION RECORDED. A trace written by an older build of this project, which
+      //    stamped only `task`.
+      //
+      // An earlier wording named only the second and dated it, and a user asked what it meant;
+      // deleting the old traces would have made it a sentence describing a cause nobody could hit
+      // any more while the branch stayed reachable through the first.
       const note = document.createElement("div");
       note.className = "det-sub";
-      const when = trajData.started_at
-        ? new Date(trajData.started_at * 1000).toLocaleString()
-        : "";
-      note.textContent = when
-        ? t(
-            "traj.noMetaWhen",
-            `This run (${when}) was recorded before the app started saving these details. ` +
-              `A new run will show them.`,
-            { when }
-          )
+      note.textContent = trajData.started_at
+        ? t("traj.noMeta", "No configuration was recorded for this run.")
         : t(
-            "traj.noMeta",
-            "This run was recorded before the app started saving these details. " +
-              "A new run will show them.",
+            "traj.notStarted",
+            "Nothing has been recorded for this run yet \u2014 it may still be starting, or it " +
+              "never got going.",
           );
       host.appendChild(note);
     }

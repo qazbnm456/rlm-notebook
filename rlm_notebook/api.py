@@ -965,6 +965,19 @@ _NO_RUN_OPTIONS = RunOptions()
 
 class AskRequest(RunOptions):
     question: str
+    #: Replace the LAST turn instead of appending, when it asked this same question.
+    #:
+    #: Only the last one, and that is a correctness line rather than a simplification: every later
+    #: answer was produced with this one in its `history` (invariant 11), so regenerating a turn in
+    #: the middle would leave the answers after it derived from a version of the conversation that
+    #: no longer exists. Appending would be the non-destructive alternative and is worse here — the
+    #: reason a reader regenerates is that the answer was wrong, and keeping it in the thread keeps
+    #: it in `history` for every future turn.
+    #:
+    #: The question must MATCH, checked inside the lock against the notebook as it is then. A
+    #: request that arrives after someone else has asked something new simply appends, which is the
+    #: safe direction: an unmatched regenerate can never delete a turn it did not mean to.
+    regenerate: bool = False
 
 
 class AskResponse(BaseModel):
@@ -1250,7 +1263,16 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
     # the file somehow vanished DURING the run, recreating it is strictly better than raising and
     # throwing away an answer that was already generated and paid for.
     turn = ChatTurn(question=body.question, answer=answer, run_id=run_id)
-    await _mutate_or_http(notebook_id, lambda nb: nb.turns.append(turn), create=True)
+
+    def _persist(nb: Notebook) -> None:
+        # Inside the lock, against the notebook as it is NOW — the snapshot this handler read
+        # before the run may be minutes old (the same reasoning the append itself carries).
+        if body.regenerate and nb.turns and nb.turns[-1].question == body.question:
+            nb.turns[-1] = turn
+        else:
+            nb.turns.append(turn)
+
+    await _mutate_or_http(notebook_id, _persist, create=True)
 
     # Citations verify against the SNAPSHOT corpus — the blob the model actually read. Verifying
     # against sources it never saw would be a different (and weaker) claim. Invariant 11's

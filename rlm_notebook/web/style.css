@@ -3838,3 +3838,27 @@ body.is-resizing .studio-grip {
     grid-template-rows: 9rem minmax(0, 1fr);
   }
 }
+
+/* Regenerate is offered on the LAST turn only. Every later answer was produced with this one in
+   its `history` (invariant 11), so redoing a turn in the middle would leave the answers after it
+   derived from a conversation that no longer exists.
+
+   A stylesheet rule rather than a flag passed into `renderTurn`, because turns reach the DOM
+   through two paths — `rebuildHistory` and the `chat:turnAdded` replay — and a rule that reads the
+   DOM is right for both without either having to remember. The same mechanism `.turn-followups`
+   already uses, and it hides the control while a question is pending for free, since the pending
+   row is appended last. */
+.turn-regenerate {
+  display: inline-block;
+  margin-top: 0.35rem;
+}
+
+.turn:not(:last-child) .turn-regenerate {
+  display: none;
+}
+
+/* `.turn-answer.is-pending` is the row of a question still running: its own turn is last, and
+   offering to redo an answer that does not exist yet is nonsense. */
+.turn-answer.is-pending .turn-regenerate {
+  display: none;
+}
