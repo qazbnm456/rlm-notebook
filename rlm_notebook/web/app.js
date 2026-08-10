@@ -2310,17 +2310,34 @@ function renderChatOverview() {
 
   // ONE button, whichever state asked for it — a stale overview and an incomplete one both want
   // the same action, and appending it per-branch would have produced two on a notebook that is both.
-  if (offerRegenerate) {
-    el.appendChild(overviewStarter(t("chat.regenerateOverview", "\u21bb Regenerate overview"), ""));
-  }
+  //
+  // ALWAYS OFFERED once an overview exists, which it was not: it was gated behind `stale` or
+  // "incomplete", so an overview that was current and complete but simply WRONG had no way to be
+  // regenerated at all. A user hit exactly that — asked how to press a button that was not on the
+  // page — while looking at an overview whose five citations had all failed coordinate
+  // verification. Nothing about their sources had changed, so nothing ever made it stale. The
+  // podcast has offered a quiet Regenerate in this same state since invariant 42; the overview
+  // simply never gained it.
+  el.appendChild(
+    overviewStarter(
+      offerRegenerate
+        ? t("chat.regenerateOverview", "\u21bb Regenerate overview")
+        : t("chat.refreshOverview", "\u21bb Regenerate"),
+      "",
+      !offerRegenerate,
+    )
+  );
 }
 
-function overviewStarter(labelText, hintText) {
+function overviewStarter(labelText, hintText, quiet) {
   const wrap = document.createElement("div");
   wrap.className = "chat-starter";
   const btn = document.createElement("button");
   btn.type = "button";
-  btn.className = "btn btn-primary";
+  // SECONDARY once an overview exists. Regenerating costs two real RLM runs, so it must not be the
+  // loudest thing on a panel that already holds what it makes — the same weighting the podcast's
+  // own generate button uses (invariant 42), applied to the control that had been missing entirely.
+  btn.className = quiet ? "btn" : "btn btn-primary";
   btn.textContent = labelText;
   btn.addEventListener("click", () => {
     btn.disabled = true;

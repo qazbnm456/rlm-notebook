@@ -2058,3 +2058,15 @@ questions with verifiable citations, and get a distilled research artifact out.
   The original question's answer: the two runs are independent, both writes land under the
   per-notebook lock, and neither repaint can now delete the other's run. Blocking the composer for
   a multi-minute run would cost more than it protects.
+
+- **An overview could only be regenerated if something had INVALIDATED it.** A user asked how to
+  press "↻ Regenerate" while looking at an overview whose five citations had all failed coordinate
+  verification — the stored form of the defect fixed earlier in this slice. The button was gated on
+  the overview being stale or incomplete; their sources had not moved and the FAQ half had
+  succeeded, so it was not on the page at all. An artifact that is current and complete but simply
+  wrong is a real state, and it was the one with no way out.
+
+  It is always offered now. The flag picks the label and the weight rather than the existence:
+  quiet when nothing is wrong, because regenerating costs two real model runs and must not be the
+  loudest control on a panel that already holds what it makes; louder and explicit when stale or
+  incomplete. The same three-state shape the podcast's own button has had since it was persisted.

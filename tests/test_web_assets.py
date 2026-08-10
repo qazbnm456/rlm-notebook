@@ -660,8 +660,31 @@ def test_a_message_naming_an_action_ships_with_that_action():
     note_at = body.index("chat.noStarters")
     assert "offerRegenerate = true;" in body[note_at : note_at + 400]
     assert body.count("chat.regenerateOverview") == 1
+
+    # The control is now UNCONDITIONAL, which is the strongest possible form of this rule: a note
+    # naming regeneration can never ship without it. It was gated on `offerRegenerate`, so an
+    # overview that was current and complete but simply WRONG had no way to be regenerated — a user
+    # asked how to press a button that was not on the page, while looking at an overview whose five
+    # citations had all failed coordinate verification.
+    # Checked by looking at what PRECEDES the append rather than by matching a syntax shape: a
+    # mutation reintroduced the gate as a brace-less `if (offerRegenerate) el.appendChild(...)` and
+    # a regex expecting `{` walked straight past it.
     button_at = body.index("chat.regenerateOverview")
-    assert "if (offerRegenerate)" in body[button_at - 300 : button_at]
+    append_at = body.rindex("el.appendChild(", 0, button_at)
+    assert "el.appendChild(" in body[button_at - 300 : button_at], "the button is not appended"
+    preceding = body[max(0, append_at - 120) : append_at]
+    assert "if (offerRegenerate)" not in preceding, (
+        f"the regenerate control is gated again — an overview nobody has invalidated cannot be "
+        f"redone. Preceding source: {preceding!r}"
+    )
+
+    # ...and the flag still decides the LABEL and the WEIGHT, so a stale or incomplete overview
+    # gets the louder, explicit control rather than the quiet one a healthy overview carries.
+    assert "chat.refreshOverview" in body, "the quiet variant is gone"
+    assert re.search(r"offerRegenerate\s*\n?\s*\?\s*t\(\s*\"chat\.regenerateOverview\"", body), (
+        "the stale/incomplete label is no longer chosen by the flag"
+    )
+    assert "!offerRegenerate," in body, "the quiet weight is no longer chosen by the flag"
 
 
 def test_the_chat_placeholder_only_appears_while_its_sentence_is_true():

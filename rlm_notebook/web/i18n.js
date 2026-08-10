@@ -118,6 +118,7 @@ const STRINGS = {
     "references.empty": "還沒有任何引用。先提問，或產生一份概覽。",
     "references.uses": "引用 {n} 次",
     // --- trajectory drawer
+    "chat.refreshOverview": "↻ 重新產生",
     "traj.title": "執行軌跡",
     "traj.search": "搜尋回合…",
     "traj.stat": "{turns} 個回合 · {tools} 次工具呼叫",

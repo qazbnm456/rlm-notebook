@@ -2560,6 +2560,21 @@ them exist because an earlier design discussion mentioned them.
     never started. Pre-existing, found while fixing the above, and guarded on
     `generation === notebookGeneration` at both call sites.
 
+    **The overview had no way to be regenerated unless something INVALIDATED it, and that is how
+    this was found.** A user asked how to press "↻ Regenerate" while looking at an overview whose
+    five citations had all failed coordinate verification (invariant 67's reported defect, in its
+    stored form). The button was gated on `stale` OR "incomplete", their sources had not moved, and
+    the FAQ half had succeeded — so the control simply was not on the page. An artifact that is
+    current and complete but WRONG is a real state, and it was the one state with no way out.
+
+    The control is UNCONDITIONAL now once an overview exists, and `offerRegenerate` picks its LABEL
+    and WEIGHT instead of its existence: quiet and short when nothing is wrong (regenerating costs
+    two real RLM runs, so it must not be the loudest thing on a panel that already holds what it
+    makes), louder and explicit when stale or incomplete. That is exactly the three-state treatment
+    invariant 42 gave the podcast's generate button; the overview never gained it. It also makes the
+    "regenerate to try again" note unable to name a missing action, which is the strongest form of
+    the rule its own tripwire was written for.
+
     **What is NOT a bug, asked directly by a user: asking a question while an overview regenerates.**
     The two are separate runs with distinct ids; `mutate_notebook` re-reads under a lock and applies
     each delta (invariant 34), so the turn and the overview both land; `rebuildHistory` re-appends
