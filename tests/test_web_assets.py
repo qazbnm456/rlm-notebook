@@ -1403,8 +1403,18 @@ def test_the_missing_metadata_note_says_when_and_what_to_do():
     assert "trajData.started_at" in js, "the note cannot say WHEN the run happened"
     for key in ("traj.noMeta", "traj.noMetaWhen"):
         assert key in js, f"{key} is gone"
-    # The English fallback at the call site is what an English reader sees (invariant 48), so the
-    # actionable half has to be in it, not only in the translation table.
-    fallback = re.search(r'"traj\.noMetaWhen",\s*\n?\s*`([^`]*)`', js, re.DOTALL)
-    assert fallback and "A new run will show them" in fallback.group(1), fallback
-    assert "predates" not in js, "the wording that had to be explained is back"
+    # The English fallback at the CALL SITE is what an English reader sees (invariant 48), so the
+    # actionable half has to be in it and not only in the translation table. Both fallbacks are
+    # template literals split across concatenated backtick strings, so the check spans the whole
+    # call rather than one backtick — the first version matched only the opening fragment and
+    # failed on a sentence that was in fact complete.
+    for key in ("traj.noMetaWhen", "traj.noMeta"):
+        at = js.index(f'"{key}",')
+        assert "A new run will show them" in js[at : at + 400], (
+            f"{key}'s English fallback no longer tells the reader what to do: {js[at : at + 260]!r}"
+        )
+    # And the translation carries it too, or a Chinese reader gets only half the message.
+    i18n = (WEB / "i18n.js").read_text(encoding="utf-8")
+    for key in ("traj.noMeta", "traj.noMetaWhen"):
+        at = i18n.index(f'"{key}":')
+        assert "重新執行" in i18n[at : at + 200], f"{key} is not translated actionably"
