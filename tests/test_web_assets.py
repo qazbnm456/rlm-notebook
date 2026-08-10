@@ -1167,3 +1167,49 @@ def test_a_live_trajectory_poll_keeps_the_readers_place():
         "the live poll clears the reader's search box again"
     )
     assert 'trajSelect("init", 0);' not in body, "the live poll resets the selection unconditionally"
+
+
+def test_a_repaint_cannot_delete_the_overviews_progress_and_stop():
+    """Adding or removing a source while an overview generates calls `renderChatOverview`, which
+    CLEARS `#chat-overview` — the element holding that run's pulsing dot, elapsed counter and its
+    only Stop button. Invariant 47's rule broken by a repaint, which is exactly the class invariant
+    60 fixed for the pending chat turn.
+
+    Worse than it sounds: `sources:changed` deliberately does not bump `overviewToken` (stranding a
+    generation the server already paid for would be the bigger bug), so the run stays live with no
+    way to see or stop it until it lands minutes later."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    render = re.search(r"function renderChatOverview\(\)\s*\{(.*?)\n\}", js, re.DOTALL)
+    assert render, "renderChatOverview is gone"
+    body = render.group(1)
+    guard = re.search(r"^\s*if \(overviewRunning\) return;", body, re.MULTILINE)
+    assert guard, "a repaint can clear the overview panel while a run owns it"
+    # The guard must come BEFORE the clear, or it protects nothing.
+    assert guard.start() < body.index('el.textContent = ""'), body[:300]
+
+    # ...and every path out of the run must release it, or the panel is frozen forever. A notebook
+    # SWITCH matters most: without it the new notebook keeps the old run's status node.
+    gen = re.search(r"async function generateOverview\(\)\s*\{(.*?)\n\}\n", js, re.DOTALL)
+    assert gen and gen.group(1).count("overviewRunning = false") >= 3, (
+        "not every exit from generateOverview releases the panel"
+    )
+    switched = re.search(r'store\.on\("notebook:switched", \(\) => \{(.*?)\n  \}\)', js, re.DOTALL)
+    assert switched and "overviewRunning = false" in switched.group(1), (
+        "switching notebooks leaves the previous run owning the new notebook's overview panel"
+    )
+
+
+def test_a_superseded_overview_note_never_lands_in_another_notebooks_panel():
+    """`!live()` covers two different situations. A second press of Generate on the SAME notebook is
+    a supersede and should say so; a NOTEBOOK SWITCH means `#chat-overview` now belongs to a
+    different notebook, and writing there overwrites ITS overview with a note about a run it never
+    started."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    gen = re.search(r"async function generateOverview\(\)\s*\{(.*?)\n\}\n", js, re.DOTALL)
+    assert gen, "generateOverview is gone"
+    calls = re.findall(r"supersededNote\(el\)", gen.group(1))
+    assert calls, "the supersede note is gone entirely — a dropped response reads as a hang"
+    guarded = re.findall(r"if \(generation === notebookGeneration\) supersededNote\(el\)", gen.group(1))
+    assert len(guarded) == len(calls), (
+        f"{len(calls) - len(guarded)} supersede note(s) can still land in another notebook's panel"
+    )

@@ -2535,4 +2535,37 @@ them exist because an earlier design discussion mentioned them.
     widths, turn and tool details, search matching two turns, and stepping from a tool selection
     landing on that tool's own turn rather than bouncing to the start.
 
+71. **A repaint may not delete a RUN — and `#chat-overview` is owned by its generation while one is
+    in flight (`overviewRunning`).** Invariant 60 fixed this for the pending chat turn; the
+    overview's OWN run had the mirror-image hole. `renderChatOverview` clears that element, which
+    holds the run's pulsing dot, its elapsed counter and its only Stop — and three things call it
+    for reasons that have nothing to do with the run: `sources:changed`, the source-delete handler,
+    and a notebook switch. So adding a source while an overview generated wiped the progress
+    indicator and the Stop, which is invariant 47's rule broken by a repaint.
+
+    **Worse than it sounds, because of a deliberate decision one line away.** `sources:changed`
+    does NOT bump `overviewToken` — stranding a generation the server has already paid for would be
+    the bigger bug — so the run stays live with no way to see or stop it until it lands minutes
+    later. The two decisions are individually right and were never checked together.
+
+    **A notebook SWITCH must release the flag, not just bump the token.** Otherwise the new
+    notebook's panel keeps the previous run's status node, because the guard defers every repaint.
+    Found by asking what the guard does to the paths that were already correct, rather than only to
+    the one that was broken.
+
+    **`!live()` covers two situations and only ONE of them belongs to this panel.** A second press
+    of Generate on the same notebook is a supersede and must say so (invariant 47 — a silent
+    `return` reads as a hang). A NOTEBOOK SWITCH is not: `#chat-overview` belongs to a different
+    notebook by then, and `supersededNote` would overwrite ITS overview with a note about a run it
+    never started. Pre-existing, found while fixing the above, and guarded on
+    `generation === notebookGeneration` at both call sites.
+
+    **What is NOT a bug, asked directly by a user: asking a question while an overview regenerates.**
+    The two are separate runs with distinct ids; `mutate_notebook` re-reads under a lock and applies
+    each delta (invariant 34), so the turn and the overview both land; `rebuildHistory` re-appends
+    the SAME `overviewEl` node, so a finishing question cannot wipe a running overview; and
+    invariant 60 already makes the reverse safe. Freezing the composer for a multi-minute run would
+    cost the reader more than it protects — and the two writes were made safe precisely so it does
+    not have to.
+
 See `CHANGELOG.md` for what shipped in the current slice and why.

@@ -2039,3 +2039,22 @@ questions with verifiable citations, and get a distilled research artifact out.
   turns wastes the step budget just as surely as a long one written in a single reply loses the
   run. The podcast keeps its tier-specific warning (60-90 utterances is a fact about that task) and
   no longer restates the mechanic — one copy, pinned by a tripwire over all six.
+
+- **A user asked whether the chat should be frozen while an overview regenerates. It should not —
+  but the question found a real bug next door.** `renderChatOverview` clears the element that holds
+  the run's progress dot and its only Stop, and adding or removing a source calls it. So a source
+  added mid-generation wiped both, while a deliberate decision one line away (not bumping the
+  generation token, so a paid-for run is never stranded) kept the run alive with no way to see or
+  cancel it until it landed minutes later. Two individually-right decisions that had never been
+  checked together. The panel is owned by its run now, exactly as invariant 60 already does for a
+  pending chat turn.
+
+  A notebook switch has to RELEASE that ownership rather than only strand the run, or the new
+  notebook keeps the old one's status node — and a pre-existing sibling turned up in the same
+  function: the "superseded" note was written into `#chat-overview` even when the reader had
+  switched notebooks, overwriting a different notebook's overview with a note about a run it never
+  started.
+
+  The original question's answer: the two runs are independent, both writes land under the
+  per-notebook lock, and neither repaint can now delete the other's run. Blocking the composer for
+  a multi-minute run would cost more than it protects.

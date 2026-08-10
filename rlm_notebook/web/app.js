@@ -2228,7 +2228,24 @@ function renderTurn(turn) {
 // and Phase 2's rule (never spend one nobody asked for) is unchanged.
 let overviewToken = 0;
 
+//: True while `generateOverview` owns `#chat-overview` — its pulsing dot, its elapsed counter and
+//: its Stop button live there and nowhere else.
+//:
+//: `renderChatOverview` CLEARS that element, and three things call it for reasons that have nothing
+//: to do with the run: adding a source, removing one, and the source-delete handler. So adding a
+//: source while an overview generated wiped the progress indicator AND the only Stop — invariant
+//: 47's rule broken by a repaint, the same class invariant 60 fixed for the pending chat turn and
+//: for exactly the same reason: a repaint must carry the run in flight with it.
+//:
+//: Worse than it sounds. `sources:changed` deliberately does NOT bump `overviewToken` (stranding a
+//: generation the server has already paid for would be the bigger bug), so the run stays live with
+//: no way to see or stop it until it lands minutes later.
+let overviewRunning = false;
+
 function renderChatOverview() {
+  // A run owns this element. It repaints itself when it finishes, cancels or fails, and staleness
+  // is recomputed server-side at that point anyway — so there is nothing to lose by deferring.
+  if (overviewRunning) return;
   const el = document.getElementById("chat-overview");
   el.textContent = "";
   el.hidden = !state.sources.length;
@@ -2353,6 +2370,7 @@ async function generateOverview() {
 
   el.hidden = false;
   el.textContent = "";
+  overviewRunning = true;
 
   // The server appends `-summary`/`-faq` to the run id it derives, so both targets are predictable:
   // the ticker follows the summary, and Stop cancels BOTH (a notebook-scoped cancel would leave the
@@ -2368,6 +2386,7 @@ async function generateOverview() {
     onCancel: () => {
       cancelled = true;
       overviewToken += 1; // strand this generation's own response
+      overviewRunning = false; // release BEFORE the repaint, or the guard above swallows it
       renderChatOverview(); // straight back to the pre-run state, nothing half-written left behind
     },
   });
@@ -2384,12 +2403,18 @@ async function generateOverview() {
       body: JSON.stringify({ run_id: runToken }),
     });
     status.finish();
+    overviewRunning = false;
     if (cancelled) return;
     if (!live()) {
       // SUPERSEDED, not lost. Saying nothing here is what made a real report read as "pressed
       // generate, it said Finished, then nothing ever appeared": the response arrived, this guard
       // dropped it silently, and the last ticker line just sat there looking stuck.
-      supersededNote(el);
+      //
+      // But `!live()` covers TWO situations and only one of them is this panel's business. If the
+      // reader has SWITCHED NOTEBOOKS, `#chat-overview` now belongs to a different notebook and
+      // writing here would overwrite ITS overview with a note about a run it never started.
+      // Superseding is a same-notebook event: a second press of Generate.
+      if (generation === notebookGeneration) supersededNote(el);
       return;
     }
     state.overview = notebook.overview;
@@ -2402,9 +2427,10 @@ async function generateOverview() {
     store.emit("chat:rerender", {});
   } catch (err) {
     status.finish();
+    overviewRunning = false;
     if (cancelled) return;
     if (!live()) {
-      supersededNote(el);
+      if (generation === notebookGeneration) supersededNote(el);
       return;
     }
     el.textContent = "";
@@ -2484,6 +2510,9 @@ function initChatPanel() {
 
   store.on("notebook:switched", () => {
     overviewToken += 1; // a notebook switch strands any generation still in flight
+    // ...and releases the panel it owned. Without this the new notebook keeps the OLD run's
+    // pulsing dot and Stop, because `renderChatOverview` defers while a run owns the element.
+    overviewRunning = false;
     renderChatOverview();
     // The placeholder comes back too: `chat:turnAdded` hides it, and without this a switch FROM a
     // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at all.
