@@ -2059,6 +2059,11 @@ questions with verifiable citations, and get a distilled research artifact out.
   per-notebook lock, and neither repaint can now delete the other's run. Blocking the composer for
   a multi-minute run would cost more than it protects.
 
+  **REVERSED later in this same slice** — see "The chat composer is frozen while an overview
+  generates" below. The technical half of this paragraph still holds (nothing was ever at risk);
+  what changed is that the user asked twice, and whether two runs LOOK like they are fighting is
+  their call rather than a question the locking answers.
+
 - **An overview could only be regenerated if something had INVALIDATED it.** A user asked how to
   press "↻ Regenerate" while looking at an overview whose five citations had all failed coordinate
   verification — the stored form of the defect fixed earlier in this slice. The button was gated on
@@ -2166,3 +2171,36 @@ questions with verifiable citations, and get a distilled research artifact out.
   deleted. It cannot: the trace file is reserved before the run spawns, so a run opened in its first
   moments — or one whose spawn failed, or one killed instantly — has a real file with zero events.
   What had to go was the WORDING, which named a cause the cleanup makes unreachable.
+
+- **A conversation can be cleared.** Turns were append-only — a source could be deleted and a note
+  could be deleted, but a chat could only grow — so "start over" was impossible, and regenerate
+  reaches the last answer only (every later one was produced with it in `history`). Sources, notes,
+  the overview and the podcast are kept, and the confirmation says so: losing sources is the fear a
+  destructive control in the chat panel invites.
+
+- **A tooltip at the left edge of the chat was clipped**, photographed arriving with its first
+  characters sliced off. The default tip anchors right, so a 15rem panel on a left-edge control
+  extends off the scroller — which clips horizontally, because an `overflow-y: auto` box computes
+  `overflow-x` to `auto` too. Anchoring it into the space the control actually has is the fix, and
+  this stylesheet already did exactly that elsewhere. Deleting the tooltips was the first instinct
+  and would have removed working information to avoid a positioning bug.
+
+- **An independent fact-check of this batch's documentation against its code found nine problems,
+  and the sharpest was a claim in an OLDER invariant that today's work had quietly falsified.**
+  Invariant 48 still said the interface language "is never sent to the server, and never reaches a
+  prompt" — both halves untrue since it became a language-resolution signal earlier in this same
+  slice. `i18n.js`'s own header had been rewritten for exactly that; the invariant had not.
+
+  Also corrected: a sentinel list miscounted as two when it has six; a stylesheet comment whose
+  arithmetic said 64.6px where recomputing from its own values gives 66.7px (the fix was right, the
+  sum beside it was not); two contradictory CHANGELOG entries on freezing the chat composer, with
+  nothing saying the first had been reversed; an invariant asserting a root cause that a LATER
+  invariant records as having been wrong; an enumeration of "three callers" that was five, listed
+  one of them twice, and disagreed with the code comment beside it; a `tickerLogs` comment keeping
+  a paragraph the next paragraph retracts; and `web/DESIGN.md` — tracked and shipped in the wheel —
+  still documenting an element that was deleted.
+
+  And one new test did not pin what it claimed: inserting `return;` at the top of `syncClearBtn`
+  left the suite green, because every substring it checked still matched the dead code below. That
+  is the identical defeat this batch already recorded fixing for `markWantedQuote`, made again in
+  the very next test written.

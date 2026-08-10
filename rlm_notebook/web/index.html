@@ -64,7 +64,13 @@
     </section>
 
     <section class="col col-chat" id="col-chat">
-      <div class="panel-head" data-i18n="chat.head">Chat</div>
+      <div class="panel-head">
+        <span data-i18n="chat.head">Chat</span>
+        <button type="button" class="panel-head-action" id="chat-clear" hidden
+                data-i18n="chat.clear" data-i18n-tip="chat.clearTip"
+                data-tip="Delete every question and answer in this notebook. Sources, notes and
+                          the overview are kept.">Clear conversation</button>
+      </div>
 
       <div class="chat-history" id="chat-history">
         <!-- The overview lives INSIDE the scrolling thread, as its first entry. It used to be a

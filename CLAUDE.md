@@ -981,8 +981,8 @@ them exist because an earlier design discussion mentioned them.
     independent review caught both the missed instance and the claim built on it. The first version
     of `test_web_assets.py` could not have caught it either: it harvested element ids from
     `index.html`, and `.ticker-detail` is built with `createElement`. It now keys on CSS CLASSES,
-    which the markup and the JS spell the same way, and asserts up front that it can still see both
-    known instances — so a future extraction failure fails the build instead of passing vacuously.
+    which the markup and the JS spell the same way, and asserts up front that it can still see every
+    known instance — so a future extraction failure fails the build instead of passing vacuously.
 
     **A visible author `display` on a hidden-toggled class IS allowed — with a guard that OUTRANKS
     it.** The podcast transcript can only fill the space the rest of its panel leaves through a flex
@@ -1710,8 +1710,17 @@ them exist because an earlier design discussion mentioned them.
     the OUTPUT language (invariant 39, a server setting).** One decides what the buttons say, the
     other what the model writes. A reader in Taiwan may well want a Chinese interface over English
     papers, and folding the two together makes that combination unexpressible — so the UI language
-    lives in `localStorage`, is never sent to the server, and never reaches a prompt. The settings
-    page carries both, on separate rows, saying which is which. A test pins the separation.
+    lives in `localStorage` and the settings page carries both, on separate rows, saying which is
+    which. A test pins the separation.
+
+    **This paragraph used to end "is never sent to the server, and never reaches a prompt", and
+    invariant 69 made both halves false without correcting it here.** The chosen interface language
+    IS sent, on every request (`X-RLM-Interface-Language`), and DOES reach a prompt, as one of four
+    signals `naming.SuggestLanguage` weighs when a notebook has no output language yet. What
+    survives is the SEPARATION: two settings, two rows, and an explicit output language still wins
+    outright. `i18n.js`'s own header was rewritten for this and the invariant was not — found by an
+    independent fact-check, which is the failure mode a "one copy of the rule" discipline is
+    supposed to prevent and did not, because this copy is prose rather than code.
 
     **`STRINGS.en` is EMPTY on purpose.** English is whatever `index.html` and `app.js` already say:
     static markup carries `data-i18n` / `-title` / `-placeholder` / `-tip` and keeps its own text
@@ -1905,6 +1914,15 @@ them exist because an earlier design discussion mentioned them.
     optional, since a collapsed rail shows nothing but icons. Reported as "以前有的 hover tooltip
     效果都不見了". `test_no_tooltip_host_clips_its_own_tooltip` harvests tip-bearing classes from the
     markup, from `dataset.tip` in `app.js`, and from stylesheet rules already naming `[data-tip]`.
+    **A HORIZONTAL clip at the left edge is fixable, and removing the tip is the wrong instinct.**
+    `[data-tip]::after` anchors `right: 0`, so a 15rem panel on a control at the LEFT edge of a
+    scroller extends off it — and any `overflow-y: auto` box computes `overflow-x` to `auto` too.
+    A user photographed the steps pill's tip arriving with its first characters sliced off. The fix
+    is to anchor the tip into the space the control actually has (`left: 0; right: auto`), which
+    this stylesheet already did for `.src-flags` with that reason written beside it. The first
+    instinct was to delete the tooltips, which would have removed working information to avoid a
+    positioning bug.
+
     **Stated rather than implied: an ANCESTOR's clipping overflow does the same thing and is NOT
     covered** — finding those needs a DOM this suite does not have. `.col`'s `overflow-y: auto` is
     exactly such an ancestor (one non-visible axis forces the other to `auto`), which is why both tab
@@ -2555,7 +2573,7 @@ them exist because an earlier design discussion mentioned them.
 
     `.ticker-detail`/`.ticker-row` and their CSS are gone with it, and `tickerLogs` stopped being a
     cache — it is now only what `openTicker` resolves with. **`.ticker-detail` was also one of the
-    two sentinels in invariant 36's tripwire**, the list that stops that whole test passing
+    SIX sentinels in invariant 36's tripwire**, the list that stops that whole test passing
     vacuously; it is replaced by `.traj-drawer` rather than dropped, and the extraction gained a
     route for a BARE `hidden` attribute in the markup, which is the ordinary spelling and which all
     four existing routes were blind to (the drawer is reached as `trajEl.drawer.hidden = …`, a
@@ -2621,9 +2639,12 @@ them exist because an earlier design discussion mentioned them.
 71. **A repaint may not delete a RUN — and `#chat-overview` is owned by its generation while one is
     in flight (`overviewRunning`).** Invariant 60 fixed this for the pending chat turn; the
     overview's OWN run had the mirror-image hole. `renderChatOverview` clears that element, which
-    holds the run's pulsing dot, its elapsed counter and its only Stop — and three things call it
-    for reasons that have nothing to do with the run: `sources:changed`, the source-delete handler,
-    and a notebook switch. So adding a source while an overview generated wiped the progress
+    holds the run's pulsing dot, its elapsed counter and its only Stop — and FIVE things call it for
+    reasons that have nothing to do with the run: `sources:changed`, the source-delete handler, a
+    notebook switch, the rebuild after an `ask`, and an interface-language change. (An earlier count
+    here said three, and the code comment beside the guard said a DIFFERENT three, one of them
+    listed twice. The guard sits at the TOP of `renderChatOverview`, so every caller is covered
+    either way — it was only the enumeration that was wrong, in two places that disagreed.) So adding a source while an overview generated wiped the progress
     indicator and the Stop, which is invariant 47's rule broken by a repaint.
 
     **Worse than it sounds, because of a deliberate decision one line away.** `sources:changed`
@@ -2698,6 +2719,18 @@ them exist because an earlier design discussion mentioned them.
     lock, against the notebook as it is THEN — a request that lands after someone else asked
     something new appends instead, which is the safe direction.
 
+    **A conversation can be CLEARED, which is the other end of the same fact**
+    (`DELETE /notebooks/{id}/turns`). Regenerate reaches the last answer only, for the `history`
+    reason above — so clearing is the only honest way to undo a turn in the middle, and turns were
+    otherwise append-only: a source could be deleted and a note could be deleted, but a conversation
+    could only grow. Sources, notes, the overview and the podcast are untouched, and nothing is
+    marked stale: an overview's `source_ids` are about the CORPUS, which has not moved. The
+    confirmation names what SURVIVES as well as what goes, since losing sources is the fear a
+    destructive control in the chat panel invites. The control hides itself when there is no
+    conversation, kept in sync from the EXISTING `chat:turnAdded`/`chat:rerender`/
+    `notebook:switched` handlers rather than three new ones — a second subscription to one event
+    inside one init is what `test_no_event_is_subscribed_twice_inside_one_init_function` forbids.
+
     **Replacing rather than appending.** The reason a reader regenerates is that the answer was
     wrong; keeping it in the thread keeps it in `history` for every future turn. Both entry points
     share ONE flow (`askQuestion`), since the pending row, the ticker, Stop, the cancel path and the
@@ -2717,9 +2750,14 @@ them exist because an earlier design discussion mentioned them.
     back on.
 
     A user pressed the steps pill after an update and got the OLD inline reasoning log — the exact
-    thing the Trajectory drawer had replaced. The server was serving the new `app.js`; their browser
-    was running the previous one, and nothing on the page could have told them. Verified by fetching
-    the served asset and finding the new code in it while the screenshot showed the old behaviour.
+    thing the Trajectory drawer had replaced. **That report's cause turned out to be something else
+    entirely** (invariant 70: a SECOND steps pill that the new file still expanded inline), and the
+    check offered at the time — the server serves the new code, the screen shows the old behaviour —
+    could not distinguish the two, precisely because the new code still contained the old behaviour.
+    So this invariant rests on the MECHANISM rather than on that report: Starlette sends no
+    `Cache-Control`, the filenames carry no content hash, and a browser is therefore free to run a
+    stale `app.js` with nothing on the page able to say so. Worth closing whether or not it was what
+    happened that day.
 
     **`no-cache` is NOT `no-store`.** The copy stays in the cache and the ETag short-circuits the
     transfer, so an unchanged asset costs one conditional request and a 304 with no body — measured.

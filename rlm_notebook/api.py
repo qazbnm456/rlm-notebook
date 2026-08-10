@@ -782,6 +782,31 @@ async def delete_note_endpoint(notebook_id: str, note_id: str) -> NotebookRespon
     return _notebook_response(notebook)
 
 
+@app.delete("/notebooks/{notebook_id}/turns", response_model=NotebookResponse)
+async def clear_turns(notebook_id: str) -> NotebookResponse:
+    """Start the conversation over: drop every `ChatTurn`, keep everything else.
+
+    Turns were append-only, so a reader who wanted a fresh start had nowhere to go — a source could
+    be deleted and a note could be deleted, but a conversation could only grow. Regenerating an
+    answer replaces the LAST one (`AskRequest.regenerate`) and deliberately cannot reach further
+    back, because every later answer was produced with the earlier ones in its `history`; clearing
+    is the other end of that same fact, and the only honest way to reach a turn in the middle.
+
+    **Sources, notes, the overview and the podcast are untouched.** The conversation is the one
+    thing being reset — the corpus and the artifacts derived from it are not part of it, and a
+    reader clearing a chat is not asking to lose their sources. Nothing is marked stale either: an
+    overview's `source_ids` are about the corpus, which has not moved.
+
+    Irreversible, like every other delete here, and offered behind a confirmation in the UI. The
+    response is the full ground-truth notebook so a client re-renders from what was actually
+    persisted rather than from what it assumed.
+    """
+    def _clear(nb: Notebook) -> None:
+        nb.turns.clear()
+
+    return _notebook_response(await _mutate_or_http(notebook_id, _clear, create=False))
+
+
 @app.delete("/notebooks/{notebook_id}/sources/{source_id}", response_model=NotebookResponse)
 async def delete_source_endpoint(notebook_id: str, source_id: str) -> NotebookResponse:
     """Remove one source. Same shape as deleting a note: existing notebook only (`create=False`).

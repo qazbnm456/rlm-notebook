@@ -89,7 +89,7 @@ were all considered and rejected first):
   citation-verifiable-truth product. The body default (`body { font-family: "Public Sans", ... }`).
 - **JetBrains Mono** — the one deliberate callback to the sibling studios' technical identity, kept
   exactly where the product intentionally echoes a developer-console reading: Phase 3's reasoning
-  ticker (`.ticker-toggle`/`.ticker-detail`) and the citation-turn detail payload
+  ticker pill (`.ticker-toggle`; `.ticker-detail` is gone — see below) and the citation-turn payload
   (`.citation-detail-payload`) — nowhere else. The `.trace-face` class reserved for it in Phase 1/2
   went unused until Phase 3 actually needed it.
 
@@ -191,7 +191,10 @@ alongside the actual request. While pending, the ticker's translated `{kind, sum
 replace the static "Thinking…"/"Generating…" copy with live-updating copy in the SAME slot — this
 is not a new UI element, just a livelier version of an existing one. Once the request settles, the
 ticker log (already held in memory, nothing re-fetched) collapses into a small `⌁ N steps`
-pill (`.ticker-toggle`) that expands a plain-text log (`.ticker-detail`) on click.
+pill (`.ticker-toggle`). **Superseded**: that pill no longer expands a plain-text log in place
+(`.ticker-detail` and its CSS are gone). It opens the Trajectory drawer for the run, which carries
+the same trace with the code each turn ran, the tool calls and real per-turn timing. Recorded here
+rather than rewritten, because this file is the Phase 3 design record and the change came later.
 
 Every citation span with a known run id becomes clickable (`.citation-clickable`): clicking it
 calls `GET .../citation-turn` and fills a single shared `.citation-detail` slot per answer (not one

@@ -119,6 +119,9 @@ const STRINGS = {
     "references.uses": "引用 {n} 次",
     // --- trajectory drawer
     "chat.refreshOverview": "↻ 重新產生",
+    "chat.clear": "清空對話",
+    "chat.clearTip": "刪除這本筆記本裡所有的提問與回答。來源、筆記和概覽會保留。",
+    "chat.clearConfirm": "確定要刪除全部 {n} 則提問與回答？來源、筆記和概覽會保留。",
     "chat.regenerateTurn": "↻ 重新產生",
     "chat.regenerateTurnTip": "重新問一次這個問題並取代這則回答。會花費一次完整的模型執行。",
     "chat.overviewSecondHalf": "摘要完成 · 正在產生建議問題…",

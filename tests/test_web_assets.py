@@ -345,7 +345,9 @@ def test_the_interface_language_is_separate_from_the_output_language():
         line for line in raw.splitlines() if not line.lstrip().startswith("//")
     )
     app = (WEB / "app.js").read_text(encoding="utf-8")
-    # The UI language lives in localStorage and is never sent anywhere.
+    # The UI language lives in localStorage. It IS sent, as one signal among four that language
+    # resolution weighs (invariant 69) — what this pins is the SEPARATION: `i18n.js` knows nothing
+    # about the OUTPUT language, so the two settings can never collapse into one.
     assert "localStorage" in i18n
     assert "RN_OUTPUT_LANGUAGE" not in i18n
     assert "output_language" not in i18n
@@ -1462,3 +1464,48 @@ def test_regenerate_replaces_only_a_matching_last_turn():
     persist = src[src.index("def _persist(") : src.index("await _mutate_or_http(notebook_id, _persist")]
     assert "body.regenerate" in persist and "nb.turns[-1].question == body.question" in persist, persist
     assert "nb.turns[-1] = turn" in persist and "nb.turns.append(turn)" in persist, persist
+
+
+def test_the_clear_conversation_control_appears_only_when_there_is_one():
+    """A destructive control offered on an empty thread is an invitation to nothing. It is also the
+    only way to undo a turn in the MIDDLE — regenerate deliberately reaches the last one only."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    sync = re.search(r"const syncClearBtn = \(\) => \{(.*?)\n  \};", js, re.DOTALL)
+    assert sync, "syncClearBtn is gone"
+    body = sync.group(1)
+    assert "state.turns" in body and "length" in body, body
+    # The assignment must be REACHABLE. A fact-check inserted `return;` as the first statement —
+    # so the button is never synced at all — and every substring above still matched the dead code
+    # below it. The identical defeat this batch already recorded fixing for `markWantedQuote`, made
+    # again in the very next test written. A source-tree check sees tokens, not control flow, unless
+    # it is told to look at the first statement.
+    first = next(
+        (ln.strip() for ln in body.splitlines()
+         if ln.strip() and not ln.strip().startswith(("//", "/*", "*"))),
+        "",
+    )
+    assert not re.match(r"^return\s*;?$", first), f"syncClearBtn returns before it syncs: {first!r}"
+    # Destructive and irreversible, so it confirms — and names what SURVIVES, since losing sources
+    # is what a reader would fear from a control in the chat panel.
+    at = js.index('"chat.clearConfirm"')
+    assert "Sources, notes and the overview are kept" in js[at : at + 300], js[at : at + 300]
+    i18n = (WEB / "i18n.js").read_text(encoding="utf-8")
+    at = i18n.index('"chat.clearConfirm"')
+    assert "保留" in i18n[at : at + 200], "the Chinese confirmation drops what survives"
+
+
+def test_a_tip_on_a_left_edge_control_opens_rightward():
+    """`[data-tip]::after` anchors `right: 0` by default, so a 15rem panel on a control at the LEFT
+    edge of a scroller extends off it — and `.chat-history` is `overflow-y: auto`, which computes
+    `overflow-x` to `auto` too. Photographed by a user: a tip arriving with its first characters
+    sliced off.
+
+    Removing the tips was the first instinct and the wrong one. Invariant 54's ancestor case cannot
+    always be fixed, but when the clipping is HORIZONTAL and the control sits at the left edge, it
+    always can — anchor the tip into the space the control actually has, which this file already
+    does for `.src-flags`."""
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    for sel in (r"\.ticker-toggle\[data-tip\]::after", r"\.turn-regenerate \[data-tip\]::after"):
+        rule = re.search(rf"{sel}[^{{]*\{{([^}}]*)\}}", css)
+        assert rule, f"{sel} has no anchor override — its tip is clipped by the chat scroller"
+        assert "left: 0" in rule.group(1) and "right: auto" in rule.group(1), rule.group(1)

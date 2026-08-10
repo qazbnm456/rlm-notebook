@@ -119,9 +119,6 @@ async function api(path, options) {
 // small "view reasoning" affordance afterward. Losing the ticker (a network hiccup, the SSE
 // connection dropping) never blocks or breaks the actual request.
 
-//: One client-side log per run id, kept for the lifetime of the page (not just while a stream is
-//: open) so a "⌁ N steps" affordance can expand instantly without re-fetching. Shared across
-//: Chat/Guide/Podcast rather than three separate caches.
 //: Every event a run's stream has produced this page-session, keyed by run id. `openTicker`
 //: accumulates into it and RESOLVES with it, which is what the awaiting caller reads — nothing
 //: else does any more. It stopped being a cache when the persisted "⌁ N steps" pill moved from
@@ -2217,9 +2214,12 @@ let overviewToken = 0;
 //: True while `generateOverview` owns `#chat-overview` — its pulsing dot, its elapsed counter and
 //: its Stop button live there and nowhere else.
 //:
-//: `renderChatOverview` CLEARS that element, and three things call it for reasons that have nothing
-//: to do with the run: adding a source, removing one, and the source-delete handler. So adding a
-//: source while an overview generated wiped the progress indicator AND the only Stop — invariant
+//: `renderChatOverview` CLEARS that element, and FIVE things call it for reasons that have nothing
+//: to do with the run: `sources:changed`, the source-delete handler, a notebook switch, the rebuild
+//: after an `ask`, and an interface-language change. (An earlier version of this comment said three
+//: and listed source removal twice; invariant 71 said a DIFFERENT three. The guard is at the TOP of
+//: the function, so every caller was covered either way.) So adding a source while an overview
+//: generated wiped the progress indicator AND the only Stop — invariant
 //: 47's rule broken by a repaint, the same class invariant 60 fixed for the pending chat turn and
 //: for exactly the same reason: a repaint must carry the run in flight with it.
 //:
@@ -2497,6 +2497,15 @@ function initChatPanel() {
   const syncEmptyNote = (turns, pending) =>
     (empty.hidden = turns.length > 0 || Boolean(pending) || (state.sources || []).length > 0);
 
+  //: "Clear conversation". Declared up here because the handlers that keep it in sync are the
+  //: EXISTING `chat:turnAdded` / `chat:rerender` / `notebook:switched` subscriptions — a second
+  //: handler for one event inside one init is what `test_no_event_is_subscribed_twice_inside_one_
+  //: init_function` forbids, and rightly: two of them make ordering matter.
+  const clearBtn = document.getElementById("chat-clear");
+  const syncClearBtn = () => {
+    clearBtn.hidden = !state.notebookId || !(state.turns || []).length;
+  };
+
   //: The question currently in flight, if any. `chat:rerender` has to put it back: an independent
   //: review reproduced regenerating the overview mid-question deleting the pending row, its status
   //: and its Stop, leaving a disabled composer with no way to cancel until the answer landed
@@ -2547,6 +2556,7 @@ function initChatPanel() {
     // The placeholder comes back too: `chat:turnAdded` hides it, and without this a switch FROM a
     // notebook with turns TO an empty one left a blank panel with no "ask a question" prompt at all.
     rebuildHistory([]);
+    syncClearBtn();
   });
 
   // Chat's own reaction to the corpus changing. Re-render only — deliberately NOT a token bump:
@@ -2571,11 +2581,15 @@ function initChatPanel() {
     // the fold. Invariant 57 says the overview scrolls AWAY as the conversation grows; starting
     // there is a different thing.
     if (!restoring) history.scrollTop = history.scrollHeight;
+    syncClearBtn();
   });
 
   // Something outside the thread changed the notebook-wide reference order (regenerating the
   // overview is the one that does it today), so every turn's stroke numbers have to be recomputed.
-  store.on("chat:rerender", () => rebuildHistory(state.turns || [], pendingTurn));
+  store.on("chat:rerender", () => {
+    rebuildHistory(state.turns || [], pendingTurn);
+    syncClearBtn();
+  });
 
   store.on("chat:pending", ({ pending }) => {
     submitBtn.disabled = pending;
@@ -2685,6 +2699,52 @@ function initChatPanel() {
   // A turn asks to be redone. Exposed on `store` rather than threaded through `renderTurn`'s six
   // call sites: the button is built far from here and this is the one flow that can run it.
   store.on("chat:regenerate", ({ question }) => void askQuestion(question, { regenerate: true }));
+
+  // Starting over. Turns were append-only, so a reader who wanted a fresh start had nowhere to go:
+  // a source could be deleted and a note could be deleted, but a conversation could only grow.
+  // Regenerate replaces the LAST answer and deliberately cannot reach further back (invariant 11);
+  // this is the other end of that same fact, and the only honest way to undo a turn in the middle.
+  clearBtn.addEventListener("click", async () => {
+    // Irreversible, like every other delete here — and unlike removing ONE source, this discards
+    // work that cost real model runs, so the confirmation names what survives as well as what goes.
+    const n = (state.turns || []).length;
+    if (
+      !confirm(
+        t(
+          "chat.clearConfirm",
+          `Delete all ${n} questions and answers? Sources, notes and the overview are kept.`,
+          { n }
+        )
+      )
+    ) {
+      return;
+    }
+    clearBtn.disabled = true;
+    try {
+      const notebook = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/turns`, {
+        method: "DELETE",
+      });
+      // From the server's own record, never from an assumption about what it did.
+      state.turns = notebook.turns;
+      pendingTurn = null;
+      refreshReferenceView();
+      rebuildHistory(state.turns);
+      // `refreshReferenceView` above already re-stamped every stroke on the page (`renumberStrokes`),
+      // so this needs no `chat:rerender` — emitting one would only rebuild the thread a second time,
+      // and `chat:rerender` has exactly one emitter for a reason (regenerating the overview is the
+      // thing that changes the notebook-wide order from OUTSIDE the thread).
+      //
+      // The overview's starter questions come back: they are shown only before a conversation
+      // exists, and one no longer does.
+      renderChatOverview();
+      syncClearBtn();
+    } catch (err) {
+      alert(t("err.generic", `(error) ${err.message}`, { message: err.message }));
+    } finally {
+      clearBtn.disabled = false;
+    }
+  });
+  syncClearBtn();
 }
 
 // --- Studio panel: Guide tabs -----------------------------------------------------------------

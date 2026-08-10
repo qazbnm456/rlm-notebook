@@ -3083,3 +3083,57 @@ def test_every_grounded_task_forbids_the_model_numbering_its_own_citations():
     finally:
         if previous is not None:
             rt._CONFIG = previous
+
+
+def test_clearing_a_conversation_keeps_everything_that_is_not_the_conversation(tmp_path, monkeypatch):
+    """Turns were append-only: a source could be deleted and a note could be deleted, but a
+    conversation could only grow. Regenerate replaces the LAST answer and deliberately cannot reach
+    further back (invariant 11); clearing is the other end of that same fact.
+
+    Sources, notes, the overview and the podcast are NOT part of the conversation — a reader
+    starting a chat over is not asking to lose their corpus."""
+    from fastapi.testclient import TestClient
+
+    from rlm_notebook import api
+    from rlm_notebook import notebook as nbmod
+    from rlm_notebook.schema import Answer, ChatTurn, Note, Notebook, Overview, Source, SourceBlock
+
+    # The notebooks dir resolves against the process cwd (`DEFAULT_NOTEBOOKS_DIR`), which is
+    # how every other notebook-writing test in this file isolates itself.
+    monkeypatch.chdir(tmp_path)
+    nb = Notebook(
+        id="nb1",
+        sources=[Source(id="s1", origin="x", kind="text", blocks=[SourceBlock(locator="whole", text="t")])],
+        notes=[Note(id="n1", text="kept")],
+        overview=Overview(text="kept", citations=[], source_ids=["s1"]),
+        turns=[
+            ChatTurn(question="q1", answer=Answer(text="a1", citations=[])),
+            ChatTurn(question="q2", answer=Answer(text="a2", citations=[])),
+        ],
+    )
+    nbmod.save_notebook(nb)
+
+    with TestClient(api.app) as client:
+        body = client.delete("/notebooks/nb1/turns").json()
+    assert body["turns"] == []
+    assert [s["id"] for s in body["sources"]] == ["s1"], "clearing a chat took the sources with it"
+    assert [n["id"] for n in body["notes"]] == ["n1"], "clearing a chat took the notes with it"
+    assert body["overview"] and body["overview"]["text"] == "kept"
+    # The corpus has not moved, so nothing derived from it becomes stale.
+    assert body["overview"]["stale"] is False
+
+    # Persisted, not just echoed.
+    assert nbmod.load_notebook("nb1").turns == []
+
+
+def test_clearing_a_conversation_on_a_missing_notebook_is_a_404(tmp_path, monkeypatch):
+    """`create=False`, matching every other existing-notebook-only mutator — clearing the chat of a
+    notebook that does not exist must not conjure one."""
+    from fastapi.testclient import TestClient
+
+    from rlm_notebook import api
+
+    monkeypatch.chdir(tmp_path)
+    with TestClient(api.app) as client:
+        assert client.delete("/notebooks/ghost/turns").status_code == 404
+    assert not list((tmp_path / "notebooks").glob("*.json")), "a 404 left a notebook file behind"
