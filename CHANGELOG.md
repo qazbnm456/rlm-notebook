@@ -2149,3 +2149,20 @@ questions with verifiable citations, and get a distilled research artifact out.
   while holding six citations, so the page showed two numbering systems and they disagreed. The
   interface numbers them; the prompt now says so. Prompt-only on purpose — `arr[1]` is ordinary
   prose here, so a display-layer strip would corrupt real text to tidy a number.
+
+- **A chat answer can be regenerated now.** The overview, the podcast and every Guide kind had a way
+  to be redone; a chat answer did not, so one the reader was unhappy with was permanent. It sits in
+  the row that answer's other affordances already occupy, at the same quiet weight — re-answering
+  costs a full model run and should not be the loudest thing under an answer.
+
+  The LAST turn only, and that is correctness: every later answer was produced with this one in its
+  history, so redoing a middle turn would leave the answers after it derived from a conversation
+  that no longer exists. The server re-checks inside its lock and appends instead of replacing when
+  the question no longer matches, so a regenerate that lands late can never overwrite a turn it did
+  not mean to.
+
+- **The empty "Initial state" now names which empty it is.** A user asked whether the
+  "recorded before the app saved these details" branch could go away once the old traces were
+  deleted. It cannot: the trace file is reserved before the run spawns, so a run opened in its first
+  moments — or one whose spawn failed, or one killed instantly — has a real file with zero events.
+  What had to go was the WORDING, which named a cause the cleanup makes unreachable.

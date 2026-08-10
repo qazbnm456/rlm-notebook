@@ -2602,8 +2602,16 @@ them exist because an earlier design discussion mentioned them.
     since moved on. The corpus TEXT never goes in — its size does, the same reasoning invariant 52
     gives for streaming a step's output size rather than its text — and neither do `api_key` or
     `base_url`. A trace is already the most exposed artifact this project writes, so what goes into
-    one is a decision rather than a convenience. An older trace carries none of it and the panel
-    says so rather than rendering blank.
+    one is a decision rather than a convenience.
+
+    **An empty panel reads as broken, so the empty STATE names which empty it is — and there are TWO
+    live causes, neither of them "an old trace", which was only the first one anybody hit.**
+    `_run_isolated` reserves the trace file exclusively BEFORE spawning (invariant 29) and
+    `run_trajectory` stops at a torn final line, so a run opened in its first moments, one whose
+    spawn failed, or one killed instantly has a real file with zero events; `traces._is_ours`
+    accepts an empty file for exactly that reason. A user asked whether the branch could be deleted
+    once the old traces were cleared: it cannot, because that path stays reachable — but the WORDING
+    had to stop naming a cause the cleanup makes unreachable.
 
     **Verified with a DOM shim under `node` against a real 12-turn trace**, since this project still
     has no JS test runner (invariant 29) — 13 step rows, per-turn durations, proportional segment
@@ -2672,6 +2680,29 @@ them exist because an earlier design discussion mentioned them.
     thread whose overview is being rewritten READS as two things fighting whether or not they are,
     and the person using it gets to decide that. Recorded as a product decision rather than a fix,
     so a later reader does not "simplify" it away as redundant with the locking.
+
+    **A chat answer can be regenerated, and only the LAST one.** The overview, the podcast and each
+    Guide kind all had a way to be redone; a chat answer did not, so an answer a reader was unhappy
+    with was permanent. The control sits in the row that answer's other affordances already occupy —
+    the references link and the steps pill — at the same quiet weight, because re-answering costs a
+    full model run and must not be the loudest thing under an answer the reader may be happy with.
+
+    **The last turn only, and that is correctness rather than simplification.** Every later answer
+    was produced with this one in its `history` (invariant 11), so redoing a turn in the middle would
+    leave the answers after it derived from a conversation that no longer exists. The affordance is
+    gated by a STYLESHEET rule (`.turn:not(:last-child)`), because turns reach the DOM through two
+    paths — `rebuildHistory` and the `chat:turnAdded` replay — and a rule that reads the DOM is right
+    for both without either having to remember; the same mechanism `.turn-followups` already uses,
+    and it hides the control during a pending question for free. The SERVER re-checks independently:
+    `AskRequest.regenerate` replaces `turns[-1]` only when its question still matches, inside the
+    lock, against the notebook as it is THEN — a request that lands after someone else asked
+    something new appends instead, which is the safe direction.
+
+    **Replacing rather than appending.** The reason a reader regenerates is that the answer was
+    wrong; keeping it in the thread keeps it in `history` for every future turn. Both entry points
+    share ONE flow (`askQuestion`), since the pending row, the ticker, Stop, the cancel path and the
+    rebuild-from-the-server's-record are exactly what would drift between two copies — this file has
+    already paid for a duplicated affordance once, with the two "N steps" pills.
 
     **The COMPOSER only, never the thread.** Clearing the conversation was offered as the
     alternative and is the one thing not to do: it would destroy history to signal a transient
