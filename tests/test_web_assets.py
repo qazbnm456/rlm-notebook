@@ -1389,3 +1389,22 @@ def test_a_timeline_segment_cannot_clip_its_own_label():
         f"a segment's content measures {total:.1f}px inside a {height.group(1)}px box — "
         f"`.seg`'s own overflow:hidden will slice a line in half"
     )
+
+
+def test_the_missing_metadata_note_says_when_and_what_to_do():
+    """A user asked what "this run predates the recording of its own configuration" meant. The
+    sentence was accurate and still failed: it named an internal capability and left them to work
+    out whether something was wrong, whether it applied to them, and what to do about it.
+
+    A trace written before the worker recorded its configuration is an ordinary, permanent fact
+    about that file — nothing re-writes a trace — so the note has to answer the reader's actual
+    question: when was this, and how do I see the details."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    assert "trajData.started_at" in js, "the note cannot say WHEN the run happened"
+    for key in ("traj.noMeta", "traj.noMetaWhen"):
+        assert key in js, f"{key} is gone"
+    # The English fallback at the call site is what an English reader sees (invariant 48), so the
+    # actionable half has to be in it, not only in the translation table.
+    fallback = re.search(r'"traj\.noMetaWhen",\s*\n?\s*`([^`]*)`', js, re.DOTALL)
+    assert fallback and "A new run will show them" in fallback.group(1), fallback
+    assert "predates" not in js, "the wording that had to be explained is back"

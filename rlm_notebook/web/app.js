@@ -4221,13 +4221,29 @@ function renderTrajDetail() {
     } else {
       // A trace written before the worker recorded its configuration carries only `task`, which is
       // already the headline. Say so rather than rendering an empty panel — a blank box reads as
-      // broken, and "this run predates it" is a true and useful thing to know.
+      // broken.
+      //
+      // The first wording ("this run predates the recording of its own configuration") was accurate
+      // and a user still had to ask what it meant: it named an internal capability and left them to
+      // work out whether something was wrong, whether it applied to them, and what to do. It says
+      // WHEN the run happened and what to do about it now.
       const note = document.createElement("div");
       note.className = "det-sub";
-      note.textContent = t(
-        "traj.noMeta",
-        "This run predates the recording of its own configuration.",
-      );
+      const when = trajData.started_at
+        ? new Date(trajData.started_at * 1000).toLocaleString()
+        : "";
+      note.textContent = when
+        ? t(
+            "traj.noMetaWhen",
+            `This run (${when}) was recorded before the app started saving these details. ` +
+              `A new run will show them.`,
+            { when }
+          )
+        : t(
+            "traj.noMeta",
+            "This run was recorded before the app started saving these details. " +
+              "A new run will show them.",
+          );
       host.appendChild(note);
     }
     if (trajData.error) trajField(host, t("traj.error", "Error"), trajData.error);
