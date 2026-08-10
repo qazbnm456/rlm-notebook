@@ -8,17 +8,10 @@ question. Everything else (retry, sandbox selection, budget caps, tracing) is in
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, ClassVar
-
-from rlm_harness import RLMTask
-
 from .instructions import (
     CITATION_RULES,
-    SKILLS_DIR,
-    apply_skills,
+    GroundedTask,
     artifact_language_rule,
-    make_grounded_validator,
     validate_before_submit_rule,
 )
 from .schema import FAQ, KeyInsight, Summary, Timeline
@@ -47,7 +40,7 @@ than filling the gap from what you already know.
 """
 
 
-class GenerateSummary(RLMTask):
+class GenerateSummary(GroundedTask):
     """A concise summary of a notebook's sources, with citations."""
 
     signature = "sources: str, output_language: str -> summary: Summary"
@@ -58,22 +51,10 @@ class GenerateSummary(RLMTask):
         "reader would need, not a chapter-by-chapter recap.",
         "validate_summary",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Summary)]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)
 
 
 
-class GenerateFAQ(RLMTask):
+class GenerateFAQ(GroundedTask):
     """A set of frequently-asked questions and answers derived from a notebook's sources."""
 
     signature = "sources: str, output_language: str -> faq: FAQ"
@@ -85,22 +66,10 @@ class GenerateFAQ(RLMTask):
         "for their own sake.",
         "validate_faq",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(FAQ)]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)
 
 
 
-class GenerateTimeline(RLMTask):
+class GenerateTimeline(GroundedTask):
     """A chronological (or otherwise ordered) timeline of events described across a notebook's
     sources."""
 
@@ -115,22 +84,10 @@ class GenerateTimeline(RLMTask):
         "list of events rather than fabricating one.",
         "validate_timeline",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Timeline)]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)
 
 
 
-class GenerateKeyInsight(RLMTask):
+class GenerateKeyInsight(GroundedTask):
     """The single most important, non-obvious takeaway from a notebook's sources, in one sentence."""
 
     signature = "sources: str, output_language: str -> insight: KeyInsight"
@@ -143,16 +100,4 @@ class GenerateKeyInsight(RLMTask):
         "would consider most worth knowing.",
         "validate_keyinsight",
     )
-    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(KeyInsight)]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)
 

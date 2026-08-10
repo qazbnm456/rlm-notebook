@@ -32,17 +32,10 @@ transcript.)
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, ClassVar
-
-from rlm_harness import RLMTask
-
 from .instructions import (
     CITATION_RULES,
-    SKILLS_DIR,
-    apply_skills,
+    GroundedTask,
     artifact_language_rule,
-    make_grounded_validator,
     validate_before_submit_rule,
 )
 from .schema import PodcastScript
@@ -128,10 +121,7 @@ coordinate in a `Citation` on the utterance that makes the claim; write the line
 """
 
 
-_validate_podcastscript = make_grounded_validator(PodcastScript)
-
-
-class GeneratePodcastScript(RLMTask):
+class GeneratePodcastScript(GroundedTask):
     """Generate a two-host podcast script grounded in a notebook's sources, with citations."""
 
     signature = (
@@ -140,15 +130,3 @@ class GeneratePodcastScript(RLMTask):
     output_field = "script"
     output_model = PodcastScript
     instructions = _INSTRUCTIONS
-    tools: ClassVar[list[Callable[..., Any]]] = [_validate_podcastscript]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)

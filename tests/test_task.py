@@ -43,7 +43,9 @@ def _configure() -> None:
 def test_answer_question_tools_are_repl_safe():
     """CLAUDE.md invariant: every tool this task exposes must have explicit named params (no
     *args/**kwargs — see rlm_harness.testing.assert_repl_safe's docstring for why)."""
-    for tool in AnswerQuestion.tools:
+    # An INSTANCE's tools — the ClassVar is empty now that the validator is built per run.
+    _configure()
+    for tool in AnswerQuestion(skills_dir=None).tools:
         assert_repl_safe(tool)
 
 
@@ -52,12 +54,13 @@ def test_answer_question_never_exposes_a_network_capable_tool():
     A regression guard, not a redundant check — the risk is someone later adding
     `make_fetch_tool(...)` to `tools=` "just to fetch one more page on request," which every other
     test here would keep passing right through."""
-    names = {getattr(tool, "__name__", "") for tool in AnswerQuestion.tools}
+    _configure()
+    names = {getattr(tool, "__name__", "") for tool in AnswerQuestion(skills_dir=None).tools}
     assert not any("fetch" in name or "http" in name or "url" in name for name in names), (
-        f"AnswerQuestion.tools contains a suspiciously network-shaped tool name: {names}"
+        f"AnswerQuestion's tools contain a suspiciously network-shaped tool name: {names}"
     )
     assert names == {"validate_answer"}, (
-        f"AnswerQuestion.tools changed to {names} — if this is intentional, re-read CLAUDE.md "
+        f"AnswerQuestion's tools changed to {names} — if this is intentional, re-read CLAUDE.md "
         f"invariant 1 before adding anything with network access."
     )
 
@@ -87,11 +90,19 @@ def test_answer_question_offline_forward_pass():
     assert result.citations[0].locator == "page:1"
 
 
+def _validator(task):
+    """The tool a RUN actually gets. Built per instance since it closes over that run's
+    coordinates, so `AnswerQuestion.tools` (the ClassVar) is empty and reading it would test
+    nothing."""
+    return next(t for t in task.tools if getattr(t, "__name__", "") == "validate_answer")
+
+
 def test_validate_answer_tool_reports_success_on_valid_json():
-    validator = AnswerQuestion.tools[0]
-    assert "successful" in validator(json.dumps(_ANSWER_DICT))
+    _configure()
+    assert "successful" in _validator(AnswerQuestion(skills_dir=None))(json.dumps(_ANSWER_DICT))
 
 
 def test_validate_answer_tool_reports_failure_on_invalid_json():
-    validator = AnswerQuestion.tools[0]
+    _configure()
+    validator = _validator(AnswerQuestion(skills_dir=None))
     assert "failed" in validator(json.dumps({"text": 123, "citations": "not a list"}))

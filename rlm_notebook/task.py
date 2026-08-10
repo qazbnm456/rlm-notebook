@@ -10,17 +10,10 @@ inherited from `rlm_harness.RLMTask`.
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from typing import Any, ClassVar
-
-from rlm_harness import RLMTask
-
 from .instructions import (
     CITATION_RULES,
-    SKILLS_DIR,
-    apply_skills,
+    GroundedTask,
     chat_language_rule,
-    make_grounded_validator,
     validate_before_submit_rule,
 )
 from .schema import Answer
@@ -54,23 +47,11 @@ a claim.
 """
 
 
-class AnswerQuestion(RLMTask):
+class AnswerQuestion(GroundedTask):
     """Answer one question grounded in a notebook's corpus blob, with citations."""
 
     signature = "sources: str, history: str, question: str, output_language: str -> answer: Answer"
     output_field = "answer"
     output_model = Answer
     instructions = _INSTRUCTIONS
-    tools: ClassVar[list[Callable[..., Any]]] = [make_grounded_validator(Answer)]
-
-    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
-        """Skills by injection — see `instructions.apply_skills` for the shape and the reasoning.
-
-        A CONSTRUCTOR ARGUMENT rather than a module constant, matching the siblings: a test points
-        it at a fixture directory, and `None` turns it off entirely — which a caller needs, because
-        a stale skill is worse than an absent one. Defaults ON, because a planner that has to be
-        told to consult its own knowledge base will not.
-        """
-        apply_skills(self, skills_dir)
-        super().__init__(**kw)
 

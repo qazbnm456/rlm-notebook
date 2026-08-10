@@ -58,7 +58,9 @@ def _configure() -> None:
 
 
 def test_generate_podcast_script_tools_are_repl_safe():
-    for tool in GeneratePodcastScript.tools:
+    # An INSTANCE's tools — the ClassVar is empty now that the validator is built per run.
+    _configure()
+    for tool in GeneratePodcastScript(skills_dir=None).tools:
         assert_repl_safe(tool)
 
 
@@ -66,7 +68,8 @@ def test_generate_podcast_script_never_exposes_a_network_capable_tool():
     """Same invariant-1-style regression guard as AnswerQuestion's/the Guide tasks' — this task
     only writes a script from `sources`, so it should never grow a fetch/TTS tool of its own (TTS
     synthesis happens entirely AFTER this task returns, in tts.py, host-side)."""
-    names = {getattr(tool, "__name__", "") for tool in GeneratePodcastScript.tools}
+    _configure()
+    names = {getattr(tool, "__name__", "") for tool in GeneratePodcastScript(skills_dir=None).tools}
     assert names == {"validate_podcastscript"}
     assert not any(bad in n for n in names for bad in ("fetch", "http", "url", "tts", "audio"))
 

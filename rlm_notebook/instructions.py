@@ -10,11 +10,12 @@ others would silently weaken the guarantee for whichever task got missed.
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-from rlm_harness import load_skills_as_tools, render_skills_manifest
+from rlm_harness import RLMTask, load_skills_as_tools, render_skills_manifest
 from rlm_harness.tools.validation import make_schema_validator
 
 #: This package's own recorded craft and measured failure modes, shipped INSIDE the wheel for the
@@ -66,7 +67,50 @@ def _marker_offenders(value: Any, path: str = "") -> list[str]:
     return []
 
 
-def make_grounded_validator(model: type) -> Callable[[str], str]:
+#: A corpus marker, capturing the coordinate INSIDE it (`s1|whole`, `s3|page:2`).
+#: Deliberately a second, capturing spelling of `citations.MARKER_PATTERN` rather than an import:
+#: `instructions.py` is imported by every task module and `citations.py` pulls in the schema, and
+#: the pattern is three tokens long. If it ever grows, share it.
+_COORDINATE_PATTERN = re.compile(r"\[\[SRC:([^\]]*)\]\]")
+
+
+def coordinates_in(blob: str) -> set[str]:
+    """Every `source_id|locator` pair that actually occurs as a marker in `blob`.
+
+    This is the ground truth `citations.verify_citations` checks against server-side, computed from
+    the SAME string the model was handed — so the pre-SUBMIT validator can reject an invented
+    coordinate while the model can still fix it, instead of the reader finding it as a red
+    "unverified" badge afterwards.
+    """
+    return {m.group(1) for m in _COORDINATE_PATTERN.finditer(blob)}
+
+
+def _cited_coordinates(value: Any, path: str = "") -> list[tuple[str, str]]:
+    """Every `(path, coordinate)` in `value` — anything carrying BOTH `source_id` and `locator`.
+
+    Structural rather than an `isinstance(value, Citation)` check, for the same reason
+    `_marker_offenders` walks by field: `instructions.py` stays free of the schema module, and a
+    future citation-shaped model is covered without this function being remembered.
+    """
+    fields = getattr(type(value), "model_fields", None)
+    if not fields:
+        if isinstance(value, (list, tuple, set, frozenset)):
+            return [p for i, v in enumerate(value) for p in _cited_coordinates(v, f"{path}[{i}]")]
+        if isinstance(value, dict):
+            return [p for k, v in value.items() for p in _cited_coordinates(v, f"{path}[{k!r}]")]
+        return []
+    if "source_id" in fields and "locator" in fields:
+        return [(path or "citation", f"{value.source_id}|{value.locator}")]
+    found: list[tuple[str, str]] = []
+    for name in fields:
+        child = getattr(value, name, None)
+        found.extend(_cited_coordinates(child, f"{path}.{name}" if path else name))
+    return found
+
+
+def make_grounded_validator(
+    model: type, coordinates: Callable[[], set[str]] | None = None
+) -> Callable[[str], str]:
     """`rlm_harness`'s schema validator PLUS a check the schema cannot express: no `[[SRC:...]]`
     marker anywhere in the model's own prose.
 
@@ -115,6 +159,27 @@ def make_grounded_validator(model: type) -> Callable[[str], str]:
                 f"for the interface, not a citation and not something a reader or a listener should "
                 f"ever see — {advice}."
             )
+        known = coordinates() if coordinates else set()
+        if known:
+            wrong = [
+                (path, coord)
+                for path, coord in _cited_coordinates(model.model_validate_json(data_json_str))
+                if coord not in known
+            ]
+            if wrong:
+                # Show what a REAL one looks like rather than only naming the bad ones: the observed
+                # failure is a model writing a section heading or a whole sentence as the `locator`,
+                # and a rejection that just says "wrong" invites it to invent a different sentence.
+                sample = sorted(known)[:4]
+                listed = "; ".join(f"{path} -> {coord!r}" for path, coord in wrong[:5])
+                return (
+                    f"Validation failed: {len(wrong)} citation(s) point at a coordinate that does "
+                    f"not exist in `sources` — {listed}. A `source_id`/`locator` pair is COPIED from "
+                    f"a `[[SRC:<source_id>|<locator>]]` marker you actually found in `sources`, "
+                    f"never composed from the passage's wording. Real markers in this corpus look "
+                    f"like: {', '.join(repr(s) for s in sample)}. Search `sources` for the marker "
+                    f"that precedes the block you are citing and copy both parts of it verbatim."
+                )
         return verdict
 
     validate.__name__ = f"validate_{model.__name__.lower()}"
@@ -162,6 +227,48 @@ def apply_skills(task: Any, skills_dir: str | None) -> None:
     # the task's own prompt — citations, language, validate-before-submit — reads as though it
     # were inside the skills element.
     task.instructions = manifest + "\n</available_skills>\n\n" + type(task).instructions
+
+
+class GroundedTask(RLMTask):
+    """The shape all SIX citation-grounded tasks share: skills by injection, and a pre-SUBMIT
+    validator that can see the corpus THIS run was given.
+
+    It exists because the six `__init__`s were byte-identical copies of the skills wiring, which is
+    the drift hazard invariant 13 is about — and because the coordinate check below needs a per-RUN
+    value, which a `ClassVar` tool list composed at import time cannot hold.
+
+    **The validator is built here, from `output_model`, rather than declared as a `ClassVar` on each
+    task.** Six `tools: ClassVar = [make_grounded_validator(X)]` lines were six chances for one task
+    to be given a weaker validator than the others — which is exactly how the marker check spent a
+    slice living only on the podcast.
+    """
+
+    #: A skills directory is a CONSTRUCTOR argument, matching the siblings: a test points it at a
+    #: fixture and `None` turns it off, which a caller needs because a stale skill is worse than an
+    #: absent one. Defaults ON, because a planner that has to be told to consult its own knowledge
+    #: base will not.
+    def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
+        self._coordinates: set[str] = set()
+        self.tools = [make_grounded_validator(self.output_model, lambda: self._coordinates)]
+        apply_skills(self, skills_dir)
+        super().__init__(**kw)
+
+    async def arun(self, **inputs: Any) -> Any:
+        """Capture this run's real coordinates before the model can cite anything.
+
+        `sources` is the blob the model is about to explore, so the markers IN it are exactly the
+        coordinates a citation may legitimately carry — the same ground truth
+        `citations.verify_citations` uses server-side, just applied while the model can still act
+        on it.
+
+        **Deliberately fails OPEN when the blob yields no markers at all.** An empty set means "we
+        do not know what is valid here", and rejecting every citation of a legitimate run is far
+        worse than letting the server-side verification catch an invented one (invariant 5 is the
+        guarantee; this is an early warning). Stated rather than left as an accident, because a
+        guard that silently stops checking is the failure mode invariant 66 already records.
+        """
+        self._coordinates = coordinates_in(inputs.get("sources", "") or "")
+        return await super().arun(**inputs)
 
 
 CITATION_RULES = """\
@@ -219,6 +326,16 @@ prose, and a reader uses them to find the passage you are pointing at.\
 """
 
 
+PROPER_NOUNS = """\
+Keep a proper noun as the source wrote it. Names of people, products, projects, companies,
+standards and identifiers stay in their original script — "Trinity" stays "Trinity", not a
+translation of the word "trinity"; "NASA" and "CVE-2026-1234" stay as they are. Translating one
+costs the reader the exact term they would need to search for, which is the opposite of what a
+research notebook is for. Everything AROUND the name still follows the language you were asked to
+write in.\
+"""
+
+
 def chat_language_rule(language: str) -> str:
     """`AnswerQuestion`'s language rule. Separate from the artifact rule because chat has something
     no artifact has — a question, whose own language is the strongest available signal.
@@ -234,13 +351,14 @@ def chat_language_rule(language: str) -> str:
         f"tell (\"and Y?\", \"why?\"), use the language of the most recent question in `history`.\n"
         f"Reading `history` for THAT is reading it as context for what the question refers to, which\n"
         f"is what it is for — it remains never a source of facts or citations.\n\n"
+        f"{PROPER_NOUNS}\n\n"
         f"{VERBATIM_COORDINATES}"
     )
 
 
 def artifact_language_rule(language: str) -> str:
     """The language rule for whole-corpus artifacts, which have no question to take a cue from."""
-    return f"Write your prose in {language}.\n\n{VERBATIM_COORDINATES}"
+    return f"Write your prose in {language}.\n\n{PROPER_NOUNS}\n\n{VERBATIM_COORDINATES}"
 
 
 def validate_before_submit_rule(tool_name: str) -> str:
@@ -248,9 +366,11 @@ def validate_before_submit_rule(tool_name: str) -> str:
     (`make_schema_validator` derives it from the output model as `validate_<model name, lowered>`).
     """
     return (
-        f"Before you SUBMIT, validate your draft JSON against the expected schema with the\n"
-        f"`{tool_name}` tool, and only submit after it reports success. That tool checks JSON\n"
-        f"SHAPE only — it does not, and cannot, confirm your citations point at real sources; a\n"
-        f"separate check does that after this run ends, so getting the shape right here is what\n"
-        f"you are responsible for."
+        f"Before you SUBMIT, validate your draft JSON with the `{tool_name}` tool, and only\n"
+        f"submit after it reports success. It checks three things: the JSON shape, that no\n"
+        f"`[[SRC:...]]` marker leaked into your own prose, and that every citation's\n"
+        f"`source_id`/`locator` pair actually occurs as a marker in `sources`. That last one is\n"
+        f"the common mistake — a locator is COPIED from a marker, never composed from the\n"
+        f"passage's own wording. It still cannot confirm your prose faithfully represents the\n"
+        f"passage you cited; that remains yours to get right."
     )
