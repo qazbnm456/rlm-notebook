@@ -2029,3 +2029,13 @@ questions with verifiable citations, and get a distilled research artifact out.
   Every one of those is pinned now, and each mutation was replayed to confirm it fails — including
   one where the first fix was itself defeated: a token check on `markWantedQuote` passed with the
   function's body replaced by `return;`.
+
+- **The build-across-turns rule reaches all six tasks now, not just the podcast.** It is must-apply
+  by its own account — skipping it loses the whole run to a truncated reply — and it lived in one
+  prompt while the other five relied on an OPTIONAL skill a model may never open. Invariant 65 had
+  recorded that as the single unclean line of the prompt/skill split; this closes it.
+
+  Worded conditionally, because the rule is not "always accumulate": a short answer built across
+  turns wastes the step budget just as surely as a long one written in a single reply loses the
+  run. The podcast keeps its tier-specific warning (60-90 utterances is a fact about that task) and
+  no longer restates the mechanic — one copy, pinned by a tripwire over all six.

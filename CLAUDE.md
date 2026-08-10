@@ -2304,14 +2304,19 @@ them exist because an earlier design discussion mentioned them.
     skill is where the REASON for them lives. Inventing craft to have something to move would have
     been worse than an empty skill directory.
 
-    **One line of that split is NOT clean, and it is stated rather than smoothed over.** The
-    build-across-turns mechanic (invariant 64) is a must-apply rule by its own account — skipping it
-    LOSES the run — and it is in `GeneratePodcastScript`'s prompt only. For the other five tasks it
-    exists solely in the optional `corpus-navigation` skill, where a model that never calls
-    `read_skill` never sees it. That is tolerable today because the podcast is the one task whose
-    output is reliably large enough to hit the cap, and it is exactly the kind of "tolerable today"
-    that becomes a lost run when a Guide artifact grows. Promoting it into the shared prompt is a
-    real follow-up, not a note.
+    **The one line of that split that was NOT clean has since been fixed
+    (`instructions.ACCUMULATE_LARGE_OUTPUTS`).** The build-across-turns mechanic (invariant 64) is a
+    must-apply rule by its own account — skipping it LOSES the run — and it lived in
+    `GeneratePodcastScript`'s prompt ONLY. For the other five tasks it existed solely in the
+    optional `corpus-navigation` skill, where a model that never calls `read_skill` never sees it.
+    It is a shared constant composed into all six now, worded CONDITIONALLY ("if your finished
+    output will not comfortably fit in ONE reply"), because a short answer built across turns wastes
+    the step budget just as surely as a long one written in a single reply loses the run. The
+    podcast keeps its TIER-SPECIFIC pointer (60-90 utterances is a fact about that task) and no
+    longer restates the mechanic. A tripwire asserts all six carry it and that the podcast holds
+    exactly one copy — this was tolerable only while the podcast was the one task whose output was
+    reliably large enough to hit the cap, which is precisely the kind of "tolerable today" that
+    becomes a lost run when a Guide artifact grows.
 
     **Provenance is part of the craft, and this project got it wrong on the first try.**
     `podcast-craft`'s techniques are quoted from the NotebookLM team's own interview; its

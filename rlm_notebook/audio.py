@@ -33,6 +33,7 @@ transcript.)
 from __future__ import annotations
 
 from .instructions import (
+    ACCUMULATE_LARGE_OUTPUTS,
     CITATION_RULES,
     GroundedTask,
     artifact_language_rule,
@@ -63,11 +64,9 @@ reacting, and building on what the other just said.
 - `long` — roughly 18 to 25 minutes: about 60 to 90 turns. Enough to work through the sources
   properly: where they disagree, the reasoning behind a claim, an implication followed to the end.
 
-A `long` script does NOT fit in one reply. Build it across several REPL turns instead: keep a
-Python list in the sandbox, append a few utterances to it each turn, print only its length to check
-your progress, and SUBMIT the finished variable at the end. Never print the accumulated script
-itself — that spends the same budget twice. Writing all 60-90 turns into a single code block is the
-one way this reliably fails: the reply is cut off mid-structure and the whole run is lost.
+A `default` or `long` script does NOT fit in one reply — accumulate `utterances` across REPL turns
+as described below. Writing all 60-90 of them into a single code block is the one way this task
+reliably fails.
 
 Reach the target with SUBSTANCE, never with filler — no restating what was just said, no "that's
 fascinating", no summarising the episode back to the listener mid-way. If the sources genuinely do
@@ -116,6 +115,8 @@ it pointed at is lost. A real run wrote 20 of them across 19 of its 47 utterance
 coordinate in a `Citation` on the utterance that makes the claim; write the line as a line.
 
 {CITATION_RULES}
+
+{ACCUMULATE_LARGE_OUTPUTS}
 
 {validate_before_submit_rule("validate_podcastscript")}
 """

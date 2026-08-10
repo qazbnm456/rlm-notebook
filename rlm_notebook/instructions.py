@@ -326,6 +326,19 @@ prose, and a reader uses them to find the passage you are pointing at.\
 """
 
 
+ACCUMULATE_LARGE_OUTPUTS = """\
+If your finished output will not comfortably fit in ONE reply, do not write it in one. Keep a
+Python variable in the sandbox, add to it across several REPL turns, print only its LENGTH to check
+your progress, and SUBMIT the finished variable at the end. Never print the thing you are
+accumulating — that spends the same budget a second time and brings the reply cap closer.
+
+This is not a style preference. A reply that exceeds the per-call generation cap is cut off
+mid-structure, the fragment does not parse, and the whole run is lost along with everything it had
+already spent. Building across turns is what the sandbox is FOR; a short output that genuinely fits
+in one reply should still be written in one.\
+"""
+
+
 PROPER_NOUNS = """\
 Keep a proper noun as the source wrote it. Names of people, products, projects, companies,
 standards and identifiers stay in their original script — "Trinity" stays "Trinity", not a

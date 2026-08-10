@@ -2920,3 +2920,43 @@ def test_the_trajectory_endpoint_reads_a_trace_that_is_still_being_written(tmp_p
     assert body["run_id"] == run_id
     assert body["ok"] is None, "an unfinished run must not report an outcome"
     assert len(body["iterations"]) == 1 and len(body["timeline"]) == 1
+
+
+def test_every_grounded_task_carries_the_build_across_turns_rule():
+    """Invariant 64's mechanic is must-apply BY ITS OWN ACCOUNT — skipping it loses the whole run —
+    and it spent a slice living only in `GeneratePodcastScript`'s prompt, with the other five tasks
+    relying on the OPTIONAL `corpus-navigation` skill that a model may simply never open.
+
+    Invariant 65 recorded that as the one unclean line of the prompt/skill split and named
+    promoting it as a real follow-up. This is the tripwire for the promotion: a must-apply rule
+    reaching five of six tasks is exactly the drift invariant 13 exists to prevent."""
+    from rlm_harness import RLMConfig
+    from rlm_harness import runtime as rt
+
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.guide import GenerateFAQ, GenerateKeyInsight, GenerateSummary, GenerateTimeline
+    from rlm_notebook.instructions import ACCUMULATE_LARGE_OUTPUTS
+    from rlm_notebook.task import AnswerQuestion
+
+    previous = getattr(rt, "_CONFIG", None)
+    rt.configure(RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False))
+    try:
+        tasks = [
+            AnswerQuestion,
+            GenerateSummary,
+            GenerateFAQ,
+            GenerateTimeline,
+            GenerateKeyInsight,
+            GeneratePodcastScript,
+        ]
+        for task_cls in tasks:
+            assert ACCUMULATE_LARGE_OUTPUTS in task_cls(skills_dir=None).instructions, (
+                f"{task_cls.__name__} does not carry the build-across-turns rule"
+            )
+        # ONE copy, not six near-copies: the podcast's own tier paragraph must point at the shared
+        # rule rather than restate it (invariant 13's discipline, which this promotion is applying).
+        podcast = GeneratePodcastScript(skills_dir=None).instructions
+        assert podcast.count("Never print the thing you are") == 1, "the rule was hand-duplicated"
+    finally:
+        if previous is not None:
+            rt._CONFIG = previous

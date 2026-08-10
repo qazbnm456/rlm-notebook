@@ -145,12 +145,19 @@ def test_a_long_script_is_told_to_build_across_turns():
     `max_tokens=16384` and the whole run was lost — dspy said so in as many words. Built across REPL
     turns instead, the same tier produced 80 utterances and 44 citations with the budget untouched.
     That is what the sandbox is FOR, and it is the reason this project did not answer a truncation
-    by raising a cap for the second time."""
+    by raising a cap for the second time.
+
+    The MECHANIC now lives in `instructions.ACCUMULATE_LARGE_OUTPUTS`, shared by all six tasks —
+    invariant 65 recorded it reaching only this one as the unclean line of the prompt/skill split.
+    What stays here is the TIER-SPECIFIC pointer, because 60-90 utterances is a fact about this
+    task and not about the others."""
+    from rlm_notebook.instructions import ACCUMULATE_LARGE_OUTPUTS
+
     instructions = GeneratePodcastScript.instructions
     assert "does NOT fit in one reply" in instructions
-    assert "Never print the accumulated script" in instructions, (
-        "printing the accumulated script back spends the same budget twice — it lands in the "
-        "planner's next prompt"
+    assert "60-90" in instructions, "the tier-specific warning is gone"
+    assert ACCUMULATE_LARGE_OUTPUTS in instructions, (
+        "the shared build-across-turns rule is no longer composed into the podcast prompt"
     )
 
 

@@ -11,6 +11,7 @@ inherited from `rlm_harness.RLMTask`.
 from __future__ import annotations
 
 from .instructions import (
+    ACCUMULATE_LARGE_OUTPUTS,
     CITATION_RULES,
     GroundedTask,
     chat_language_rule,
@@ -42,6 +43,8 @@ proposing something the corpus cannot support wastes the reader's next turn. Kee
 specific; skip any that just rephrase the question you were asked. If nothing worthwhile follows,
 leave the list empty rather than padding it. They carry no citations: a question is a prompt, not
 a claim.
+
+{ACCUMULATE_LARGE_OUTPUTS}
 
 {validate_before_submit_rule("validate_answer")}
 """

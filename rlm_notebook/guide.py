@@ -9,6 +9,7 @@ question. Everything else (retry, sandbox selection, budget caps, tracing) is in
 from __future__ import annotations
 
 from .instructions import (
+    ACCUMULATE_LARGE_OUTPUTS,
     CITATION_RULES,
     GroundedTask,
     artifact_language_rule,
@@ -35,6 +36,8 @@ than filling the gap from what you already know.
 {artifact_language_rule("the language named by the `output_language` variable")}
 
 {CITATION_RULES}
+
+{ACCUMULATE_LARGE_OUTPUTS}
 
 {validate_before_submit_rule(tool_name)}
 """
