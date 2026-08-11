@@ -1470,21 +1470,41 @@ def test_the_clear_conversation_control_appears_only_when_there_is_one():
     """A destructive control offered on an empty thread is an invitation to nothing. It is also the
     only way to undo a turn in the MIDDLE — regenerate deliberately reaches the last one only."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
-    sync = re.search(r"const syncClearBtn = \(\) => \{(.*?)\n  \};", js, re.DOTALL)
-    assert sync, "syncClearBtn is gone"
-    body = sync.group(1)
-    assert "state.turns" in body and "length" in body, body
-    # The assignment must be REACHABLE. A fact-check inserted `return;` as the first statement —
-    # so the button is never synced at all — and every substring above still matched the dead code
-    # below it. The identical defeat this batch already recorded fixing for `markWantedQuote`, made
-    # again in the very next test written. A source-tree check sees tokens, not control flow, unless
-    # it is told to look at the first statement.
-    first = next(
-        (ln.strip() for ln in body.splitlines()
-         if ln.strip() and not ln.strip().startswith(("//", "/*", "*"))),
-        "",
+    # The DIRECTION, as a whole expression rather than as tokens that happen to appear. An
+    # independent review inverted the condition (`.length > 0`) and the suite stayed green: every
+    # substring the first version checked was still present, just saying the opposite.
+    assert re.search(
+        r"clearBtn\.hidden\s*=\s*!state\.notebookId\s*\|\|\s*!\(state\.turns", js
+    ), "the visibility condition no longer hides the control on an empty thread"
+
+    # ...and the WIRING. The same review deleted every call site — leaving `#chat-clear` with the
+    # `hidden` attribute it is born with, so the feature was entirely dead — and the suite stayed
+    # green too. Both are invariant 60's own recorded lesson: a substring assertion is not a
+    # behavioural one.
+    #
+    # FIVE sites: the three handlers below, the clear handler's own re-sync after it empties the
+    # thread, and the initial paint at the tail of `initChatPanel`. An exact count rather than a
+    # floor, so DELETING one fails here — adding a sixth is a deliberate edit to this number.
+    assert js.count("syncClearBtn();") == 5, (
+        f"syncClearBtn is called from {js.count('syncClearBtn();')} places, expected 5 — the three "
+        f"handlers, the clear handler's own re-sync, and the initial paint"
     )
-    assert not re.match(r"^return\s*;?$", first), f"syncClearBtn returns before it syncs: {first!r}"
+    # Scoped to `initChatPanel`: `notebook:switched` is subscribed in FOUR init functions, and an
+    # unscoped search matched the source viewer's one — a test that reads "the handler" has to say
+    # WHICH handler in a file where several spell the same event.
+    panel = js[js.index("function initChatPanel()") : js.index("\nfunction renderGuideContent")]
+    for event in ("chat:turnAdded", "chat:rerender", "notebook:switched"):
+        handler = re.search(rf'store\.on\("{event}",(.*?)\n  \}}\);', panel, re.DOTALL)
+        assert handler and "syncClearBtn();" in handler.group(1), (
+            f"initChatPanel's {event} handler no longer re-syncs the clear control"
+        )
+
+    # Clearing while a question runs would delete the turns and then let `ask`'s own persist append
+    # the answer to the empty list — the conversation comes back with one entry.
+    pending = re.search(r'store\.on\("chat:pending", \(\{ pending \}\) => \{(.*?)\n  \}\);', js, re.DOTALL)
+    assert pending and "clearBtn.disabled = pending" in pending.group(1), (
+        "the clear control is live during an in-flight question"
+    )
     # Destructive and irreversible, so it confirms — and names what SURVIVES, since losing sources
     # is what a reader would fear from a control in the chat panel.
     at = js.index('"chat.clearConfirm"')

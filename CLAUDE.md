@@ -14,7 +14,12 @@ uv pip install -e ../rlm-harness
 
 ## Verify
 
-- `uvx ruff@0.16.0 check .` — lint (line-length 110, matching rlm-harness/ctx-distillery's pin — an
+- `uvx ruff@0.16.0 check .` — lint. **`line-length = 110` is a FORMATTER setting and is NOT
+  enforced by `check`**: ruff's default rule set has no `E501`, so an over-long line passes and
+  20 of them are in the tree today. A name scrub left a 157-character line and nothing caught it
+  — found by an independent review, not by the command this bullet names. Enabling `E501` (and
+  rewrapping those 20) is a real follow-up; until then the number below is a convention people
+  keep by hand. It matches rlm-harness/ctx-distillery's pin — an
   unpinned `uvx ruff check .` resolves the latest ruff at run time and can redden CI with nobody
   having touched a line of code).
 - `uv run python -m pytest -q` — the whole suite, fully offline. The dspy-bearing test
@@ -2718,6 +2723,23 @@ them exist because an earlier design discussion mentioned them.
     `AskRequest.regenerate` replaces `turns[-1]` only when its question still matches, inside the
     lock, against the notebook as it is THEN — a request that lands after someone else asked
     something new appends instead, which is the safe direction.
+
+    **Clearing is DISABLED while a question is in flight**, and that is correctness rather than
+    tidiness: the server would delete the turns and then `ask`'s own persist would append its answer
+    to the now-empty list, so the conversation the reader just cleared comes back with one entry in
+    it. Stop is the control for a run in flight; this one is for a conversation that has finished
+    happening. Two more faults an independent review found in the same handler and reproduced by
+    driving the real source under stubs: `rebuildHistory(state.turns)` without the pending argument
+    deleted a running question's row along with its only Stop (invariant 47 broken by a repaint,
+    exactly what invariant 60 fixed for `chat:rerender`), and nulling `pendingTurn` made
+    `askQuestion`'s own catch throw on a null — so a run that failed after a clear rendered no error
+    row and raised no alert, it simply stopped.
+
+    **It captures `notebookGeneration` like every other awaiting flow here**, which it did not: a
+    notebook switch during the DELETE applied the result to whichever notebook was open when it
+    landed, wiping the NEW notebook's conversation out of client state and off the screen.
+    `generateOverview`, `askQuestion`, `fetchKind` and the podcast all had the guard; this one was
+    written without it.
 
     **A conversation can be CLEARED, which is the other end of the same fact**
     (`DELETE /notebooks/{id}/turns`). Regenerate reaches the last answer only, for the `history`

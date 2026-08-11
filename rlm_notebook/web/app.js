@@ -2506,6 +2506,7 @@ function initChatPanel() {
     clearBtn.hidden = !state.notebookId || !(state.turns || []).length;
   };
 
+
   //: The question currently in flight, if any. `chat:rerender` has to put it back: an independent
   //: review reproduced regenerating the overview mid-question deleting the pending row, its status
   //: and its Stop, leaving a disabled composer with no way to cancel until the answer landed
@@ -2594,6 +2595,11 @@ function initChatPanel() {
   store.on("chat:pending", ({ pending }) => {
     submitBtn.disabled = pending;
     input.disabled = pending;
+    // Clearing WHILE a question runs is a race with no upside: the server would delete the turns
+    // and then `ask`'s own persist would append the answer to the empty list, so the conversation
+    // the reader just cleared comes back with one entry. Stop is the control for a run in flight;
+    // this one is for a conversation that has finished happening.
+    clearBtn.disabled = pending;
   });
 
   // One flow, two entry points: the composer, and a turn's own "regenerate". Extracted rather than
@@ -2675,7 +2681,10 @@ function initChatPanel() {
       void result; // already folded into notebook.turns above
     } catch (err) {
       status.finish();
-      if (cancelled) return;
+      // `cancelled` covers Stop; `!pendingTurn` covers every other way the row can have gone away
+      // before the request settled. Without it a failing run threw INSIDE its own error handler, so
+      // the reader saw no error row and no alert — the question simply stopped.
+      if (cancelled || !pendingTurn) return;
       pendingTurn.pending = false;
       pendingTurn.answer = t("err.generic", `(error) ${err.message}`, { message: err.message });
       pendingTurn.citations = [];
@@ -2707,6 +2716,12 @@ function initChatPanel() {
   clearBtn.addEventListener("click", async () => {
     // Irreversible, like every other delete here — and unlike removing ONE source, this discards
     // work that cost real model runs, so the confirmation names what survives as well as what goes.
+    //
+    // The generation is captured for the same reason every other awaiting flow here captures it
+    // (`generateOverview`, `askQuestion`, `fetchKind`, the podcast): this one did not, and a
+    // notebook switch during the DELETE applied the result to whichever notebook was open when it
+    // landed — wiping the NEW notebook's conversation out of client state and off the screen.
+    const generation = notebookGeneration;
     const n = (state.turns || []).length;
     if (
       !confirm(
@@ -2724,11 +2739,18 @@ function initChatPanel() {
       const notebook = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/turns`, {
         method: "DELETE",
       });
+      // The notebook that was cleared is not necessarily the one on screen any more.
+      if (generation !== notebookGeneration) return;
       // From the server's own record, never from an assumption about what it did.
       state.turns = notebook.turns;
-      pendingTurn = null;
       refreshReferenceView();
-      rebuildHistory(state.turns);
+      // `pendingTurn` is CARRIED, not dropped. Clearing is disabled while a question runs (below),
+      // so this is defence rather than a live path — but `rebuildHistory(state.turns)` alone would
+      // delete a running question's row along with its elapsed counter and its only Stop, which is
+      // invariant 47 broken by a repaint and exactly what invariant 60 fixed for `chat:rerender`.
+      // Nulling it was worse still: `askQuestion`'s own catch then threw on a null, so a run that
+      // failed after a clear rendered no error row and raised no alert — it just stopped.
+      rebuildHistory(state.turns, pendingTurn);
       // `refreshReferenceView` above already re-stamped every stroke on the page (`renumberStrokes`),
       // so this needs no `chat:rerender` — emitting one would only rebuild the thread a second time,
       // and `chat:rerender` has exactly one emitter for a reason (regenerating the overview is the

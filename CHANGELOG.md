@@ -2204,3 +2204,24 @@ questions with verifiable citations, and get a distilled research artifact out.
   left the suite green, because every substring it checked still matched the dead code below. That
   is the identical defeat this batch already recorded fixing for `markWantedQuote`, made again in
   the very next test written.
+
+- **An independent review of the clear-conversation slice found three real defects in one handler,
+  all by driving the shipped source under stubs rather than reading it.** Clearing while a question
+  ran deleted the turns and then let that question's answer be appended to the empty list, so the
+  conversation came back with one entry; the repaint took the running question's row and its only
+  Stop with it; and nulling the pending turn made the ask's own error handler throw on a null, so a
+  run that failed after a clear showed nothing at all. Clearing is disabled during a run now, and
+  the handler carries the pending row and the notebook generation the way every other awaiting flow
+  here already did.
+
+  Its test was hollow in both directions — deleting every call site (leaving the control permanently
+  hidden, the feature entirely dead) and inverting the visibility condition both left 563 tests
+  green. It pins the condition as an expression, the five call sites by count, and each of the three
+  handlers by name now. The first rewrite of that assertion matched a DIFFERENT init function's
+  `notebook:switched` subscription, which is its own small lesson: in a file where four inits spell
+  the same event, a test that says "the handler" has to say which.
+
+- **`line-length = 110` was never enforced.** It is a formatter setting, ruff's default rule set has
+  no `E501`, and the name scrub duly left a 157-character line that `check` passed. CLAUDE.md said
+  the command enforced it; it says what is true now. Twenty over-long lines predate this and
+  rewrapping them plus enabling `E501` is a follow-up, not a silent bundled edit.

@@ -2,8 +2,8 @@
 
 A pure function over already-parsed trace events — no web dependencies, no filesystem — so it is
 unit-testable without a server, a model or a run. Ported from a sibling project's own iteration
-builder, which shipped this shape first; the DECOMPOSITION is theirs, the tool vocabulary is ours (`read_skill` and the six `validate_*` tools, against their
-fetch/search/generate/validate set).
+builder, which shipped this shape first; the DECOMPOSITION is theirs, the tool vocabulary is ours
+(`read_skill` and the six `validate_*` tools, against their fetch/search/generate/validate set).
 
 An RLM run is a sequence of `main_step` REPL turns — the planner's reasoning, the Python it ran, and
 that code's output. `tool_call`/`sub_call` events that follow a turn belong to it: its code invoked
