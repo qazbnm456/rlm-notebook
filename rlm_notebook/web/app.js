@@ -81,7 +81,7 @@ function updateToggleGlyph() {
   // itself — the reason two rounds of "the icon is small and the hover does nothing" were about the
   // font, not the CSS. U+FE0E asks for text presentation, but a glyph that was never emoji in the
   // first place is one less thing depending on the platform honouring it. Same family
-  // `bugcademy/studio` uses (`◐`).
+  // one sibling studio uses (`◐`).
   toggle.textContent = current === "dark" ? "\u25d1" : "\u25d0";
 }
 
@@ -171,7 +171,7 @@ function openTicker(notebookId, runId, onEvent) {
 }
 
 // A shared "something is running" surface: a pulsing dot, the live action, a ticking elapsed
-// counter, and a Stop button. Same shape `nuclei-forge/studio`'s `.live-status` uses, and it exists
+// counter, and a Stop button. Same shape a sibling project's own live-status strip uses, and it exists
 // because of a real report: a generation takes a minute or more, the only feedback was one line of
 // text that ended on "finished" and then sat there, so the natural move is to press the button
 // again — which strands the first generation behind a staleness guard and looks like nothing
@@ -382,7 +382,7 @@ function runStatus({ notebookId, runIds, label, onCancel }) {
     });
   }
 
-  // A typed COUNT per kind of work, not a scrolling log. `nuclei-forge/studio` settled this shape
+  // A typed COUNT per kind of work, not a scrolling log. A sibling project settled on this shape
   // and its own comment says why the framing matters: a raw count climbing forever reads as
   // runaway, while a small set of named counters reads as progress. Three kinds is all our trace
   // has (`_translate_trace_event`), and three is about the ceiling before a status line becomes
@@ -1561,7 +1561,7 @@ function saveAsNoteButton(text) {
 // Answers arrived full of raw `**bold**`, `## headings` and `- lists` because the model writes
 // markdown whether or not anyone asked it to, and we were rendering the source text verbatim.
 //
-// No library, and no `innerHTML` with an interpolated string — the same discipline `bugcademy`'s
+// No library, and no `innerHTML` with an interpolated string — the same discipline a sibling
 // studio states outright for the same reason: every string here came out of a model that has been
 // reading source content an attacker may have written (invariants 6 and 29). The sibling studios
 // build markup as HTML strings with an `esc()` helper; one missed `esc()` there is an XSS sink, and
@@ -3919,7 +3919,7 @@ initStudioRail();
 
 // --- Trajectory drawer ---------------------------------------------------------------------------
 //
-// A bottom sheet that replays one RLM run: the sibling `nuclei-forge/studio`'s shape, brought here
+// A bottom sheet that replays one RLM run: a sibling project's own shape, brought here
 // because the inline step log put the planner's own reasoning PROSE inside the chat bubble, where a
 // user reported it as unreadable and space-consuming ("文鄒鄒的看不懂"). Reasoning belongs somewhere
 // a reader opts into, not in the middle of the answer they came for.

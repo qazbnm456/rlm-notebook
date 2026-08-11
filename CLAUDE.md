@@ -1669,7 +1669,7 @@ them exist because an earlier design discussion mentioned them.
 47. **Every long-running action shows that it is running and offers a way to STOP it, and no
     action starts without an explicit press.** All four surfaces — chat, the chat overview, each
     Guide kind, the podcast — mount the same `runStatus` component (pulsing dot, live action,
-    ticking elapsed, Stop), the shape `nuclei-forge/studio`'s `.live-status` already uses.
+    ticking elapsed, Stop), the shape a sibling project's own live-status strip already uses.
 
     **Stop cancels by RUN ID, not by notebook.** `POST /notebooks/{id}/runs/{run_id}/cancel` exists
     because `/overview` fires TWO runs and invariant 23's `_ACTIVE_RUNS` holds one slot per
@@ -1951,7 +1951,7 @@ them exist because an earlier design discussion mentioned them.
     rendered the text verbatim.
 
     **No library and no HTML strings**, which is invariant 29's rule stated where it costs the most.
-    The sibling studios build markup as HTML strings with an `esc()` helper; `bugcademy`'s studio
+    The sibling studios build markup as HTML strings with an `esc()` helper; one sibling studio
     states the exception outright for the identical reason, and it is ours: every string here came
     out of a model that has been reading source content an attacker may have written (invariant 6).
     One missed `esc()` in a string-building renderer is an XSS sink; building nodes removes the
@@ -2316,8 +2316,8 @@ them exist because an earlier design discussion mentioned them.
 65. **Every RLM task here carries `rlm_harness.skills` with `discovery="inject"`, and the
     prompt/skill split is a rule rather than a preference.** This project had NO skills at all until
     a user asked; the mechanism is `rlm-harness`'s own, distinct from the Claude Code skills that a
-    coding agent reads and this task never sees. Four siblings (`cabt-forge`, `bugcademy`,
-    `cve-reverser`, `nuclei-forge`) already shipped the same `inject` shape.
+    coding agent reads and this task never sees. Four sibling projects already shipped the same
+    `inject` shape.
 
     **The split**: a skill is read only if the model chooses to, so anything that CORRUPTS the output
     when skipped stays in the prompt — grounding, citations, the marker rule, language, the output
@@ -2532,7 +2532,7 @@ them exist because an earlier design discussion mentioned them.
 70. **The Trajectory drawer (`trajectory.py` + `GET .../runs/{run_id}/trajectory`) is where a run's
     reasoning lives — NOT the chat bubble.** The inline step log put the planner's own prose inside
     the answer, and a user reported it as unreadable and space-consuming. Full parity with the
-    sibling `nuclei-forge/studio`'s drawer, at the user's explicit choice between three scopes: turn
+    sibling project's own trajectory drawer, at the user's explicit choice between three scopes: turn
     nav, a tool timeline whose segment width is proportional to real elapsed time, a detail pane,
     search, and a replay transport that dwells on each turn for the time it REALLY took divided by
     the speed.

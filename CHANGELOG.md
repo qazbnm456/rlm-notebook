@@ -1657,7 +1657,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 
   **Markdown is rendered.** Answers arrived full of raw `**bold**`, `## headings` and `- lists`,
   because the model writes markdown whether or not anyone asked. The renderer is hand-written and
-  builds DOM nodes — no library, no HTML strings, the exception `bugcademy`'s studio states outright
+  builds DOM nodes — no library, no HTML strings, the exception a sibling studio states outright
   for the reason that applies here too: every string came out of a model that has been reading
   source content an attacker may have written, and one missed `esc()` in a string-building renderer
   is an XSS sink. Headings, nested lists, blockquotes, inline and fenced code, tables, rules, bold
@@ -1995,7 +1995,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 - **The run's reasoning moved out of the chat bubble into a Trajectory drawer.** The inline step log
   put the planner's own prose inside the answer, which a user reported as unreadable and
-  space-consuming. Full parity with the sibling `nuclei-forge/studio`'s drawer, at the user's
+  space-consuming. Full parity with a sibling project's own trajectory drawer, at the user's
   explicit choice: turn nav, a tool timeline whose segment width tracks real elapsed time, a detail
   pane, search, and a replay that dwells on each turn for the time it really took.
 

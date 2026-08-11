@@ -1,9 +1,8 @@
 """Decompose a run's trace into the data behind the Trajectory drawer.
 
 A pure function over already-parsed trace events — no web dependencies, no filesystem — so it is
-unit-testable without a server, a model or a run. Ported from the sibling `nuclei-forge`'s
-`studio/nuclei_forge_studio/iterations.py`, which shipped this shape first; the DECOMPOSITION is
-theirs, the tool vocabulary is ours (`read_skill` and the six `validate_*` tools, against their
+unit-testable without a server, a model or a run. Ported from a sibling project's own iteration
+builder, which shipped this shape first; the DECOMPOSITION is theirs, the tool vocabulary is ours (`read_skill` and the six `validate_*` tools, against their
 fetch/search/generate/validate set).
 
 An RLM run is a sequence of `main_step` REPL turns — the planner's reasoning, the Python it ran, and

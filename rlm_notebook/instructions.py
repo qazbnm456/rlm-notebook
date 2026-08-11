@@ -189,7 +189,7 @@ def make_grounded_validator(
 
 def apply_skills(task: Any, skills_dir: str | None) -> None:
     """Wire `skills_dir` onto `task` using `discovery="inject"`, the shape four sibling projects
-    already use (`cabt-forge`, `bugcademy`, `cve-reverser`, `nuclei-forge`).
+    already use.
 
     The CATALOG (one `- name: description` line per skill) is prepended to the instructions at
     construction time, so the planner knows which skills exist without spending a `list_skills`

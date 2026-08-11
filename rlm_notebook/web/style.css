@@ -282,7 +282,7 @@ input:focus {
 }
 
 /* Two rounds of "still too small, still no hover effect" before the actual difference showed up in
-   `bugcademy/studio`: it is the RESTING state, not the hover rule and not the glyph size. Theirs is
+   one sibling studio: it is the RESTING state, not the hover rule and not the glyph size. Theirs is
    square with a STRONG border on a raised surface, so it reads as a control before you touch it,
    and the hover then has something to change. Ours was a 999px circle with the faintest border on
    the flattest surface: barely a button at rest, so a colour shift on hover had almost no delta to
@@ -1388,7 +1388,7 @@ body.is-resizing .cols {
    podcast. It exists because of a real report: a generation takes a minute or more, the only
    feedback was one line of text that ended on "finished" and then sat there, so the natural move is
    to press the button again — which strands the first generation behind a staleness guard and looks
-   like nothing happened at all. Same shape `nuclei-forge/studio`'s `.live-status` uses. --- */
+   like nothing happened at all. Same shape a sibling project's own live-status strip uses. --- */
 
 .run-status {
   display: flex;
@@ -3273,7 +3273,7 @@ body.is-resizing .studio-grip {
 }
 
 /* --- Trajectory drawer --------------------------------------------------------------------------
-   Ported from the sibling `nuclei-forge/studio`'s own drawer, structure and proportions included —
+   Ported from a sibling project's own trajectory drawer, structure and proportions included —
    a first pass kept its DATA MODEL faithfully and then invented a cramped presentation for it
    (0.75rem rows, a 0.85rem-tall bar strip), which a user compared side by side and rejected. The
    information was all there and none of it was legible.

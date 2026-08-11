@@ -398,8 +398,8 @@ def test_titling_never_fires_from_adding_a_source():
 
 
 def test_the_run_status_counts_by_event_kind_rather_than_logging():
-    """A scrolling log is the noise the user asked to avoid; `nuclei-forge/studio` settled on typed
-    counters plus one current-activity line, and its own comment explains why the framing matters.
+    """A scrolling log is the noise the user asked to avoid; a sibling project settled on typed
+    counters plus one current-activity line, and ITS own comment explains why the framing matters.
     Pins that the ticker hands the whole EVENT over (the kind is what the counters are made of) and
     that a kind with no occurrences renders nothing."""
     js = (WEB / "app.js").read_text(encoding="utf-8")
@@ -549,7 +549,7 @@ def test_the_markdown_renderer_builds_nodes_rather_than_markup():
     """The whole reason this is hand-written instead of a library (invariant 29): every string it
     handles came out of a model that has been reading source content an attacker may have written.
     The sibling studios build markup as HTML strings with an `esc()` helper, where one missed call
-    is an XSS sink; `bugcademy` states the same exception for the same reason."""
+    is an XSS sink; a sibling project states the same exception for the same reason."""
     script = (WEB / "app.js").read_text(encoding="utf-8")
     renderer = script[script.index("const MD_FENCE") : script.index("function renderAnswerWithCitations")]
     for sink in ("innerHTML", "outerHTML", "insertAdjacentHTML", "document.write"):
