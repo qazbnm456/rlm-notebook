@@ -1529,3 +1529,27 @@ def test_a_tip_on_a_left_edge_control_opens_rightward():
         rule = re.search(rf"{sel}[^{{]*\{{([^}}]*)\}}", css)
         assert rule, f"{sel} has no anchor override — its tip is clipped by the chat scroller"
         assert "left: 0" in rule.group(1) and "right: auto" in rule.group(1), rule.group(1)
+
+
+def test_no_translated_string_carries_an_english_dash():
+    """The English copy uses `—` as a rhetorical break; carrying it into the Chinese table is a
+    translation artifact, not a translation. A user reported one rendering as a long rule that read
+    like a glyph run that had failed to resolve.
+
+    Three spellings had accumulated in one file — `——`, a SPACED `——` (the dash is already
+    full-width; the spaces are the English habit) and a half-width `—`. Chinese punctuation carries
+    the same joins: a comma continues, a semicolon separates two complete thoughts, a colon labels.
+
+    Scoped to the STRING TABLE. The file's own comments are English prose and keep their dashes,
+    which is why this reads values rather than lines.
+    """
+    src = (WEB / "i18n.js").read_text(encoding="utf-8")
+    body = src[src.index("const STRINGS = {") : src.index("const UI_LANG_KEY")]
+    offenders = [
+        line.strip()
+        for line in body.splitlines()
+        if "—" in line and not line.lstrip().startswith("//")
+    ]
+    assert not offenders, (
+        f"{len(offenders)} translated string(s) still carry an English dash: {offenders[:3]}"
+    )

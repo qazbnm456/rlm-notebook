@@ -2225,3 +2225,12 @@ questions with verifiable citations, and get a distilled research artifact out.
   no `E501`, and the name scrub duly left a 157-character line that `check` passed. CLAUDE.md said
   the command enforced it; it says what is true now. Twenty over-long lines predate this and
   rewrapping them plus enabling `E501` is a follow-up, not a silent bundled edit.
+
+- **The Chinese interface carried English dashes, which is a translation artifact rather than a
+  translation.** A user photographed "PDF、TXT 或 Markdown——一次一個檔案。" — the dash renders as a
+  long rule and reads like a glyph run that failed to resolve. Fifteen strings had it, in three
+  different spellings within one file: `——`, a SPACED `——` (the dash is already full-width, the
+  spaces are the English habit) and a half-width `—`. Chinese punctuation carries the same joins a
+  dash was standing in for: a comma continues, a semicolon separates two complete thoughts, a colon
+  labels. A test now fails on any dash inside the string table, and only inside it — the file's own
+  comments are English prose and keep theirs.

@@ -56,16 +56,16 @@ const STRINGS = {
     "sources.tab.url": "網址",
     "sources.tab.text": "貼上文字",
     "sources.tab.file": "檔案",
-    "sources.url.hint": "網頁，或 YouTube 連結——只取字幕，不會下載影片或音訊。",
+    "sources.url.hint": "網頁，或 YouTube 連結；只取字幕，不會下載影片或音訊。",
     "sources.text.placeholder": "貼上要匯入的文字…",
-    "sources.file.hint": "PDF、TXT 或 Markdown——一次一個檔案。",
+    "sources.file.hint": "PDF、TXT 或 Markdown，一次一個檔案。",
     "sources.add": "加入來源",
     "sources.empty": "還沒有來源。從上面加入一個。",
     "sources.adding": "加入中…",
     "sources.remove": "移除這個來源",
     "sources.removeConfirm": "要把「{origin}」從這個筆記本移除嗎？",
     "sources.flagHelp":
-      "這是在來源本身的文字裡發現的，不是在你的提問裡。它沒有被阻擋，回答仍然會引用它——這只是提醒你，這份來源包含看起來像是在對模型下指令的內容。",
+      "這是在來源本身的文字裡發現的，不是在你的提問裡。它沒有被阻擋，回答仍然會引用它；這只是提醒你，這份來源包含看起來像是在對模型下指令的內容。",
     "err.removeSource": "無法移除來源：{message}",
 
     // --- chat
@@ -78,7 +78,7 @@ const STRINGS = {
     "chat.thinking": "思考中…",
     "chat.stopped": "（已停止）",
     "chat.askNext": "接著問",
-    "chat.noStarters": "這份概覽沒有附上建議問題——重新產生可以再試一次。",
+    "chat.noStarters": "這份概覽沒有附上建議問題，重新產生可以再試一次。",
     "chat.startWith": "可以先問",
     "chat.generateOverview": "✨ 產生概覽",
     "chat.orJustAsk": "…或直接在下面提問。",
@@ -92,7 +92,7 @@ const STRINGS = {
     "chat.saveAsNote": "存成筆記",
     "chat.saved": "已存進筆記",
     "chat.saveAsNoteHelp":
-      "在右側 Notes 保留一份副本。筆記之後可以「升級」成來源——那才是讓後續提問引用得到它的關鍵。",
+      "在右側 Notes 保留一份副本。筆記之後可以「升級」成來源，那才是讓後續提問引用得到它的關鍵。",
 
     // --- citations
     "cite.references": "{n} 則參考",
@@ -134,7 +134,7 @@ const STRINGS = {
     "traj.timingTagOff": "ⓘ 耗時",
     "traj.noTools": "這次執行沒有呼叫任何工具。",
     "traj.noMeta": "這次執行沒有留下設定紀錄。",
-    "traj.notStarted": "這次執行還沒有留下任何紀錄 —— 可能還在啟動，也可能根本沒跑起來。",
+    "traj.notStarted": "這次執行還沒有留下任何紀錄，可能還在啟動，也可能根本沒跑起來。",
     "traj.search": "搜尋回合…",
     "traj.stat": "{turns} 個回合 · {tools} 次工具呼叫",
     "traj.init": "起始",
@@ -150,12 +150,12 @@ const STRINGS = {
     "traj.error": "錯誤",
     "traj.matches": "{n} 筆符合",
     "traj.missing": "找不到這次執行的軌跡（{message}）",
-    "traj.timingLive": "每回合的耗時是即時記錄的 —— 在每個回合被解析時就寫下。",
+    "traj.timingLive": "每回合的耗時是即時記錄的，在每個回合被解析時就寫下。",
     "traj.timingStale": "這份軌跡沒有每回合的耗時（回合不是即時標記的，或這次執行太短）；上方的工具時間軸仍是真實時間。",
     "cite.unverifiedShort": "座標對不上",
-    "cite.unverifiedHover": "{label} — 這個座標在來源中找不到",
+    "cite.unverifiedHover": "{label}（這個座標在來源中找不到）",
     "cite.unverifiedWhy":
-      "這則引用指向的位置在這個來源裡不存在，所以我們無法查核它。下面的引文本身仍可能是正確的 —— " +
+      "這則引用指向的位置在這個來源裡不存在，所以我們無法查核它。下面的引文本身仍可能是正確的，" +
       "對不上的是位址，不一定是內容。",
     "studio.sub": "從你的來源產出的東西。這裡沒有任何操作會自動執行。",
     "studio.tab.summary": "摘要",
@@ -175,8 +175,8 @@ const STRINGS = {
     "studio.kind.faq": "問答",
     "studio.kind.timeline": "時間軸",
     "studio.kind.insight": "洞察",
-    "studio.noFaq": "（沒有問答項目——來源不足以整理出問題）",
-    "studio.noTimeline": "（沒有時間軸事件——來源裡沒有可定位在時間上的內容）",
+    "studio.noFaq": "（沒有問答項目，來源不足以整理出問題）",
+    "studio.noTimeline": "（沒有時間軸事件，來源裡沒有可定位在時間上的內容）",
 
     // --- podcast
     "podcast.head": "Podcast",
@@ -192,7 +192,7 @@ const STRINGS = {
     "podcast.generateTip": "先寫出一份以你的來源為依據的雙主持人腳本，再合成語音。這是這裡最慢的操作。",
     "podcast.writing": "正在撰寫腳本…",
     "podcast.stale": "Podcast · 來源在這之後有變動",
-    "podcast.empty": "（沒有 Podcast 腳本——來源不足以討論）",
+    "podcast.empty": "（沒有 Podcast 腳本，來源不足以討論）",
     "podcast.failed": "（無法產生 Podcast）{message}",
     "podcast.download": "⤓ 下載 {ext}",
     "podcast.downloadPlain": "⤓ 下載音訊",
@@ -207,7 +207,7 @@ const STRINGS = {
     "notes.promote": "→ 升級成來源",
     "md.urlCopied": "已複製連結網址",
     "notes.promoteHelp":
-      "把這則筆記變成真正的來源。只有這樣，後續的提問才引用得到它——筆記本身只是文字，沒有自己的引用。",
+      "把這則筆記變成真正的來源。只有這樣，後續的提問才引用得到它；筆記本身只是文字，沒有自己的引用。",
     "notes.delete": "刪除",
 
     // --- run status
@@ -247,8 +247,8 @@ const STRINGS = {
     "settings.outputLanguageHelp":
       "留空的話，每個筆記本會自己從你的瀏覽器、來源和提問推斷。",
     "settings.outputLanguagePlaceholder": "例如：繁體中文",
-    "settings.voiceA": "Podcast 嗓音——主持人 A",
-    "settings.voiceB": "Podcast 嗓音——主持人 B",
+    "settings.voiceA": "Podcast 嗓音：主持人 A",
+    "settings.voiceB": "Podcast 嗓音：主持人 B",
     "settings.voiceHelp":
       "留空的話使用該 TTS 的預設：edge-tts 跟隨筆記本語言，chatterbox 使用內附的 host-a / host-b 嗓音。",
     "settings.pinnedBy": "由 {env} 指定，此處無法修改",
