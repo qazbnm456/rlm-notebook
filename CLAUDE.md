@@ -1749,4 +1749,48 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     navigation into a full re-download of a ~190KB script, which is why the test asserts the ETag and the
     304 as well as the header.
 
+73. **RapidOCR's region coordinates decide reading order (`_ocr.reading_order`) — joining its regions in
+    detection order interleaves the columns of a two-column scan.** RapidOCR reports a bounding quad per
+    region and no layout, and emits regions roughly line-by-line ACROSS the full page, so
+    `" ".join(text for _, text, _ in result)` produced prose that jumps between columns mid-sentence.
+    Measured against the same pages' own text layer, over two real papers: a two-column paper scored
+    **0.425 -> 0.756**, a single-column one 0.802 -> 0.792. **The text-layer path was never affected** —
+    `pypdfium2` reads a LaTeX two-column paper in correct column order already, because the content stream
+    is written a column at a time — so this is an OCR-path defect only, and only scanned/textless pages
+    reach it (invariant 7).
+
+    **Three rules, each degrading to the detector's own order rather than to a wrong one:**
+
+    - **A page is left EXACTLY as detected unless it looks two-column** — above `_MAX_SPANNING_FRACTION`
+      (0.15) of regions crossing the content's horizontal centre, nothing is touched. A two-column page
+      crosses the centre only on what spans the measure (a banner heading, a caption, a centred page
+      number); a single-column page crosses it on nearly every body line. The sample is two documents, so
+      the threshold is set on the SAFE side on purpose: too low merely declines to improve a page, too high
+      reorders one that was already right.
+    - **A centre-crossing region is a band BOUNDARY, never a veto.** The first draft distrusted any band
+      holding a centre-crosser, and a real two-column page's single crossing region — the page number
+      centred in its footer — cost the whole page its column order. Boundaries cut the page into bands and
+      each band is column-split on its own.
+    - **Within a band nothing is re-sorted; only the two columns are separated out of the detector's
+      order.** Sorting a band by vertical position measured WORSE on BOTH layouts (two-column 0.756 ->
+      0.743, single-column 0.774 -> 0.751): RapidOCR already emits a column's lines in reading order, and
+      re-sorting on a quad's vertical centre only disturbs near-ties like a superscript or a skewed line.
+      This is the half that is counter-intuitive and the half a later reader is most likely to "fix".
+
+    **`_order_band` partitions rather than filtering twice**, because a zero-width region sitting exactly ON
+    the centre satisfies both the left and the right test and would be emitted into both columns.
+
+    **Tesseract is deliberately NOT given the same treatment**: it does its own page segmentation, columns
+    included, and reports text already in reading order.
+
+    **The known cost, inspected rather than inferred**: a wide TABLE on a single-column page can be split
+    down the middle, and two attention-visualisation figure pages measured -0.08/-0.06. Both were read
+    directly — a flattened table and a scatter of figure labels are word soup under either ordering, which
+    is why that cost is accepted against a +0.331 gain on two-column prose.
+
+    **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
+    are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See
+    `CHANGELOG.md` for the full evaluation, including which checkpoint would be the right one if this is
+    ever revisited.
+
 See `CHANGELOG.md` for the incidents, measurements and superseded drafts behind every invariant above.

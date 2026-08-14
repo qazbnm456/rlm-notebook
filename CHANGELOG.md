@@ -11,6 +11,77 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **OCR reading order: a two-column scan no longer comes back with its columns interleaved
+  (invariant 73).** `parsers/_ocr.py` joined RapidOCR's regions with
+  `" ".join(text for _, text, _ in result)`, throwing away the bounding quad reported alongside
+  every one of them. RapidOCR emits regions roughly line-by-line ACROSS the full page, so a
+  two-column page produced prose that jumps between columns mid-sentence — the model then read
+  scrambled text, and a citation's `quote` could be a scrambled span that still passed coordinate
+  verification (invariant 5 checks where, never what).
+
+  **Measured against the same pages' own text layer** (`difflib.SequenceMatcher` over normalised
+  word sequences), two real papers, every page over 120 words:
+
+  | | before | after |
+  |---|---|---|
+  | ResNet, two-column, 12 pages | 0.425 | **0.756** |
+  | "Attention Is All You Need", single-column, 15 pages | 0.802 | 0.792 |
+
+  **The text-layer path was never affected, which is why this was not found earlier.**
+  `pypdfium2` reads a two-column LaTeX paper in correct column order already — the content stream
+  is written a column at a time — so only scanned/textless pages (invariant 7's OCR dispatch) were
+  ever wrong. That was verified on the same PDF before any code changed, not assumed.
+
+  **Two drafts were wrong before this one, and both failures are the reason the rules are shaped
+  the way they are.** The first treated any band containing a centre-crossing region as untrustworthy
+  and fell back to plain order: on a real page the ONLY crossing region was the page number centred
+  in the footer, and that one tiny box cost the whole page its column order — the initial fix
+  measured no better than no fix at all. It "worked" in the prototype only because an earlier version
+  had used the image midpoint rather than the content midpoint, which happened to land on the other
+  side of that page number. The second draft sorted each band by vertical position, which measured
+  WORSE on BOTH layouts (two-column 0.756 -> 0.743, single-column 0.774 -> 0.751) — RapidOCR already
+  emits a column's lines in reading order, so the re-sort only disturbed near-ties. Isolating the
+  re-sort from the column split, as four separate variants over one cached OCR run, is what showed
+  this; guard parameters were swept first and moved nothing, which is what prompted looking
+  elsewhere.
+
+  **Accepted cost, inspected rather than inferred**: a wide table on a single-column page can be
+  split down the middle (the Transformer paper's Table 3 does), and two attention-visualisation
+  pages measured -0.08/-0.06. Both were read directly before being accepted — a flattened table and
+  a scatter of figure labels are word soup under either ordering. `_MAX_SPANNING_FRACTION = 0.15`
+  is set from a two-document sample and deliberately errs low, since too low only declines to
+  improve a page while too high reorders one that was already correct.
+
+- **Rejected: `PaddlePaddle/PicoDet-S_layout_3cls` as a shipped default.** Evaluated after the
+  OCR reading-order defect above was suspected, since a layout model is the textbook answer to it.
+  Licensing was NOT the problem — Apache-2.0 on the model card and in the Hugging Face repo
+  metadata, the same footing as RapidOCR and Tesseract, with none of the AGPL/Artifex trouble that
+  removed `pymupdf` (invariant 7).
+
+  **It detects table, image and stamp — there is no text class**, so it cannot recover reading
+  order, columns or headings, which is the one thing that was actually broken. The same PicoDet-S
+  backbone ships as `PicoDet-S_layout_17cls` at the SAME 4.8 MB and the same ~17.5 ms CPU latency
+  (mAP 87.4 vs 88.2) with 17 categories including Text, Paragraph Title, Header and Footer — so
+  within one model family the 3cls checkpoint is the least useful one available at that size.
+
+  **The published checkpoint is Paddle's own inference format** (`inference.pdiparams` +
+  `inference.json`, 4.8 MB), not ONNX: running it as documented needs `paddlepaddle` — measured at
+  **104.5 MB for the macOS arm64 wheel and 194.8 MB for manylinux x86_64** — plus `paddleocr`, next
+  to an OCR stack that is entirely ONNX today. An ONNX detour exists (`rapid-layout`, Apache-2.0,
+  reusing the `onnxruntime`/`numpy`/`opencv`/`Pillow` this project already installs), so the runtime
+  cost is avoidable, but only by taking the weights from somewhere other than this repo.
+
+  **Nothing in the schema could consume the output either**: `SourceBlock` is text-only at
+  `page:<n>` granularity, and a table bounding box is useless without a table-structure model
+  (SLANet) behind it — that is PP-StructureV3, not one small model. **One objection was measured and
+  withdrawn**: rasterising every page to feed a detector was assumed expensive, but 12-15 pages at
+  2x measured 0.13-0.19s, the same order as text extraction.
+
+  **If layout detection is revisited**, the checkpoint is `PicoDet-S_layout_17cls` or PP-DocLayout-S
+  (4.83 MB, 23 categories), packaged as ONNX, and opt-in first per invariant 43's "installed and run
+  before adopted" bar. Its remaining value is narrow: dropping figure-internal label noise from OCR
+  text, which is what survives the geometric fix above.
+
 - **First slice: ingestion (text/web/PDF with local hybrid OCR) + citation-grounded chat, driven
   from a CLI.** No session persistence, no API/UI, no Notebook Guide, no Audio Overview yet — see
   CLAUDE.md's Scope note. Everything below is what this slice actually contains, and the design
