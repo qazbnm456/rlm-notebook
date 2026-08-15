@@ -99,7 +99,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
    only — `AskResponse` carries no flags, so this is NOT true of the API or the web UI. It is a
    transparency mechanism; do not wire it to refuse a run. Its patterns trade recall for precision
    on purpose (a paper *discussing* prompt injection can trip it) — an acceptable false-positive
-   rate for a flag nobody is forced to act on.
+   rate for a flag nobody is forced to act on — **don't over-tighten it into false negatives chasing
+   a clean read.**
 
    **A flag is a SENTENCE addressed to a person, never a regex**, because since these flags gate
    nothing, whether a human can act on them is their entire value. `_INSTRUCTION_PATTERNS` pairs
@@ -239,7 +240,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     freely-named per episode.** Keeps `Utterance.speaker` a closed enum (`Literal[...]`, not an
     `enum.Enum`) that citations and voice-mapping can rely on, and keeps `RN_TTS_VOICE_HOST_A`/`_B`
     a fixed two-variable surface. A deliberate MVP scope cut. **Known gap**: `config.tts_voice_map`
-    hardcodes both speaker keys with no tripwire, unlike `cli._SPEAKER_LABELS`.
+    hardcodes both speaker keys with no tripwire, unlike `cli._SPEAKER_LABELS`, which
+    `tests/test_cli.py`'s sibling assertion covers — so a third host would need BOTH updated and only
+    one of them would fail loudly.
 
 19. **`cli._cmd_audio` resolves the TTS provider before running the (potentially expensive)
     script-generation model call, not after.** The original ordering wasted a real model call
@@ -268,7 +271,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
 22. **Cancellation works via `killpg` on the WHOLE process group (`start_new_session=True` when
     spawning), not just the worker's own PID.** A stuck Deno grandchild must not survive as an
-    orphan after its parent worker is killed. Don't simplify this to `process.kill()`, which only
+    orphan after its parent worker is killed. **Verified by a real test that spawns an actual
+    grandchild and confirms it dies too** (`test_runner.py::test_cancel_kills_the_whole_process_group_not_just_the_leader`)
+    — one of the few claims here that is executable rather than a source-tree assertion, so breaking
+    it costs a red test, not a review catch. Don't simplify this to `process.kill()`, which only
     signals the worker's own PID.
 
 23. **`api._ACTIVE_RUNS` is a single-process, in-memory map with ONE SLOT PER NOTEBOOK ID — two
@@ -322,7 +328,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     refuses to match a literal `/` inside one `{notebook_id}` segment — but that is a FRAMEWORK
     default, not this project's code; re-check it if the route ever changes shape.
 
-28. **`cli._GUIDE_TASKS` and `api._GUIDE_TASKS` are two independent registries, kept in sync by a
+28. **`cli._GUIDE_TASKS` and `api._GUIDE_TASKS` are two independent registries, kept in sync by the
+    tripwire `test_api.py::test_guide_task_registries_stay_in_sync_between_cli_and_api`, a
     tripwire test, not by sharing code** (invariant 20 explains why `api.py` doesn't import from
     `cli.py`). Add a new `guide` kind to BOTH dicts, or the tripwire fails immediately rather than
     the two silently drifting.
@@ -348,6 +355,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `asyncio.run(...)`, which raises if invoked from a running event loop. **Accepted limitation**:
     by the time synthesis begins, `_run_isolated`'s `finally` has cleared this notebook's
     `_ACTIVE_RUNS` entry, so a stuck synthesis call has no `killpg`-equivalent to reach it. The
+    Synthesis writes through a temp file whose `finally` covers BOTH the success and the
+    synthesis-FAILURE path — the `try` has to start before `synthesize()`, or a `TTSError` raised
+    from inside it leaks the file. **`↓ Download` slugs its filename from the (model-authored)
+    notebook title**, since `download` is an attribute the browser turns into a path component, and
+    **its extension follows the SERVED file**, because a provider may emit WAV (invariant 43) and
+    naming it `.mp3` unconditionally would mislabel half of them. That second rule has no other home:
+    an audit once found it listed among invariant 43's "handled" consequences when it was not. The
     response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
     uniform with every other endpoint.
 
@@ -379,6 +393,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       event's real keys are nothing like a `main_step`'s and a citation appearing only in a sub-LM
       escalation would silently 404. `stream_run` and `citation_turn` both check the run id belongs
       to the notebook, comparing `slug(notebook_id)` (invariant 38).
+    - **Every artifact that can be re-opened PERSISTS the run id that produced it** —
+      `ChatTurn.run_id`, `Overview.run_id` (invariant 38) and `Podcast.run_id` (invariant 42), all
+      optional and backward-compatible. Without it a reload has no way back to the trace, so both
+      affordances above (and invariant 70's persisted "⌁ N steps" pill) exist only until the page is
+      refreshed. This is the storage contract those features rest on, which is why it is stated here
+      rather than left implicit in three schema fields.
 
     **Known limitations**: a missing trace degrades that ONE affordance and never the rest of the
     page (retention is bounded by invariant 34); the marker search is a HEURISTIC — finding the
@@ -474,7 +494,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     **`CaptionError` is a `ValueError` subclass.** `cli._prepare` and `api.add_sources` both catch
     ingestion failures as `except (FetchError, ValueError, OSError)`; a bare `RuntimeError` would
-    land a captionless video as an unhandled 500 / raw traceback. Don't give a future
+    land a captionless video as an unhandled 500 / raw traceback — verified live and pinned by
+    `test_api.py::test_add_sources_reports_422_not_500_on_a_captionless_youtube_video`. Don't give a future
     ingestion-failure exception a base class outside that tuple without updating both call sites.
 
     **`_parse_vtt` flattens EVERY non-blank line into its own `(start, text)` entry — one per LINE,
@@ -561,7 +582,11 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       retention traces to die early. `RN_TRACE_RETENTION_DAYS` is a floor, not a function of load.
     - **`prune_traces` never raises** (housekeeping must not turn a completed, paid-for `ask` into a
       500), which is why the **lifespan reads the retention settings itself** — otherwise a typo'd
-      value means "silently never prune". Standalone readers, never `NotebookConfig` fields, for
+      value means "silently never prune" — **a malformed one REFUSES STARTUP instead**, which is the
+      half that makes the design coherent: reading it in the lifespan and then warning-and-defaulting
+      would satisfy the sentence before this one and still leave a typo'd `RN_TRACE_RETENTION_DAYS`
+      silently keeping files that hold ingested source text. Standalone readers, never
+      `NotebookConfig` fields, for
       invariant 30's reason: a server with no model configured must still tidy up after itself.
     - **`api._prune_traces` snapshots `set(_RUN_PROCESSES)` on the EVENT LOOP, before dispatching to
       the thread**, or it races the loop's own mutation of the dict.
@@ -616,7 +641,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **A visible author `display` on a hidden-toggled class IS allowed — with a guard that OUTRANKS
     it**, i.e. a `[hidden]` rule whose selector is one token LONGER, so it wins on specificity
     regardless of source order. This tripwire compares by class NAME and would accept a guard that
-    loses the cascade; a separate test computes specificity and is the one that actually checks it.
+    loses the cascade; `test_the_podcast_transcript_is_not_capped_by_a_fixed_height` computes
+    specificity and is the one that actually checks it.
 
     **A flex column stretches its children to full width, and that is a DEFAULT, not a choice** —
     only what should span may span.
@@ -650,7 +676,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     **It is LAZY**: `app.js`'s `ensureTitle()` is called from actions that ALREADY run a model
     (generating an overview, asking, opening a Studio tab, generating a podcast), never from
-    ingestion, because pasting a link should not spend a model call naming something nobody has
+    ingestion (pinned by `test_web_assets.py::test_titling_never_fires_from_adding_a_source`, which
+    slices `app.js` and also asserts the CALL COUNT — so a fifth model-running action has to touch
+    it), because pasting a link should not spend a model call naming something nobody has
     started working on. The consequence — a notebook with sources and no title — is why
     `derived_title` exists (invariant 53).
 
@@ -659,7 +687,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     falling back to `naming.fallback_title`. An existing title is never overwritten — re-titling on
     every source add would rename a notebook under a user who had already learned its name — so the
     endpoint is idempotent. `clean_title` is the ONLY guard on what reaches the UI, since this is the
-    one model output with no schema validation behind it.
+    one model output with no schema validation behind it; the UI renders it with `textContent`,
+    never `innerHTML`, for the same reason every other model-derived string is (invariants 6 and 29).
 
 38. **The chat overview is the ONE guide artifact persisted onto a notebook (`schema.Overview`,
     `Notebook.overview`), and it is marked STALE rather than deleted when the sources change.**

@@ -52,6 +52,46 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **Finished the condensation audit: invariants 1-37 read semantically, ten losses restored.** This
+  range had only ever been checked mechanically — that every heading survived and every bold rule
+  still appeared — which is a weaker check than the one that found real losses in 38-72, and it was
+  the last unread part of the rewrite. Every restored item was verified live in the code first.
+
+  **1-37 came through markedly better than 38-72**: no inverted security statement, no weakened
+  contract, and every residual-risk hedge intact. What it lost is almost entirely the layer linking
+  a rule to its enforcement, plus two client-side rules that had no other home.
+
+  **The two that had nowhere else to live** are both in invariant 29's dropped `↓ Download`
+  paragraph: the filename is SLUGGED from the model-authored notebook title, because `download` is an
+  attribute the browser turns into a path component; and its extension follows the SERVED file,
+  because a provider may emit WAV and naming it `.mp3` would mislabel half of them. The second is the
+  sharper loss — `app.js` records that an audit once found it listed among invariant 43's "handled"
+  consequences when it was not, so invariant 43 is explicitly not its home either.
+
+  **One behaviour lost its "what" while keeping its "why".** Invariant 34 kept "the lifespan reads
+  the retention settings itself — otherwise a typo'd value means silently never prune" but dropped
+  "a malformed one refuses startup instead". Someone could satisfy every word of the surviving
+  sentence by warning-and-defaulting, and turn a typo'd `RN_TRACE_RETENTION_DAYS` back into silently
+  keeping files that hold ingested source text.
+
+  **Also restored**: five enforcement links to live tests (the lazy-titling tripwire, which also
+  asserts a CALL COUNT so a fifth model-running action must touch it; the process-group test that
+  spawns a real grandchild, one of the few executable claims here rather than a source-tree
+  assertion; the guide-registry tripwire; the captionless-YouTube 422 test; and the specificity test
+  invariant 36 refers to only as "a separate test"); the temp file whose `finally` must wrap
+  `synthesize()` itself, not just the read-back; the persisted `Overview.run_id`/`Podcast.run_id`
+  contract that invariant 70's re-openable "⌁ N steps" pill rests on; invariant 6's "don't
+  over-tighten it into false negatives chasing a clean read"; invariant 18's point, which the
+  condensation left hanging (a third host needs BOTH maps updated and only one fails loudly); and
+  invariant 37's `textContent`-never-`innerHTML` clause for the one model output with no schema
+  validation behind it.
+
+  **Checked and correctly dropped**, recorded so the line is visible: the pymupdf/AGPL discovery
+  story, the `/etc/passwd` reproduction, the lost-update reproduction, the VTT design history and
+  every "an independent audit found…" attribution are incident narrative and belong here. Invariant
+  24's enumeration of `SystemExit` sources was declared wrong by the old text itself. Invariant 36's
+  `.studio-view { display: flex }` example is stale — that rule no longer exists in `style.css`.
+
 - **`parse_pdf` now reports what the second-opinion OCR cost, because that cost was measured only
   after it shipped.** Asking what invariant 74 actually does to the 260-page scan that motivated it
   gave: 61 pages suspected and OCR'd for comparison, 4 unscoreable, 187 untouched. So roughly a
