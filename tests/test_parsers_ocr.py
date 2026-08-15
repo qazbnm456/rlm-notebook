@@ -117,6 +117,46 @@ def test_reading_order_tolerates_a_degenerate_box():
     assert _ocr.reading_order([([[0, 0]], "a"), ([[0, 0]], "b")]) == "a b"
 
 
+# --- wordlike_ratio (invariant 74) -----------------------------------------------------------
+
+
+def test_wordlike_ratio_scores_ordinary_prose_near_one():
+    text = "The encoder is composed of a stack of identical layers with residual connections"
+    assert _ocr.wordlike_ratio(text) == 1.0
+
+
+def test_wordlike_ratio_penalises_vowelless_tokens():
+    """`CNC`, `TTT`, `HDS` — what a chart's gridlines leave behind in a mis-decoded text layer.
+    Five real words against five vowelless runs is exactly half, which pins the rule rather than
+    merely asserting it went down."""
+    assert _ocr.wordlike_ratio("alpha beta gamma delta epsilon CNC TTT HDS THT NBS") == 0.5
+
+
+def test_wordlike_ratio_penalises_case_flipping_inside_a_token():
+    """`BEANseGE` is not typography, it is glyph-level mis-mapping."""
+    ratio = _ocr.wordlike_ratio("alpha BEANseGE gamma dELTa epsilon ZEta eta theta")
+    assert ratio is not None and ratio < 0.75
+
+
+def test_wordlike_ratio_exempts_all_caps_tokens():
+    """A heading is real text; only case flipping WITHIN a token is the signal."""
+    assert _ocr.wordlike_ratio("THE INCOMPLETE TORONTO FUNCTION AND ITS USE IN RADAR") == 1.0
+
+
+def test_wordlike_ratio_returns_none_below_the_token_floor():
+    """Too few tokens to judge is a real answer, not a failure — a diagram page of numeric labels
+    must not be handed a confident-looking score computed from three words."""
+    assert _ocr.wordlike_ratio("0.5 1.0 2.0 Fig 10 R/Ro 299") is None
+    assert _ocr.wordlike_ratio("") is None
+
+
+def test_wordlike_ratio_returns_none_for_cjk_rather_than_condemning_it():
+    """The rules are written for alphabets with vowels. A Chinese page has no Latin tokens, so it
+    scores None and is never judged by them — the failure a bundled English dictionary would
+    have caused."""
+    assert _ocr.wordlike_ratio("這是一段完全沒有拉丁字母的中文文字，用來確認評分函式會回傳 None。") is None
+
+
 def test_reading_order_drops_blank_regions_and_strips_each():
     regions = [(_quad(0, 300, 10), "  kept  "), (_quad(0, 300, 30), "   ")]
     assert _ocr.reading_order(regions) == "kept"

@@ -1803,4 +1803,46 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `CHANGELOG.md` for the full evaluation, including which checkpoint would be the right one if this is
     ever revisited.
 
+74. **A garbled text layer is decided by COMPARING against OCR, never by a threshold alone
+    (`pdf._page_text`, `_ocr.wordlike_ratio`).** Invariant 7 left "a bad-character-ratio heuristic" as
+    the follow-up for a text layer that is present but mis-decoded. Measurement killed the heuristic
+    on its own: across six documents the good pages' worst scores (0.79-0.99) OVERLAP the mis-decoded
+    pages' (0.63-0.80), on every metric tried — alphanumeric ratio, long-token ratio, dictionary hit
+    rate, and the shape score that shipped. **No threshold separates them, so no threshold may
+    decide.** A false positive is not free either: a good text layer beats any OCR of the same page,
+    so replacing one on suspicion is a downgrade.
+
+    **So the score only decides whether to SPEND an OCR pass, and the comparison decides what to
+    keep.** Below `_SUSPECT_TEXT_BELOW` (0.85) the page is OCR'd as a SECOND OPINION; the text layer
+    stands unless OCR beats it by `_OCR_REPLACES_TEXT_BY` (0.10). This makes a generous threshold
+    cost time and never quality — the gate is a budget, not a verdict. **The margin is not
+    decoration**: a bare `>` was tried and flipped a healthy page (0.97) to OCR (0.98) on a
+    rounding-level difference. Measured margins on genuinely mis-decoded pages were +0.20 and +0.27,
+    and the page where the layer was actually fine lost by 0.06.
+
+    **`wordlike_ratio` is deliberately DICTIONARY-FREE.** `/usr/share/dict/words` is absent on stock
+    Debian so CI cannot rely on it, and a bundled list would describe ONE language while quietly
+    condemning every page in another. Two shape rules do the work, both taken from how a mis-decoded
+    layer actually reads: no vowel anywhere in the token (`CNC`, `TTT`, `HDS`), and case flipping
+    mid-token (`BEANseGE`), with all-caps exempt because headings are real. Note that real garble
+    often DOES contain vowels — `ELTN` scores as wordlike — so this works in aggregate and never
+    per token.
+
+    **`None` is a real answer, not a failure.** Below `_MIN_SCORED_TOKENS` (8) there is nothing to
+    judge, and an unscoreable second opinion never displaces the first. This is what makes a CJK page
+    safe: it has no Latin tokens, scores `None`, and is never judged by rules written for alphabets
+    that have vowels. It is also the accepted LOSS — a pure diagram page OCRs to a few numeric
+    labels, scores `None`, and keeps its garbled layer even though the OCR was observed to be better.
+
+    **The trigger was real, not hypothetical**: an Internet Archive scan of a 1960 IRE monograph
+    whose chart pages were scanned upside-down or mirrored, so its embedded OCR decoded to
+    `UN ELTN NII PIN COCO` and `Zh *9td 3ONVY G3zMw30!` — the latter being "FIG.72 / ACTUAL RANGE"
+    reversed. `_MIN_TEXT_CHARS` sees characters and declines to run OCR, so that string is what
+    reached the corpus.
+
+    **The assumption that had to die first**: that re-OCRing such a page gains nothing because the
+    source is a chart. Measured false — on the same pages OCR recovered `FALSE ALARM INTERVAL`,
+    `PULSE REPETITION RATE` and `THE INCOMPLETE TORONTO FUNCTION`, because it reads the page as
+    rendered rather than as the original scanner mis-fed it.
+
 See `CHANGELOG.md` for the incidents, measurements and superseded drafts behind every invariant above.

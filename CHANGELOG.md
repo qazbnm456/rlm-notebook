@@ -52,6 +52,43 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **A garbled-but-present text layer is now caught, by comparing against OCR rather than by
+  trusting a threshold (invariant 74).** Invariant 7 had recorded "a bad-character-ratio heuristic"
+  as the follow-up for this gap. The heuristic does not work on its own, and measuring is what
+  showed it: across six documents the good pages' worst scores overlap the mis-decoded pages' on
+  every metric tried — alphanumeric ratio, long-token ratio, dictionary hit rate, and the shape
+  score that shipped (good 0.79-0.99 against garbled 0.63-0.80). A false positive is not free
+  either, since a good text layer beats any OCR of the same page.
+
+  So the score only decides whether to SPEND an OCR pass and the comparison decides what to keep:
+  below 0.85 the page is OCR'd as a second opinion, and the layer stands unless OCR beats it by
+  0.10. A generous gate then costs time and never quality. The margin earned its place immediately —
+  a bare `>` flipped a healthy page (0.97) to OCR (0.98) on a rounding-level difference, while the
+  genuinely mis-decoded pages won by +0.20 and +0.27.
+
+  **The trigger was a real document**, found while validating the reading-order work: an Internet
+  Archive scan of a 1960 IRE monograph whose chart pages were fed to the scanner upside-down or
+  mirrored, so its embedded OCR decoded to `UN ELTN NII PIN COCO` and `Zh *9td 3ONVY G3zMw30!` —
+  that second string is "FIG.72 / ACTUAL RANGE" reversed. `_MIN_TEXT_CHARS` sees characters, skips
+  OCR, and that is what reached the corpus.
+
+  **An assumption had to die first.** The initial read was that re-OCRing those pages gains nothing
+  because the source is a chart, and that was stated before it was checked. It is false: on the same
+  pages OCR recovered `FALSE ALARM INTERVAL`, `PULSE REPETITION RATE` and `THE INCOMPLETE TORONTO
+  FUNCTION`, because it reads the page as rendered rather than as the scanner mis-fed it. Had that
+  gone unchecked the conclusion would have been "not worth building".
+
+  **`wordlike_ratio` is dictionary-free on purpose**: `/usr/share/dict/words` is absent on stock
+  Debian so CI cannot depend on it, and a bundled list would describe one language while condemning
+  pages in every other. Two shape rules replace it — no vowel anywhere in the token, and case
+  flipping mid-token, with all-caps exempt. Real garble often does contain vowels (`ELTN` scores as
+  wordlike), so it works in aggregate and never per token.
+
+  **Accepted loss, stated rather than discovered later**: a pure diagram page OCRs to a handful of
+  numeric labels, falls under the eight-token floor, scores `None`, and keeps its garbled layer even
+  though the OCR was observed to be better. `None` is also what keeps a CJK page safe from rules
+  written for alphabets with vowels, so the floor is load-bearing in the other direction.
+
 - **Validated the OCR reading-order fix on real scans, which is the only population it serves.**
   Everything the fix was originally measured on was a rendered DIGITAL PDF — but only a page with
   no text layer reaches OCR at all, so the whole calibration had been done on a proxy for the

@@ -12,7 +12,14 @@ the detector already reported.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Sequence
+
+#: Alphabetic runs of at least two letters. Digits are excluded rather than tolerated: a page of
+#: numeric chart labels says nothing about whether its text layer decoded correctly, and letting
+#: digits into the denominator would drag every table's score toward whatever its letters did. A
+#: one-letter token carries no shape to judge either.
+_WORD_TOKEN = re.compile(r"[A-Za-z]{2,}")
 
 #: Above this share of regions crossing the page's horizontal centre, the page is not laid out in
 #: two columns and is left exactly as the detector reported it. A two-column page crosses the centre
@@ -91,6 +98,44 @@ def reading_order(regions: Sequence[tuple[Sequence[Sequence[float]], str]]) -> s
             band.append(region)
     ordered.extend(_order_band(band, centre))
     return " ".join(ordered)
+
+
+#: A page needs this many scoreable tokens before `wordlike_ratio` returns a number at all, so the
+#: score is never computed from a handful of chart axis labels, where it would be noise wearing a
+#: number. Measured: the pure-diagram pages of a real scan fall under it and correctly score `None`.
+_MIN_SCORED_TOKENS = 8
+
+_VOWELS = frozenset("aeiouyAEIOUY")
+
+
+def wordlike_ratio(text: str) -> float | None:
+    """What share of `text`'s alphabetic tokens have the SHAPE of real words (invariant 74)?
+    `None` when there are too few tokens to judge — which is a real answer, not a failure.
+
+    Deliberately dictionary-free. A system word list is not portable (`/usr/share/dict/words` is
+    absent on stock Debian, so CI could not rely on it) and a bundled one would only ever describe
+    ONE language, quietly condemning every page this project is meant to read in another. Two
+    shape rules carry it instead, both drawn from how a mis-decoded text layer actually reads:
+
+    * **no vowel at all** — `ELTN`, `CNC`, `TTT`, the residue of a chart's gridlines;
+    * **case flipping mid-token** — `BEANseGE`, which no typography produces and glyph-level
+      mis-mapping produces constantly. An all-caps token is exempt, since headings are real.
+
+    A CJK page scores `None` (no Latin tokens), so it is never judged by a rule written for
+    alphabets that have vowels — the failure mode that makes a bundled dictionary the wrong tool.
+    """
+    tokens = [t for t in _WORD_TOKEN.findall(text)]
+    if len(tokens) < _MIN_SCORED_TOKENS:
+        return None
+    return sum(1 for token in tokens if _is_wordlike(token)) / len(tokens)
+
+
+def _is_wordlike(token: str) -> bool:
+    if not _VOWELS & set(token):
+        return False
+    # `token[1:].lower() != token[1:]` means an uppercase letter appears after the first character.
+    # Ordinary prose does that only in an all-caps token, so anything else is a mis-decoded glyph.
+    return token.isupper() or token[1:].lower() == token[1:]
 
 
 def _try_rapidocr(image) -> str | None:
