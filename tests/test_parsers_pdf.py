@@ -5,7 +5,11 @@ from _pdf_fixtures import make_blank_pdf, make_image_only_pdf, make_text_pdf
 
 from rlm_notebook.parsers import _ocr
 from rlm_notebook.parsers import pdf as pdf_module
-from rlm_notebook.parsers.pdf import _OCR_REPLACES_TEXT_BY, parse_pdf
+from rlm_notebook.parsers.pdf import (
+    _OCR_REPLACES_TEXT_BY,
+    _SUSPECT_TEXT_BELOW,
+    parse_pdf,
+)
 
 #: A text layer that reads like mis-decoded glyphs — no vowels, case flipping mid-token. Taken from
 #: the shape of a real one (an IRE scan whose chart pages decoded to `UN ELTN NII PIN COCO`).
@@ -95,18 +99,35 @@ def test_parse_pdf_requires_the_margin_not_merely_a_higher_score(tmp_path, monke
 
 def test_parse_pdf_will_not_trade_a_page_of_prose_for_a_short_ocr_win(tmp_path, monkeypatch):
     """Both scores are RATIOS. Without a volume term, a page carrying one garbled figure block is
-    replaced wholesale by an OCR pass that recovered only the caption."""
+    replaced wholesale by an OCR pass that recovered only the caption.
+
+    The OCR fixture must clear `_MIN_SCORED_TOKENS`, or this exits through the `ocr_score is None`
+    arm one line earlier and pins nothing — the first version had six tokens and stayed green with
+    the whole volume guard deleted. Check WHICH branch a test leaves through, not just that it
+    passes."""
     pdf_path = tmp_path / "mostly-prose.pdf"
     prose = (
         "The encoder is composed of a stack of identical layers and each layer has two sub-layers "
         "which are applied in turn to every position of the input sequence in the usual way. "
     )
-    make_text_pdf(pdf_path, [prose + _GARBLED])
-    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: "Figure one shows the residual block")
+    layer = prose + _GARBLED + " " + _GARBLED
+    caption = "Figure one shows the residual building block used here"
+
+    # Every condition the volume guard needs in order to be the thing that decides. Asserted rather
+    # than assumed: the first two versions of this test each exited through an earlier arm — one
+    # below the token floor, one above the suspicion gate — and stayed green with the guard deleted.
+    layer_score = _ocr.wordlike_ratio(layer)
+    assert layer_score < _SUSPECT_TEXT_BELOW, "layer must be suspected, or no OCR is even run"
+    assert _ocr.scoreable_tokens(caption) >= _ocr._MIN_SCORED_TOKENS, "OCR must be scoreable"
+    assert _ocr.wordlike_ratio(caption) >= layer_score + _OCR_REPLACES_TEXT_BY, "OCR must win on score"
+
+    make_text_pdf(pdf_path, [layer])
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: caption)
 
     source = parse_pdf(str(pdf_path), "s1")
 
     assert "encoder" in source.blocks[0].text
+    assert source.blocks[0].text != caption
 
 
 def test_parse_pdf_keeps_a_garbled_layer_when_ocr_cannot_be_scored(tmp_path, monkeypatch):

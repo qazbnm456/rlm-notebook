@@ -37,9 +37,12 @@ _WORD_TOKEN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ]{2,}")
 #: only on the few elements that span the measure (a banner heading, a figure/table caption, a
 #: centred page number); a single-column page crosses it on nearly every body line. Measured on two
 #: real papers: the two-column one scored 0.00-0.11 per page (one title page at 0.41), the
-#: single-column one 0.04-0.88. A value that is too LOW only declines to improve a page; too HIGH
-#: reorders one that was already correct — so the uncertainty from a two-document sample is spent on
-#: the safe side.
+#: single-column one 0.04-0.88. **Those ranges OVERLAP, so 0.15 does not separate them** — the
+#: single-column pages measuring 0.04-0.08 are diagram pages, and they are reordered. That is the
+#: -0.08/-0.06 those two pages cost, inspected and accepted rather than designed away. A value too
+#: LOW only declines to improve a page while too HIGH reorders one that was already correct, so the
+#: uncertainty from a two-document sample is spent downward; "safe" is the direction, not a
+#: guarantee.
 _MAX_SPANNING_FRACTION = 0.15
 
 #: (left edge, right edge, vertical centre, detection index, text) — a detection flattened to the

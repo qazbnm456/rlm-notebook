@@ -491,8 +491,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     notions of "blank" at two steps, not one check reused. `tests/test_parsers_youtube.py`'s
     fixtures are real captured dumps for this reason.
 
-    **A `"ts:<mm:ss>"` locator prefix** (a fixed `_CHUNK_SECONDS = 120` window, coarser than one
-    cue), alongside `"whole"` (text/web) and `"page:<n>"` (pdf). Locator is fully opaque everywhere
+    **A `"ts:<mm:ss>"` locator prefix, widening to `"ts:<h:mm:ss>"` past the one-hour mark** (a
+    fixed `_CHUNK_SECONDS = 120` window, coarser than one cue), alongside `"whole"` (text/web) and
+    `"page:<n>"` (pdf). Locator is fully opaque everywhere
     it matters — `citations.py` and `CITATION_RULES` never parse it — so a new prefix breaks nothing.
 
     **`_fetch_caption_track` reuses `parsers/web.py`'s hardened `_opener`** rather than a bespoke
