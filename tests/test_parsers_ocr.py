@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 from rlm_notebook.parsers import _ocr
 
 
@@ -176,6 +179,49 @@ def test_reading_order_uses_the_content_midpoint_not_the_page_midpoint():
     )
 
 
+def test_reading_order_on_a_real_two_column_page():
+    """The one test here driven by REAL detector geometry rather than hand-built quads — 105 boxes
+    from a rendered two-column paper, measured once and frozen (`tests/fixtures/`). Text is not in
+    the fixture; only the layout is, which is the part `reading_order` reads.
+
+    The assertion is STRUCTURAL rather than a frozen output list, so it says what correct means
+    instead of merely locking in today's answer: the whole left column, then the whole right column,
+    each in detection order, with the centred page number last because it spans the measure. The
+    gutter bounds come from the fixture, read off the measurement rather than computed by the code
+    under test.
+
+    What it adds, and what it does not: it is the only evidence here that the algorithm produces the
+    right SHAPE on output a real detector really emitted — ragged edges, a stray footer, boxes that
+    do not line up. It does NOT subsume the synthetic fixtures. This page is a single band, so the
+    band-assignment key and the vertical-centre choice are unobservable in it (mutating either leaves
+    this test green); those are pinned above, where a fixture can be built to expose them."""
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "ocr_two_column_page.json").read_text()
+    )
+    left_ends, right_starts = fixture["left_column_ends_before"], fixture["right_column_starts_after"]
+
+    left, right, spanning = [], [], []
+    regions = []
+    for index, box in enumerate(fixture["boxes"]):
+        label = f"r{index:03d}"
+        regions.append((box, label))
+        x0 = min(point[0] for point in box)
+        x1 = max(point[0] for point in box)
+        if x1 <= left_ends:
+            left.append(label)
+        elif x0 >= right_starts:
+            right.append(label)
+        else:
+            spanning.append(label)
+
+    # The page really is two columns with one centred footer; if that stops holding the fixture has
+    # been edited and every assertion below would be measuring something else.
+    assert len(left) > 40 and len(right) > 40, (len(left), len(right))
+    assert len(spanning) == 1, spanning
+
+    assert _ocr.reading_order(regions).split() == left + right + spanning
+
+
 def test_reading_order_tolerates_a_degenerate_box():
     """A zero-width region sitting exactly on the centre satisfies both the left and the right
     test; it must be emitted once, not into both columns."""
@@ -252,6 +298,27 @@ def test_scoreable_tokens_counts_what_the_ratio_speaks_for():
     assert _ocr.scoreable_tokens("alpha beta CNC") == 3
     assert _ocr.scoreable_tokens("Größere Qualität") == 2
     assert _ocr.scoreable_tokens("0.5 1.0 這是中文") == 0
+
+
+def test_wordlike_ratio_declines_a_page_whose_latin_text_is_a_minority():
+    """The CJK protection is a SHARE of the page, not the absence of Latin text. A garbled Chinese
+    body carrying a clean English reference list scored 1.000 — computed entirely from the minority
+    that happened to be readable — and was therefore never challenged."""
+    garbled_body = "這是一段被錯誤解碼的中文內容" * 6
+    clean_references = (
+        "References Vaswani et al Attention is all you need in Advances in Neural Information"
+    )
+    assert _ocr.wordlike_ratio(garbled_body + " " + clean_references) is None
+
+
+def test_wordlike_ratio_still_scores_a_latin_page_carrying_some_cjk():
+    """The other direction: an English page quoting a few Chinese words is still an English page,
+    and must not be excused from judgement by their presence."""
+    text = (
+        "The encoder is composed of a stack of identical layers and each layer has two sub-layers "
+        "which the authors call 自注意力 in the Chinese edition of this paper"
+    )
+    assert _ocr.wordlike_ratio(text) == 1.0
 
 
 def test_wordlike_ratio_returns_none_for_cjk_rather_than_condemning_it():

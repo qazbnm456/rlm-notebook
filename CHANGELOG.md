@@ -52,6 +52,31 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **Closed the mixed-script scoring hole, and made one measurement reproducible in CI.** Both were
+  named as open when the OCR work was reviewed; neither had been acted on.
+
+  **A garbled Chinese body carrying a clean English reference list scored 1.000 and was never
+  challenged.** `wordlike_ratio` reads Latin tokens only, so on a mixed page its verdict came
+  entirely from whatever minority happened to be readable — measured at a 0.49 Latin share of the
+  page's alphabetic characters. The CJK protection was "there are no Latin tokens", which is a
+  property of pure CJK pages and not of the mixed ones that actually occur. It is now a SHARE
+  (`_MIN_LATIN_SHARE`, 0.7): the function asks whether the rule applies before asking what it says.
+  Erring high costs a missed improvement, erring low lets a Latin-shaped rule pass sentence on a
+  page written in something else, so the uncertainty is spent upward. `_WORD_TOKEN` and
+  `_LATIN_CHAR` are built from one character-class constant so they cannot drift apart about what
+  counts as Latin — one decides what is scored, the other whether scoring applies.
+
+  **Every OCR number in these entries came from documents not in the repo, so CI could reproduce
+  none of them.** One test now drives real detector geometry: 105 boxes measured off a rendered
+  two-column page, stored as `tests/fixtures/ocr_two_column_page.json` with the TEXT EXCLUDED, so
+  the fixture carries a real page's layout without carrying its prose. It asserts the structure —
+  the whole left column, then the whole right, then the centred footer — rather than freezing an
+  output list, which is the difference between saying what correct means and locking in today's
+  answer; and its gutter bounds are read off the measurement rather than computed by the code under
+  test. Stated rather than oversold: that page is a single band, so the band-assignment key and the
+  vertical-centre choice are invisible in it and stay pinned by the synthetic fixtures. `tests/` is
+  not in `pyproject.toml`'s `packages`, so none of this ships in the wheel.
+
 - **Finished the condensation audit: invariants 1-37 read semantically, ten losses restored.** This
   range had only ever been checked mechanically — that every heading survived and every bold rule
   still appeared — which is a weaker check than the one that found real losses in 38-72, and it was

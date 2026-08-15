@@ -30,7 +30,19 @@ from collections.abc import Sequence
 #: enforce. Deliberately NOT `\w` or a general Unicode-letter class: CJK characters are letters
 #: too, and matching them would end the `None` that keeps a Chinese page away from rules about
 #: vowels.
-_WORD_TOKEN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ]{2,}")
+#: One copy of the character class, because `_WORD_TOKEN` and `_LATIN_CHAR` must never disagree
+#: about what counts as Latin — one decides what is scored, the other whether scoring applies.
+_LATIN_LETTERS = "A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ"
+_WORD_TOKEN = re.compile(f"[{_LATIN_LETTERS}]{{2,}}")
+_LATIN_CHAR = re.compile(f"[{_LATIN_LETTERS}]")
+
+#: `wordlike_ratio` reads Latin tokens ONLY, so its verdict is worth nothing unless Latin text is the
+#: bulk of the page. Below this share of the page's alphabetic characters it declines to judge.
+#: Without it a page that is a garbled CJK body plus a clean English reference list scored 1.000 —
+#: computed entirely from the minority that happened to be readable — and was never challenged.
+#: Erring HIGH costs only a missed improvement; erring LOW lets a Latin-shaped rule pass sentence on
+#: a page written in something else, so the uncertainty is spent upward.
+_MIN_LATIN_SHARE = 0.7
 
 #: Above this share of regions crossing the page's horizontal centre, the page is not laid out in
 #: two columns and is left exactly as the detector reported it. A two-column page crosses the centre
@@ -147,9 +159,15 @@ def wordlike_ratio(text: str) -> float | None:
     Note what this does NOT catch: `ELTN` contains a vowel and reads as wordlike. Real garble is
     full of such tokens, which is why the score is only ever read in aggregate and never per token.
 
-    A CJK page scores `None` (no Latin tokens), so it is never judged by a rule written for
-    alphabets that have vowels — the failure mode that makes a bundled dictionary the wrong tool.
+    A CJK page scores `None`, so it is never judged by a rule written for alphabets that have vowels
+    — the failure mode that makes a bundled dictionary the wrong tool. **That protection is a SHARE
+    of the page, not the absence of Latin text**: scoring on whatever Latin happens to be present
+    let a garbled Chinese body carrying a clean English reference list read as perfectly healthy.
     """
+    # Is this rule even applicable to this page, before asking what it says about it?
+    alphabetic = sum(1 for character in text if character.isalpha())
+    if alphabetic and len(_LATIN_CHAR.findall(text)) < alphabetic * _MIN_LATIN_SHARE:
+        return None
     tokens = _WORD_TOKEN.findall(text)
     if len(tokens) < _MIN_SCORED_TOKENS:
         return None

@@ -1870,6 +1870,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **Tesseract is deliberately NOT given the same treatment**: it does its own page segmentation, columns
     included, and reports text already in reading order.
 
+    **One test drives REAL detector geometry** (`tests/fixtures/ocr_two_column_page.json`: 105 boxes
+    measured off a rendered two-column page, TEXT EXCLUDED so the fixture carries a layout and not
+    someone's prose). It asserts the STRUCTURE — the whole left column, then the whole right, then the
+    centred footer — rather than freezing an output list, and its gutter bounds come from the
+    measurement rather than from the code under test. It does not subsume the synthetic fixtures: that
+    page is a single band, so the band key and the vertical-centre choice are invisible in it.
+
     **The known cost, inspected rather than inferred**: a wide TABLE on a single-column page can be split
     down the middle, and two attention-visualisation figure pages measured -0.08/-0.06. Both were read
     directly — a flattened table and a scatter of figure labels are word soup under either ordering, which
@@ -1920,9 +1927,15 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     larger remaining gap and it is deliberate — a page with almost no letters gives the score
     nothing to work from, and guessing off five tokens is how a good page gets thrown away.
 
-    `None` for CJK is what keeps a Chinese page away from rules written for alphabets that have
-    vowels. **Only for a PURE CJK page**: a mixed page scores on its Latin minority alone, so a
-    garbled Chinese body carrying one clean English reference list reads as healthy.
+    **The CJK protection is a SHARE of the page (`_MIN_LATIN_SHARE`, 0.7), not the absence of Latin
+    text.** Scoring on whatever Latin happened to be present let a garbled Chinese body carrying a
+    clean English reference list score 1.000 — computed entirely from the readable minority — and
+    never be challenged. `wordlike_ratio` now asks whether the rule APPLIES before asking what it
+    says: below that share of the page's alphabetic characters it declines. Erring high costs only a
+    missed improvement, erring low lets a Latin-shaped rule pass sentence on a page written in
+    something else, so the uncertainty is spent upward. `_WORD_TOKEN` and `_LATIN_CHAR` are built
+    from ONE character-class constant, because the two must never disagree about what counts as
+    Latin — one decides what is scored, the other whether scoring applies.
 
     **`_WORD_TOKEN` covers Latin ACCENTS, not just ASCII, and that is load-bearing.** With
     `[A-Za-z]` a diacritic split every accented word into fragments — correct German scored 0.824
