@@ -52,6 +52,23 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **`parse_pdf` now reports what the second-opinion OCR cost, because that cost was measured only
+  after it shipped.** Asking what invariant 74 actually does to the 260-page scan that motivated it
+  gave: 61 pages suspected and OCR'd for comparison, 4 unscoreable, 187 untouched. So roughly a
+  quarter of that document pays a full OCR pass on top of reading its own text layer — and on the
+  API path that runs in the request's thread pool (invariant 34's accepted limitation), where a slow
+  ingestion is indistinguishable from a hang. One log line per document, only when a page paid,
+  naming how many paid and how many the payment changed. Same idiom as the trace sweep's line.
+
+  **Deliberately not capped.** A page with NO text layer already costs the identical OCR pass under
+  invariant 7, uncapped and uncontroversial, so bounding the speculative case more tightly than the
+  unavoidable one it sits beside would be backwards — and a cap would silently leave garbled text on
+  whichever pages fell past it. The honest answer to "why is this slow" is a sentence, not a limit.
+
+  It also settles a question left open when invariant 74 shipped: the short garbled strings quoted as
+  its trigger all score `None` on their own, so it was not obvious the feature fires on the document
+  they came from. It does — those strings are excerpts, and the full pages clear the token floor.
+
 - **Restored what the rulebook condensation dropped: enforcement links, one security statement, and
   four contract details.** The condensation moved incident narrative to this file, which was its
   stated intent and is right. What it also removed, unintentionally, was the layer of the rulebook

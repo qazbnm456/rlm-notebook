@@ -1924,4 +1924,17 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `PULSE REPETITION RATE` and `THE INCOMPLETE TORONTO FUNCTION`, because it reads the page as
     rendered rather than as the original scanner mis-fed it.
 
+    **The cost is REPORTED, not capped, and `parse_pdf` logs one line per document when any page paid
+    it.** Measured on the 260-page scan that motivated this: 61 pages suspected, 4 unscoreable, 187
+    untouched — so about a QUARTER of the document pays a full OCR pass on top of reading its own
+    text layer, and on the API path that runs in the request's thread pool (invariant 34). From
+    outside, a slow ingestion is indistinguishable from a hang, which is the whole reason for the
+    line. **Not capped, deliberately**: a page with NO text layer already costs the same OCR pass
+    under invariant 7 with no cap and no complaint, so a cap here would be stricter than the
+    unavoidable case it sits beside — and it would silently leave garbled text on whichever pages
+    fell past it, which is the "no silent caps" failure this project keeps writing down. **Known
+    gap**: `uvicorn` configures the root logger so a server operator sees this, while a CLI user
+    sees only the wait — plumbing the counts back through `ingest` to `cli.py` was judged
+    disproportionate, not overlooked.
+
 See `CHANGELOG.md` for the incidents, measurements and superseded drafts behind every invariant above.

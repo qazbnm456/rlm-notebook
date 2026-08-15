@@ -10,6 +10,9 @@ the pymupdf-replacement design record for the full account of why that had to go
 
 from __future__ import annotations
 
+import logging
+from typing import NamedTuple
+
 import pypdfium2 as pdfium
 
 from ..schema import Source, SourceBlock
@@ -50,7 +53,26 @@ _OCR_REPLACES_TEXT_BY = 0.10
 _OCR_MIN_TOKEN_SHARE = 0.25
 
 
-def _page_text(page) -> str:
+#: Second-opinion OCR is the one thing here that can make ingestion take minutes longer than the
+#: caller expects, and it is invisible from the outside — the text simply arrives late. Measured on
+#: a 260-page scan: 61 pages suspected, so roughly a quarter of the document paid a full OCR pass on
+#: top of reading its own text layer. `uvicorn` configures the root logger, so this surfaces in the
+#: server's normal output with no setup, the same way the trace sweep's line does (invariant 34).
+_log = logging.getLogger(__name__)
+
+
+class _PageText(NamedTuple):
+    """One page's text plus what it cost to decide on it — `parse_pdf` reports the totals so a slow
+    ingestion has a stated reason rather than looking like a hang."""
+
+    text: str
+    second_opinion: bool
+    """An OCR pass was spent weighing this page's text layer against a fresh reading."""
+    replaced: bool
+    """...and the fresh reading won."""
+
+
+def _page_text(page) -> _PageText:
     """One page's text: its own layer when that is usable, OCR when it is not (invariants 7, 74).
 
     Two different conditions reach OCR here. A page with NO text layer has nothing to compare and
@@ -60,18 +82,19 @@ def _page_text(page) -> str:
     suspicion is not evidence."""
     text = page.get_textpage().get_text_range().strip()
     if len(text) < _MIN_TEXT_CHARS:
-        return ocr_image(page.render(scale=_OCR_RENDER_SCALE).to_pil()).strip()
+        # No text layer: OCR is the only source, not a second opinion, and its cost is unavoidable.
+        return _PageText(ocr_image(page.render(scale=_OCR_RENDER_SCALE).to_pil()).strip(), False, False)
 
     layer_score = wordlike_ratio(text)
     if layer_score is None or layer_score >= _SUSPECT_TEXT_BELOW:
-        return text
+        return _PageText(text, False, False)
     ocr_text = ocr_image(page.render(scale=_OCR_RENDER_SCALE).to_pil()).strip()
     ocr_score = wordlike_ratio(ocr_text)
     if ocr_score is None or ocr_score < layer_score + _OCR_REPLACES_TEXT_BY:
-        return text
+        return _PageText(text, True, False)
     if scoreable_tokens(ocr_text) < scoreable_tokens(text) * _OCR_MIN_TOKEN_SHARE:
-        return text
-    return ocr_text
+        return _PageText(text, True, False)
+    return _PageText(ocr_text, True, True)
 
 
 def parse_pdf(path: str, source_id: str) -> Source:
@@ -81,10 +104,23 @@ def parse_pdf(path: str, source_id: str) -> Source:
     pdf = pdfium.PdfDocument(path)
     try:
         blocks: list[SourceBlock] = []
+        second_opinions = replaced = 0
         for page_number, page in enumerate(pdf, start=1):
-            text = _page_text(page)
-            if text:
-                blocks.append(SourceBlock(locator=f"page:{page_number}", text=text))
+            page_text = _page_text(page)
+            second_opinions += page_text.second_opinion
+            replaced += page_text.replaced
+            if page_text.text:
+                blocks.append(SourceBlock(locator=f"page:{page_number}", text=page_text.text))
+        if second_opinions:
+            # Only when it actually happened — an ordinary PDF must not log a line saying nothing.
+            _log.info(
+                "%s: %d of %d page(s) had a suspect text layer and were OCR'd for comparison, "
+                "%d replaced (invariant 74)",
+                path,
+                second_opinions,
+                len(pdf),
+                replaced,
+            )
     finally:
         pdf.close()
     if not blocks:

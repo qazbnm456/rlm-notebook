@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+
 import pytest
 from _pdf_fixtures import make_blank_pdf, make_image_only_pdf, make_text_pdf
 
@@ -157,6 +159,45 @@ def test_parse_pdf_never_ocrs_a_healthy_text_layer(tmp_path, monkeypatch):
     source = parse_pdf(str(pdf_path), "s1")
 
     assert "encoder" in source.blocks[0].text
+
+
+def test_parse_pdf_reports_what_the_second_opinions_cost(tmp_path, monkeypatch, caplog):
+    """A suspect page costs a full OCR pass, and from the outside that is indistinguishable from a
+    hang. One line per document, only when it happened, naming how many pages paid and how many the
+    payment changed."""
+    pdf_path = tmp_path / "garbled.pdf"
+    make_text_pdf(pdf_path, [_GARBLED, _GARBLED])
+    recovered = "The incomplete Toronto function and its use in radar range calculation"
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: recovered)
+
+    with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
+        parse_pdf(str(pdf_path), "s1")
+
+    assert "2 of 2 page(s) had a suspect text layer" in caplog.text
+    assert "2 replaced" in caplog.text
+
+
+def test_parse_pdf_says_nothing_about_an_ordinary_document(tmp_path, caplog):
+    """The line is evidence that something unusual happened, so a healthy PDF must not emit it."""
+    pdf_path = tmp_path / "fine.pdf"
+    make_text_pdf(pdf_path, ["The encoder is composed of a stack of identical layers."])
+
+    with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
+        parse_pdf(str(pdf_path), "s1")
+
+    assert caplog.text == ""
+
+
+def test_parse_pdf_does_not_count_a_page_with_no_text_layer_as_a_second_opinion(tmp_path, caplog):
+    """OCR on a textless page is the only source of text, not a speculative second reading — its
+    cost is unavoidable and counting it would make the report meaningless."""
+    scanned_pdf = tmp_path / "scanned.pdf"
+    make_image_only_pdf(scanned_pdf, "Apples are red or green.")
+
+    with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
+        parse_pdf(str(scanned_pdf), "s1")
+
+    assert caplog.text == ""
 
 
 def test_parse_pdf_raises_when_every_page_is_empty(tmp_path):
