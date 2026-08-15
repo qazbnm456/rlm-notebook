@@ -132,9 +132,27 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
    **A deliberately simpler OCR-need heuristic than `pymupdf4llm`'s**: a plain
    "extracted text below a small threshold" check does NOT detect a GARBLED-but-present text layer,
-   only a missing one. A bad-character-ratio heuristic is a later, independently-mergeable
-   follow-up. **`tests/_pdf_fixtures.py` builds test PDFs with `reportlab`, a `dev`-only
+   only a missing one. **That gap is now closed by invariant 74** — and NOT by the
+   bad-character-ratio heuristic this line used to promise, which measurement showed cannot work
+   alone. **`tests/_pdf_fixtures.py` builds test PDFs with `reportlab`, a `dev`-only
    dependency** — never a runtime dependency of the shipped package.
+
+   **CJK is covered by the DEFAULT backend and needs no second model.** RapidOCR ships
+   `ch_PP-OCRv4`, which is Chinese-native. Measured on rendered text: Simplified 1.000 on a
+   paragraph and 20/21 per isolated character; Traditional 0.879-0.973 per paragraph and 16-17/21
+   isolated. PaddleOCR's `chinese_cht` recognition model was fetched, wired in through RapidOCR's
+   `rec_model_path`/`rec_keys_path` seam and measured head-to-head: a WASH (mean 0.929 against
+   0.922, winning two cases, losing three, tying one), so it is not worth 11MB, a doubled OCR pass
+   and a third-party conversion's provenance. Do not re-add it without a measurement that beats
+   this one.
+
+   **The trap that makes any such measurement worthless**: `PIL.ImageFont.truetype(path, size)`
+   loads face index 0 of a `.ttc` COLLECTION, and index 0 of macOS `Songti.ttc` is Songti **SC**,
+   which silently renders NOTHING for Traditional-only glyphs. A first pass through this scored
+   Traditional at 0.589 and 0/21 and read as a total failure of the backend; it was measuring the
+   font. **Render the fixture and LOOK at it before believing any OCR number** — the same
+   render-and-look step that separated a single-column monograph from the two-column journal its
+   name implied (invariant 73).
 
 8. **`corpus.py` enforces a size cap on the assembled blob and fails loudly, not silently, past
    it.** The single-blob-as-REPL-variable design has a real memory ceiling in the pyodide/deno

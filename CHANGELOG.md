@@ -52,6 +52,36 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **Measured the CJK OCR coverage, and rejected a Traditional Chinese recognition model as a
+  wash.** No code changed; this is the evidence, and the reason not to do it again.
+
+  The default backend already handles both scripts. RapidOCR ships `ch_PP-OCRv4`, which is
+  Chinese-native: Simplified measured 1.000 on a paragraph and 20/21 per isolated character,
+  Traditional 0.879-0.973 per paragraph and 16-17/21 isolated (two fonts, Songti TC and Heiti TC).
+  Invariant 73's reordering is language-agnostic and helps Chinese exactly as much as English —
+  a two-column Simplified layout went 0.646 -> 1.000 — while a single-column CJK page crosses the
+  centre on every line and is left untouched.
+
+  PaddleOCR's `chinese_cht_PP-OCRv3` recognition model was then fetched with the official
+  `chinese_cht_dict.txt` (8421 characters, covering every character that had failed) and wired in
+  through RapidOCR's `rec_model_path`/`rec_keys_path` seam — which exists precisely because the
+  bundled models carry their dictionary in ONNX metadata while an external file is also accepted.
+  Head to head over six cases it was a wash: mean 0.929 against 0.922, winning two, losing three,
+  tying one. Not worth an 11MB model, a doubled OCR pass on every CJK page, and the provenance of
+  a third-party conversion (RapidOCR publishes no `chinese_cht` ONNX of its own; only japan, korean
+  and english).
+
+  **The trap, recorded because it inverted the conclusion twice.** `PIL.ImageFont.truetype(path,
+  size)` loads face index 0 of a `.ttc` COLLECTION, and index 0 of macOS `Songti.ttc` is Songti
+  **SC** — which silently renders nothing at all for Traditional-only glyphs. The first pass
+  scored Traditional at 0.589 with 0/21 isolated characters, which read as the backend having no
+  Traditional support, and produced two further false findings on top: that swapping in the
+  `chinese_cht` model changed nothing (it was the *detector* finding no ink, not the recogniser
+  lacking the character), and that invariant 73's reordering compounded the damage (the blank gaps
+  fragmented each line into pieces the geometry then mistook for two columns). Rendering the
+  fixture to a PNG and looking at it showed blank space where the characters should be. Every one
+  of those findings evaporated with a font that has the glyphs.
+
 - **A garbled-but-present text layer is now caught, by comparing against OCR rather than by
   trusting a threshold (invariant 74).** Invariant 7 had recorded "a bad-character-ratio heuristic"
   as the follow-up for this gap. The heuristic does not work on its own, and measuring is what
