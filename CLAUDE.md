@@ -1764,9 +1764,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     - **A page is left EXACTLY as detected unless it looks two-column** — above `_MAX_SPANNING_FRACTION`
       (0.15) of regions crossing the content's horizontal centre, nothing is touched. A two-column page
       crosses the centre only on what spans the measure (a banner heading, a caption, a centred page
-      number); a single-column page crosses it on nearly every body line. The sample is two documents, so
-      the threshold is set on the SAFE side on purpose: too low merely declines to improve a page, too high
-      reorders one that was already right.
+      number); a single-column page crosses it on nearly every body line. Too low a value merely declines
+      to improve a page, too high reorders one that was already right, so it is set on the SAFE side.
+      **The threshold was calibrated on rendered digital PDFs and then checked against the population it
+      actually serves** — only a page with NO text layer reaches OCR — and it transfers: a real
+      two-column scan (Physical Review Letters, 1958) measured 0.01-0.05 per page, the same band as the
+      clean renders, and every one of its 16 pages was reordered. Controlled skew of 0.25-2.0 degrees held
+      it at 0.00-0.08, so the drift a scanner introduces does not reach the threshold.
     - **A centre-crossing region is a band BOUNDARY, never a veto.** The first draft distrusted any band
       holding a centre-crosser, and a real two-column page's single crossing region — the page number
       centred in its footer — cost the whole page its column order. Boundaries cut the page into bands and
@@ -1787,6 +1791,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     down the middle, and two attention-visualisation figure pages measured -0.08/-0.06. Both were read
     directly — a flattened table and a scatter of figure labels are word soup under either ordering, which
     is why that cost is accepted against a +0.331 gain on two-column prose.
+
+    **THREE columns are out of scope and decline themselves.** A three-column scan (Scientific American
+    Supplement, 1890) puts the middle column across the centre, so it crosses on nearly every line and the
+    page is left alone — the same arithmetic that recognises a single-column page, not a case anyone had to
+    special-case. Do not "extend" this to N columns without measuring: the guard is what makes an
+    unsupported layout safe, and a generalisation that removes it trades a decline for a corruption.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See

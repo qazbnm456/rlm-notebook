@@ -52,6 +52,40 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **Validated the OCR reading-order fix on real scans, which is the only population it serves.**
+  Everything the fix was originally measured on was a rendered DIGITAL PDF — but only a page with
+  no text layer reaches OCR at all, so the whole calibration had been done on a proxy for the
+  target rather than the target. Skew was the specific worry: a scan rotated a fraction of a degree
+  widens every line's bounding quad and drifts its vertical centre, and those are exactly the two
+  numbers the ordering keys on.
+
+  **It transfers.** Physical Review Letters, December 1958, a genuine two-column scan (with the
+  facing page bleeding into the right margin, as scans do): 16 pages, **0.329 -> 0.509**, the split
+  applied on every one of them, spanning fractions 0.01-0.05 — the same band the clean renders
+  produced. The absolute numbers sit lower than the digital measurements because the reference is
+  Abbyy's OCR of degraded 1958 print, so two OCR engines disagree at the character level no matter
+  what the ordering does; the delta is the part that means anything. One page moved -0.005.
+
+  **Skew was then isolated rather than left confounded** with sensor noise, old typography and the
+  reference OCR's own errors: rotating a clean two-column render by 0.25, 0.5, 1.0 and 2.0 degrees
+  held the spanning fraction at 0.00-0.08 and the split fired at every angle. Two degrees is well
+  past what a scanner introduces, so the mechanism that prompted this check is not a risk in the
+  range that occurs.
+
+  **The first sample was wrong and the negative results are worth keeping.** Three other real scans
+  (an IRE monograph, Scientific American Supplement 1890, a declassified typescript) all measured
+  +0.000, which read as "inert on real scans" until the pages were actually looked at: the monograph
+  is single-column, the typescript is single-column, and the 1890 magazine is THREE-column. Leaving
+  all three untouched is the correct behaviour — a three-column page puts its middle column across
+  the centre and so declines itself by the same arithmetic that recognises a single-column page. The
+  reading was assumed from the journal's name; rendering one page to an image settled it in seconds.
+
+  **Noted in passing, and now evidenced rather than theoretical**: that IRE scan's own embedded text
+  layer is garbage on some pages (`'‘ \r\n“ i \r\nsi - a \r\nal 2 yt 7 wo'`). `_MIN_TEXT_CHARS = 1`
+  sees characters, declines to run OCR, and that string is what would reach the corpus — the
+  garbled-but-present text layer invariant 7 records as an open gap, in a document anyone could
+  ingest today.
+
 - **Rejected: `PaddlePaddle/PicoDet-S_layout_3cls` as a shipped default.** Evaluated after the
   OCR reading-order defect above was suspected, since a layout model is the textbook answer to it.
   Licensing was NOT the problem — Apache-2.0 on the model card and in the Hugging Face repo
