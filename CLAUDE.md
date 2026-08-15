@@ -354,7 +354,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `asyncio.to_thread` specifically because `EdgeTTSProvider.synthesize()` internally calls
     `asyncio.run(...)`, which raises if invoked from a running event loop. **Accepted limitation**:
     by the time synthesis begins, `_run_isolated`'s `finally` has cleared this notebook's
-    `_ACTIVE_RUNS` entry, so a stuck synthesis call has no `killpg`-equivalent to reach it. The
+    `_ACTIVE_RUNS` entry, so a stuck synthesis call has no `killpg`-equivalent to reach it.
+
     Synthesis writes through a temp file whose `finally` covers BOTH the success and the
     synthesis-FAILURE path — the `try` has to start before `synthesize()`, or a `TTSError` raised
     from inside it leaks the file. **`↓ Download` slugs its filename from the (model-authored)
@@ -365,7 +366,7 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
     uniform with every other endpoint.
 
-    **The live reasoning-trace stream rests on four rules:**
+    **The live reasoning-trace stream rests on five rules:**
 
     - **The client picks the run id, never the server** (`RunOptions.run_id`, a shared optional body
       field on `ask`/`guide`/`audio`), so the caller can open `GET .../runs/{run_id}/stream` before
@@ -677,8 +678,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **It is LAZY**: `app.js`'s `ensureTitle()` is called from actions that ALREADY run a model
     (generating an overview, asking, opening a Studio tab, generating a podcast), never from
     ingestion (pinned by `test_web_assets.py::test_titling_never_fires_from_adding_a_source`, which
-    slices `app.js` and also asserts the CALL COUNT — so a fifth model-running action has to touch
-    it), because pasting a link should not spend a model call naming something nobody has
+    slices `app.js` around the add-source path and asserts `suggestTitle(` is absent from it). Its
+    `ensureTitle();` count is a FLOOR (`>= 4`), so it catches a call site being deleted and NOT a
+    fifth action forgetting to add one — the useful half is the slice. Lazy, because pasting a link
+    should not spend a model call naming something nobody has
     started working on. The consequence — a notebook with sources and no title — is why
     `derived_title` exists (invariant 53).
 
@@ -1306,10 +1309,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     Every string here came out of a model that has been reading source content an attacker may have
     written (invariant 6); one missed `esc()` in a string-building renderer is an XSS sink, and building
     nodes removes the failure mode instead of guarding it.
-    **`test_the_markdown_renderer_builds_nodes_rather_than_markup` pins it**, and its coverage floor is
-    part of the rule: mutation testing got THREE navigable links past the test's first version —
-    `setAttribute("href", …)`, a template-literal ``createElement(`a`)``, and a click handler assigning
-    `window.location`. A future widening must still catch all three.
+    **`test_the_markdown_renderer_builds_nodes_rather_than_markup` pins the node-building rule.** The
+    NAVIGABLE-LINK rule below is a different test with a different sink list
+    (`test_the_markdown_renderer_never_creates_a_navigable_link`), and its coverage floor is part of
+    that rule: mutation testing got THREE links past its first version — `setAttribute("href", …)`, a
+    template-literal ``createElement(`a`)``, and a click handler assigning `window.location`. A future
+    widening must still catch all three. Do not merge the two in your head: widening the wrong one
+    leaves the XSS guard exactly as it was.
 
     **A `[label](url)` renders its label with the URL revealed on hover and COPIED on click, never an
     `<a href>`.** Invariant 1 refuses to let the MODEL reach a URL because a prompt-injected source could
@@ -1969,7 +1975,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **The cost is REPORTED, not capped, and `parse_pdf` logs one line per document when any page paid
     it.** Measured on the 260-page scan that motivated this: 61 pages suspected, 4 unscoreable, 187
     untouched — so about a QUARTER of the document pays a full OCR pass on top of reading its own
-    text layer, and on the API path that runs in the request's thread pool (invariant 34). From
+    text layer, and on the API path that runs in the request's thread pool (invariant 34). (The three
+    figures cover the pages that HAD a text layer; the remaining 8 had none and took invariant 7's
+    unavoidable path.) From
     outside, a slow ingestion is indistinguishable from a hang, which is the whole reason for the
     line. **Not capped, deliberately**: a page with NO text layer already costs the same OCR pass
     under invariant 7 with no cap and no complaint, so a cap here would be stricter than the

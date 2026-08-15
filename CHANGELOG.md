@@ -52,6 +52,45 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **A third review round, this time over the restorations themselves; six defects fixed.** Restored
+  prose is the dangerous kind, because it reads as authoritative while nobody has re-checked it
+  against the code. Of 26 claims put back by the two restoration commits, four were wrong.
+
+  **The worst pointed a maintainer at the wrong file.** The restored coverage floor — mutation
+  testing once got `setAttribute("href")`, a template-literal `` createElement(`a`) `` and a
+  `window.location` assignment past the test — was attributed to
+  `test_the_markdown_renderer_builds_nodes_rather_than_markup`. That test checks
+  `innerHTML`/`outerHTML`/`insertAdjacentHTML`/`document.write` and would fail on none of the three.
+  The floor belongs to `test_the_markdown_renderer_never_creates_a_navigable_link`, which is a
+  different test with a different sink list. Someone widening an XSS guard would have widened a file
+  that does not have one. The two are now named separately with an explicit "do not merge these in
+  your head".
+
+  **One overstated a guarantee.** The lazy-titling tripwire's `ensureTitle();` count is a FLOOR
+  (`>= 4`), so it catches a call site being DELETED, not a fifth model-running action forgetting to
+  add one. The restored sentence claimed the latter. The useful half is the slice assertion, and the
+  text now says which half does what.
+
+  **Two were mechanical and both from the restore itself**: a "rests on four rules" lead-in left
+  standing over five bullets after one was appended, and an insertion that landed mid-sentence and
+  orphaned a `The`.
+
+  **The substantive code gap: the log's headline number was untested for the case it exists to
+  explain.** Gating it on `replaced` instead of `second_opinions` survived every test — and that
+  mutant silences the line for exactly the majority case in the 260-page measurement, where most
+  suspected pages are NOT replaced. The logging test also made all four quantities equal (two pages,
+  two suspected, two replaced), so swapping any two in the format string passed. Now: four pages,
+  two suspected, one replaced, one blank — four different numbers, with a second test covering
+  "suspected but nothing replaced". Getting the blank page to matter took two attempts: the
+  monkeypatched OCR stub was handing text to a page that has none, so `len(blocks)` silently equalled
+  `len(pdf)` again and the mutant lived through the first fix.
+
+  Also: both empty-log assertions are scoped to this module's logger rather than to all of
+  `caplog.text`, and the real-geometry fixture's self-disclaimer now names all three things it cannot
+  see (its single centre-crosser is the last detection, so the spanning branch is invisible in it
+  too) alongside the one thing only it can — `_order_band`'s within-column sort key, which no
+  hand-built fixture reproduces.
+
 - **Closed the mixed-script scoring hole, and made one measurement reproducible in CI.** Both were
   named as open when the OCR work was reviewed; neither had been acted on.
 

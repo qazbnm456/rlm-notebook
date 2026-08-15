@@ -166,15 +166,53 @@ def test_parse_pdf_reports_what_the_second_opinions_cost(tmp_path, monkeypatch, 
     hang. One line per document, only when it happened, naming how many pages paid and how many the
     payment changed."""
     pdf_path = tmp_path / "garbled.pdf"
-    make_text_pdf(pdf_path, [_GARBLED, _GARBLED])
+    # Three pages, two of them suspect, one of those replaced — four DIFFERENT numbers, so swapping
+    # any two of them in the format string fails. Equal counts made the first version unable to tell
+    # "pages" from "suspected" from "replaced" (the same reasoning invariant 44 records for offsets).
+    # A BLANK page too, so `len(pdf)` and `len(blocks)` differ: the line counts the document's
+    # pages, not the ones that yielded text, and swapping them would misreport every scan that has
+    # an empty leaf in it.
+    healthy = "The encoder is composed of a stack of identical layers in the usual way"
+    make_text_pdf(pdf_path, [_GARBLED, _GARBLED, healthy, ""])
     recovered = "The incomplete Toronto function and its use in radar range calculation"
-    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: recovered)
+    calls = {"n": 0}
+
+    def _ocr_once(image):
+        """Wins on the first suspect page, loses on the second, and finds nothing on the blank one —
+        so `pages`, `suspected` and `replaced` are three different numbers. The blank page reaches
+        OCR through the NO-text-layer arm and must come back empty, or the stub hands it text a real
+        OCR pass would never find and `len(blocks)` silently equals `len(pdf)` again."""
+        calls["n"] += 1
+        if calls["n"] == 1:
+            return recovered
+        if calls["n"] == 2:
+            return "QQR MMPF ZXCV KLPN WRTB VVGH JJKD PPLM"
+        return ""
+
+    monkeypatch.setattr(pdf_module, "ocr_image", _ocr_once)
 
     with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
         parse_pdf(str(pdf_path), "s1")
 
-    assert "2 of 2 page(s) had a suspect text layer" in caplog.text
-    assert "2 replaced" in caplog.text
+    assert "2 of 4 page(s) had a suspect text layer" in caplog.text
+    assert "1 replaced" in caplog.text
+
+
+def test_parse_pdf_reports_a_second_opinion_even_when_nothing_was_replaced(tmp_path, monkeypatch, caplog):
+    """The line answers "why was that slow", so it must fire on the case that dominates a real
+    document: pages that PAID for an OCR pass and kept their own text anyway. On the 260-page scan
+    this feature was built for, most of the 61 suspected pages were not replaced — gating the log on
+    `replaced` would silence it exactly there."""
+    pdf_path = tmp_path / "garbled.pdf"
+    make_text_pdf(pdf_path, [_GARBLED])
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: "QQR MMPF ZXCV KLPN WRTB VVGH JJKD")
+
+    with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
+        source = parse_pdf(str(pdf_path), "s1")
+
+    assert "ELTN" in source.blocks[0].text, "precondition: the layer must have been KEPT"
+    assert "1 of 1 page(s) had a suspect text layer" in caplog.text
+    assert "0 replaced" in caplog.text
 
 
 def test_parse_pdf_says_nothing_about_an_ordinary_document(tmp_path, caplog):
@@ -185,7 +223,9 @@ def test_parse_pdf_says_nothing_about_an_ordinary_document(tmp_path, caplog):
     with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
         parse_pdf(str(pdf_path), "s1")
 
-    assert caplog.text == ""
+    # Scoped to THIS module's logger: `caplog.text` collects every logger, so an unrelated
+    # warning from the OCR stack would fail this for the wrong reason.
+    assert [r for r in caplog.records if r.name == pdf_module.__name__] == []
 
 
 def test_parse_pdf_does_not_count_a_page_with_no_text_layer_as_a_second_opinion(tmp_path, caplog):
@@ -197,7 +237,9 @@ def test_parse_pdf_does_not_count_a_page_with_no_text_layer_as_a_second_opinion(
     with caplog.at_level(logging.INFO, logger=pdf_module.__name__):
         parse_pdf(str(scanned_pdf), "s1")
 
-    assert caplog.text == ""
+    # Scoped to THIS module's logger: `caplog.text` collects every logger, so an unrelated
+    # warning from the OCR stack would fail this for the wrong reason.
+    assert [r for r in caplog.records if r.name == pdf_module.__name__] == []
 
 
 def test_parse_pdf_raises_when_every_page_is_empty(tmp_path):

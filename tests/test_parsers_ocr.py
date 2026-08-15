@@ -190,11 +190,14 @@ def test_reading_order_on_a_real_two_column_page():
     gutter bounds come from the fixture, read off the measurement rather than computed by the code
     under test.
 
-    What it adds, and what it does not: it is the only evidence here that the algorithm produces the
+    What it adds, and what it does not. It is the only evidence here that the algorithm produces the
     right SHAPE on output a real detector really emitted — ragged edges, a stray footer, boxes that
-    do not line up. It does NOT subsume the synthetic fixtures. This page is a single band, so the
-    band-assignment key and the vertical-centre choice are unobservable in it (mutating either leaves
-    this test green); those are pinned above, where a fixture can be built to expose them."""
+    do not line up — and it is the ONLY test that kills `_order_band`'s within-column sort key, since
+    the left column's detection order matches neither its x order nor its vertical order, which no
+    hand-built fixture reproduces. It does not subsume the synthetic ones: this page is a single band
+    whose only centre-crosser is the LAST detection, so the band-assignment key, the vertical-centre
+    choice and the spanning special case are all invisible in it (mutating any of the three leaves
+    this test green). Those are pinned above, where a fixture can be built to expose them."""
     fixture = json.loads(
         (Path(__file__).parent / "fixtures" / "ocr_two_column_page.json").read_text()
     )
