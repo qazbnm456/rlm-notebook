@@ -13,13 +13,24 @@ the detector already reported.
 from __future__ import annotations
 
 import re
+import unicodedata
 from collections.abc import Sequence
 
-#: Alphabetic runs of at least two letters. Digits are excluded rather than tolerated: a page of
-#: numeric chart labels says nothing about whether its text layer decoded correctly, and letting
-#: digits into the denominator would drag every table's score toward whatever its letters did. A
-#: one-letter token carries no shape to judge either.
-_WORD_TOKEN = re.compile(r"[A-Za-z]{2,}")
+#: Runs of at least two LATIN letters, accents included. Digits are excluded rather than tolerated:
+#: a page of numeric chart labels says nothing about whether its text layer decoded correctly, and
+#: letting digits into the denominator would drag every table's score toward whatever its letters
+#: did. A one-letter token carries no shape to judge either.
+#:
+#: The ranges are Latin-1 Supplement, Latin Extended-A/B and Latin Extended Additional (where
+#: Vietnamese lives), with the two mathematical operators sitting inside Latin-1 (× ÷) cut out.
+#: **Plain `[A-Za-z]` was a bug, not a simplification**: a diacritic split every accented word into
+#: ASCII fragments, so correctly-decoded Vietnamese scored 0.22 and German 0.90 — and stripping the
+#: accents, which is exactly what a weak OCR does, RAISED both to 1.00. A degraded second opinion
+#: could therefore beat a perfect text layer, inverting the one rule `pdf._page_text` exists to
+#: enforce. Deliberately NOT `\w` or a general Unicode-letter class: CJK characters are letters
+#: too, and matching them would end the `None` that keeps a Chinese page away from rules about
+#: vowels.
+_WORD_TOKEN = re.compile(r"[A-Za-zÀ-ÖØ-öø-ɏḀ-ỿ]{2,}")
 
 #: Above this share of regions crossing the page's horizontal centre, the page is not laid out in
 #: two columns and is left exactly as the detector reported it. A two-column page crosses the centre
@@ -56,8 +67,9 @@ def _order_band(band: list[_Region], centre: float) -> list[str]:
         # zero-width region sitting exactly ON the centre satisfies both tests and would otherwise
         # be emitted into both columns.
         (left if region[1] <= centre else right).append(region)
-    if not left or not right:
-        return [region[4] for region in left + right]
+    # No "is either side empty" special case is needed: with one side empty the concatenation IS
+    # the band's own order, so the two-column reading and the leave-it-alone reading coincide. An
+    # earlier draft branched on it, which read as a rule and was dead code.
     return [region[4] for region in left] + [region[4] for region in right]
 
 
@@ -108,6 +120,13 @@ _MIN_SCORED_TOKENS = 8
 _VOWELS = frozenset("aeiouyAEIOUY")
 
 
+def scoreable_tokens(text: str) -> int:
+    """How many tokens `wordlike_ratio` would judge — i.e. how much of this text the score is
+    actually speaking for. A ratio carries no volume, so a caller comparing two texts needs this
+    separately to tell "better" from "shorter"."""
+    return len(_WORD_TOKEN.findall(text))
+
+
 def wordlike_ratio(text: str) -> float | None:
     """What share of `text`'s alphabetic tokens have the SHAPE of real words (invariant 74)?
     `None` when there are too few tokens to judge — which is a real answer, not a failure.
@@ -117,21 +136,30 @@ def wordlike_ratio(text: str) -> float | None:
     ONE language, quietly condemning every page this project is meant to read in another. Two
     shape rules carry it instead, both drawn from how a mis-decoded text layer actually reads:
 
-    * **no vowel at all** — `ELTN`, `CNC`, `TTT`, the residue of a chart's gridlines;
+    * **no vowel at all** — `CNC`, `TTT`, `HDS`, the residue of a chart's gridlines. Accents are
+      folded away first, so `đề` and `Größere` are judged on `de` and `Grossere`;
     * **case flipping mid-token** — `BEANseGE`, which no typography produces and glyph-level
       mis-mapping produces constantly. An all-caps token is exempt, since headings are real.
+
+    Note what this does NOT catch: `ELTN` contains a vowel and reads as wordlike. Real garble is
+    full of such tokens, which is why the score is only ever read in aggregate and never per token.
 
     A CJK page scores `None` (no Latin tokens), so it is never judged by a rule written for
     alphabets that have vowels — the failure mode that makes a bundled dictionary the wrong tool.
     """
-    tokens = [t for t in _WORD_TOKEN.findall(text)]
+    tokens = _WORD_TOKEN.findall(text)
     if len(tokens) < _MIN_SCORED_TOKENS:
         return None
     return sum(1 for token in tokens if _is_wordlike(token)) / len(tokens)
 
 
 def _is_wordlike(token: str) -> bool:
-    if not _VOWELS & set(token):
+    # Fold accents before the vowel test, or every accented vowel reads as "no vowel here" and the
+    # rule condemns the languages that use them. NFD splits `ề` into `e` + a combining mark; letters
+    # that do not decompose (`ß`, `đ`) simply stay put, which is fine — their words carry other
+    # vowels. Case is preserved by the normalisation, so the second rule still sees the original.
+    folded = unicodedata.normalize("NFD", token)
+    if not _VOWELS & {c for c in folded if not unicodedata.combining(c)}:
         return False
     # `token[1:].lower() != token[1:]` means an uppercase letter appears after the first character.
     # Ordinary prose does that only in an all-caps token, so anything else is a mis-decoded glyph.
@@ -147,14 +175,20 @@ def _try_rapidocr(image) -> str | None:
         import numpy as np
 
         result, _ = RapidOCR()(np.array(image.convert("RGB")))
+        if not result:
+            return None
+        # INSIDE the try, deliberately. `reading_order` reads coordinates out of whatever the
+        # detector returned, so it is exposed to the result's SHAPE — a future rapidocr changing
+        # its box format or row arity (the pin is `>=1.3`, with no upper bound) would otherwise
+        # raise straight through `ocr_image`, whose docstring promises it never does. Verified: a
+        # `None` box, a flat xyxy box, a 2-tuple row and a non-numeric coordinate all escaped when
+        # this line sat outside.
+        text = reading_order([(box, text) for box, text, _ in result])
     except Exception:  # noqa: BLE001 — an OCR engine choking on an unusual rendered page must
         # fall through to the next backend (or to "no OCR text"), never take down ingestion of an
         # otherwise-fine multi-page PDF. Same "degrade, don't crash, at an extraction boundary"
         # posture this project's sibling family already uses at its own sandbox boundaries.
         return None
-    if not result:
-        return None
-    text = reading_order([(box, text) for box, text, _ in result])
     return text or None
 
 

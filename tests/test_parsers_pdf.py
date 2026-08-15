@@ -3,8 +3,9 @@ from __future__ import annotations
 import pytest
 from _pdf_fixtures import make_blank_pdf, make_image_only_pdf, make_text_pdf
 
+from rlm_notebook.parsers import _ocr
 from rlm_notebook.parsers import pdf as pdf_module
-from rlm_notebook.parsers.pdf import parse_pdf
+from rlm_notebook.parsers.pdf import _OCR_REPLACES_TEXT_BY, parse_pdf
 
 #: A text layer that reads like mis-decoded glyphs — no vowels, case flipping mid-token. Taken from
 #: the shape of a real one (an IRE scan whose chart pages decoded to `UN ELTN NII PIN COCO`).
@@ -53,14 +54,59 @@ def test_parse_pdf_replaces_a_garbled_text_layer_when_ocr_is_clearly_better(tmp_
 
 def test_parse_pdf_keeps_a_garbled_text_layer_when_ocr_is_no_better(tmp_path, monkeypatch):
     """A suspicion is not evidence. If OCR does not clearly beat the layer, the layer stands —
-    this is what makes a generous suspicion threshold cost only time, never quality."""
+    this is what makes a generous suspicion threshold cost only time, never quality.
+
+    The OCR fixture shares NO token with the layer, deliberately. A first version reused `ELTN` in
+    both and asserted on it, so the assertion held whichever text was returned: deleting the whole
+    comparison from `_page_text` left the suite green."""
     pdf_path = tmp_path / "garbled.pdf"
     make_text_pdf(pdf_path, [_GARBLED])
-    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: "NII CNC TTT ELTN PIN THT NBas HDS")
+    ocr = "QQR MMPF ZXCV KLPN WRTB VVGH JJKD PPLM"
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: ocr)
 
     source = parse_pdf(str(pdf_path), "s1")
 
+    assert source.blocks[0].text != ocr
     assert "ELTN" in source.blocks[0].text
+
+
+def test_parse_pdf_requires_the_margin_not_merely_a_higher_score(tmp_path, monkeypatch):
+    """`_OCR_REPLACES_TEXT_BY` pinned from both sides: beating the layer is not enough, beating it
+    by the margin is. A bare `>` once flipped a healthy page on a rounding-level difference."""
+    pdf_path = tmp_path / "garbled.pdf"
+    make_text_pdf(pdf_path, [_GARBLED])
+    layer_score = _ocr.wordlike_ratio(_GARBLED)
+
+    def _ocr_scoring(target: float) -> str:
+        """Alphabetic tokens, `target` of them wordlike — same token count as the layer, so only
+        the score decides."""
+        total = _ocr.scoreable_tokens(_GARBLED)
+        good = round(target * total)
+        return " ".join(["alpha"] * good + ["CNC"] * (total - good))
+
+    just_over = _ocr_scoring(layer_score + _OCR_REPLACES_TEXT_BY / 2)
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: just_over)
+    assert "ELTN" in parse_pdf(str(pdf_path), "s1").blocks[0].text
+
+    clears_it = _ocr_scoring(min(1.0, layer_score + _OCR_REPLACES_TEXT_BY * 2))
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: clears_it)
+    assert "ELTN" not in parse_pdf(str(pdf_path), "s1").blocks[0].text
+
+
+def test_parse_pdf_will_not_trade_a_page_of_prose_for_a_short_ocr_win(tmp_path, monkeypatch):
+    """Both scores are RATIOS. Without a volume term, a page carrying one garbled figure block is
+    replaced wholesale by an OCR pass that recovered only the caption."""
+    pdf_path = tmp_path / "mostly-prose.pdf"
+    prose = (
+        "The encoder is composed of a stack of identical layers and each layer has two sub-layers "
+        "which are applied in turn to every position of the input sequence in the usual way. "
+    )
+    make_text_pdf(pdf_path, [prose + _GARBLED])
+    monkeypatch.setattr(pdf_module, "ocr_image", lambda image: "Figure one shows the residual block")
+
+    source = parse_pdf(str(pdf_path), "s1")
+
+    assert "encoder" in source.blocks[0].text
 
 
 def test_parse_pdf_keeps_a_garbled_layer_when_ocr_cannot_be_scored(tmp_path, monkeypatch):

@@ -13,13 +13,13 @@ from __future__ import annotations
 import pypdfium2 as pdfium
 
 from ..schema import Source, SourceBlock
-from ._ocr import ocr_image, wordlike_ratio
+from ._ocr import ocr_image, scoreable_tokens, wordlike_ratio
 
-#: A page's own text layer below this many stripped characters is treated as needing OCR — a
-#: deliberately simpler heuristic than pymupdf4llm's former ML-based classifier (which also caught
-#: a GARBLED-but-present text layer, not just a missing one); this project's own scanned-PDF use
-#: case is a missing text layer, not a garbled one, so this trade is accepted, not silently assumed
-#: equivalent — see the design doc above.
+#: A page's own text layer below this many stripped characters has nothing to compare and goes
+#: straight to OCR. Literally 1, i.e. no text layer at all: this is the MISSING-layer test only.
+#: pymupdf4llm's former ML classifier also caught a GARBLED-but-present layer; `_page_text` handles
+#: that case separately now (invariant 74), and the two conditions stay distinct because one has no
+#: alternative to weigh and the other has two readings to choose between.
 _MIN_TEXT_CHARS = 1
 
 #: Scale factor for rendering a textless page to an image before OCR — 2x roughly matches
@@ -38,6 +38,16 @@ _SUSPECT_TEXT_BELOW = 0.85
 #: perfectly good page on a rounding-level difference in testing. Measured margins on genuinely
 #: mis-decoded pages were +0.20 and +0.27; the one page where the layer was fine lost by 0.06.
 _OCR_REPLACES_TEXT_BY = 0.10
+
+#: ...and it has to have READ a comparable amount of the page. Both scores are RATIOS with no
+#: volume term, so without this a page of prose carrying one garbled figure block could be replaced
+#: wholesale by an OCR pass that recovered only the caption — scoring 1.0 on nine words against 0.68
+#: on ninety-two. Measured token shares: the two pages a real scan genuinely needed replaced scored
+#: 0.39 and 0.45, a diagram page that must keep its layer scored 0.03, and the constructed
+#: prose-for-a-caption loss scored 0.10. **The separation is narrow and cannot be tightened**: a
+#: garbled layer fragments into MORE tokens than a clean OCR of the same page, so a high share is
+#: exactly what a true replacement does NOT look like.
+_OCR_MIN_TOKEN_SHARE = 0.25
 
 
 def _page_text(page) -> str:
@@ -58,6 +68,8 @@ def _page_text(page) -> str:
     ocr_text = ocr_image(page.render(scale=_OCR_RENDER_SCALE).to_pil()).strip()
     ocr_score = wordlike_ratio(ocr_text)
     if ocr_score is None or ocr_score < layer_score + _OCR_REPLACES_TEXT_BY:
+        return text
+    if scoreable_tokens(ocr_text) < scoreable_tokens(text) * _OCR_MIN_TOKEN_SHARE:
         return text
     return ocr_text
 

@@ -52,6 +52,64 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **An independent review of the OCR work found three real defects and a hollow test; all fixed.**
+  Every finding below was reproduced locally before being acted on.
+
+  **A correct text layer could be replaced by a WORSE OCR of itself, for accented Latin scripts.**
+  `_WORD_TOKEN` was `[A-Za-z]{2,}`, so a diacritic split every accented word into ASCII fragments
+  and the vowelless residue counted as garble: correct German scored 0.824 and correct Vietnamese
+  0.375, both under the 0.85 suspicion gate. Worse, stripping the accents — exactly what a weak OCR
+  does — raised both to 1.000, clearing the replacement margin. The metric REWARDED the degradation.
+  This was the same "a bundled dictionary would describe one language while condemning pages in
+  another" that the dictionary-free design exists to avoid, reintroduced through the regex, with
+  only CJK actually protected. The token class now spans Latin-1 Supplement, Latin Extended-A/B and
+  Latin Extended Additional, and the vowel test folds accents through NFD first. Deliberately not a
+  general Unicode-letter class: CJK characters are letters too, and matching them would end the
+  `None` that keeps a Chinese page away from rules about vowels.
+
+  **The replace decision was volume-blind.** Both sides are RATIOS with no length term, so a
+  484-character layer scoring 0.682 (four clean sentences plus a garbled figure block) was replaced
+  by a 59-character OCR result scoring 1.000 — a page of prose traded for a caption.
+  `_OCR_MIN_TOKEN_SHARE` (0.25) now requires the second opinion to have read a comparable amount of
+  the page. Calibrated on real pages: the two that genuinely needed replacing scored 0.39 and 0.45,
+  a diagram page that must keep its layer 0.03, the constructed loss 0.10.
+
+  **`ocr_image`'s documented "never raises" had become false.** `reading_order` reads coordinates
+  out of the detector's result and sat OUTSIDE `_try_rapidocr`'s try/except, so a `None` box, a flat
+  xyxy box, a two-element row or a non-numeric coordinate all escaped — verified, all four. The
+  earlier code touched only the text field, so this change widened the unguarded surface from row
+  arity to every coordinate value, against a dependency pinned `>=1.3` with no upper bound.
+
+  **The test named for invariant 74's headline rule did not test it.** Its OCR fixture contained
+  `ELTN`, the same token the assertion looked for in the layer, so the assertion held whichever text
+  came back: deleting the entire comparison from `_page_text` left the suite green, as did setting
+  the margin to zero. Fixed, and the margin is now pinned from both sides.
+
+  **Mutation testing drove the rest.** Of the surviving mutations the review reported, the two that
+  mattered are now killed: the band sort key and the top-edge-versus-centre choice. Both needed a
+  fixture with a centre-crossing region to be observable at all — inside one band the regions are
+  re-sorted into detection order anyway, which is why every earlier fixture left them alive.
+  Three survivors are ACCEPTED and stated rather than chased: centre versus bottom edge, and two
+  boundary flips (`>` to `>=` on the spanning guard, `<=` to `<` in the partition) that differ only
+  on exact equality. Writing tests for those would be contriving inputs to defend an arbitrary
+  choice.
+
+  **Overstated claims corrected rather than defended.** Invariant 7 said the garbled-layer gap was
+  "closed"; it is narrowed — a layer too garbled to yield eight Latin tokens still scores `None` and
+  is never challenged, which covers most of the short strings quoted as the trigger. The docstring
+  listed `ELTN` as an example of "no vowel at all" while the code scores it wordlike. `pdf.py`'s
+  comment still said this project's use case is a missing layer "not a garbled one" twelve lines
+  above the code that handles a garbled one. The "safe side" framing on `_MAX_SPANNING_FRACTION`,
+  the "unsupported layouts decline themselves" claim (true for odd column counts; a four-column page
+  passes the guard and is split down the middle) and "language-agnostic" (the split hardcodes
+  left-then-right, so a two-column RTL scan would be swapped) are recorded as limits.
+
+  **Not fixed, and worth naming**: the condensation in `15813c4` dropped the enforcement records
+  linking several live tripwire tests to the rules they pin, weakened invariant 52's statement that
+  the reasoning stream can quote ingested source text, and dropped a few contract details
+  (`synthesize`'s offsets being in seconds, the `rlmnb-podcast-length` key, the `corpus-navigation`
+  skill by name). That is a separate restoration pass over a commit this work did not author.
+
 - **Measured the CJK OCR coverage, and rejected a Traditional Chinese recognition model as a
   wash.** No code changed; this is the evidence, and the reason not to do it again.
 
@@ -151,7 +209,9 @@ questions with verifiable citations, and get a distilled research artifact out.
   layer is garbage on some pages (`'‘ \r\n“ i \r\nsi - a \r\nal 2 yt 7 wo'`). `_MIN_TEXT_CHARS = 1`
   sees characters, declines to run OCR, and that string is what would reach the corpus — the
   garbled-but-present text layer invariant 7 records as an open gap, in a document anyone could
-  ingest today.
+  ingest today. *(Later in this same section: invariant 74 narrows that gap but does not close it,
+  and this particular string is one it still misses — four Latin tokens is under the scoring floor,
+  so the layer is never challenged. The entry below states the limit.)*
 
 - **Rejected: `PaddlePaddle/PicoDet-S_layout_3cls` as a shipped default.** Evaluated after the
   OCR reading-order defect above was suspected, since a layout model is the textbook answer to it.

@@ -132,9 +132,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
    **A deliberately simpler OCR-need heuristic than `pymupdf4llm`'s**: a plain
    "extracted text below a small threshold" check does NOT detect a GARBLED-but-present text layer,
-   only a missing one. **That gap is now closed by invariant 74** — and NOT by the
+   only a missing one. **Invariant 74 NARROWS that gap; it does not close it** — and not by the
    bad-character-ratio heuristic this line used to promise, which measurement showed cannot work
-   alone. **`tests/_pdf_fixtures.py` builds test PDFs with `reportlab`, a `dev`-only
+   alone. A layer too garbled to yield eight Latin tokens still scores `None` and is never
+   challenged, which is most of the short strings the incident record quotes. **`tests/_pdf_fixtures.py` builds test PDFs with `reportlab`, a `dev`-only
    dependency** — never a runtime dependency of the shipped package.
 
    **CJK is covered by the DEFAULT backend and needs no second model.** RapidOCR ships
@@ -1846,11 +1847,36 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     often DOES contain vowels — `ELTN` scores as wordlike — so this works in aggregate and never
     per token.
 
-    **`None` is a real answer, not a failure.** Below `_MIN_SCORED_TOKENS` (8) there is nothing to
-    judge, and an unscoreable second opinion never displaces the first. This is what makes a CJK page
-    safe: it has no Latin tokens, scores `None`, and is never judged by rules written for alphabets
-    that have vowels. It is also the accepted LOSS — a pure diagram page OCRs to a few numeric
-    labels, scores `None`, and keeps its garbled layer even though the OCR was observed to be better.
+    **`None` is a real answer, not a failure, and it cuts BOTH ways.** Below `_MIN_SCORED_TOKENS`
+    (8) there is nothing to judge. An unscoreable SECOND opinion never displaces the first — the
+    accepted loss where a pure diagram page OCRs to a few numeric labels and keeps its garbled layer
+    even though the OCR was observed to be better. **And an unscoreable FIRST opinion is never
+    challenged at all**: a layer garbled down to four or five tokens spends no OCR and stands as it
+    is, which covers most of the short strings quoted as this invariant's own trigger. That is the
+    larger remaining gap and it is deliberate — a page with almost no letters gives the score
+    nothing to work from, and guessing off five tokens is how a good page gets thrown away.
+
+    `None` for CJK is what keeps a Chinese page away from rules written for alphabets that have
+    vowels. **Only for a PURE CJK page**: a mixed page scores on its Latin minority alone, so a
+    garbled Chinese body carrying one clean English reference list reads as healthy.
+
+    **`_WORD_TOKEN` covers Latin ACCENTS, not just ASCII, and that is load-bearing.** With
+    `[A-Za-z]` a diacritic split every accented word into fragments — correct German scored 0.824
+    and correct Vietnamese 0.375, both under the gate — and stripping the accents, which is exactly
+    what a weak OCR does, raised both to 1.000. The metric REWARDED the degradation, so a correct
+    text layer could be replaced by a worse OCR of itself: the precise inversion of the rule above,
+    and the same "condemning every page in another language" this invariant rejects a bundled
+    dictionary to avoid. It is deliberately not a general Unicode-letter class, because CJK
+    characters are letters too and matching them would end the `None` that protects them.
+
+    **Neither score carries VOLUME, so `_OCR_MIN_TOKEN_SHARE` (0.25) is a separate gate.** Two
+    ratios compare quality and say nothing about how much of the page each one read; without it a
+    page of prose carrying one garbled figure block is replaced wholesale by an OCR pass that
+    recovered only the caption. Measured: the two pages a real scan genuinely needed replaced scored
+    0.39 and 0.45, a diagram page that must keep its layer 0.03, a constructed prose-for-a-caption
+    loss 0.10. **The separation is narrow and cannot be tightened** — a garbled layer fragments into
+    MORE tokens than a clean OCR of the same page, so a high share is exactly what a true
+    replacement does not look like.
 
     **The trigger was real, not hypothetical**: an Internet Archive scan of a 1960 IRE monograph
     whose chart pages were scanned upside-down or mirrored, so its embedded OCR decoded to
