@@ -752,6 +752,11 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     required input surfaces only as an opaque `RLMTaskError` while an UNDECLARED extra kwarg is
     silently accepted — so a partial rollout fails silently in both directions.
 
+    **Everything above about what the MODEL does was verified live, on both paths, and could not have
+    been otherwise**: the offline tests drive a scripted LM and can demonstrate none of it (invariant 4's
+    residual-risk note applies with full force). Forced Chinese against English sources returned Chinese
+    prose with `s1`/`whole` untranslated, English quotes verbatim and every citation verified.
+
 40. **`tts.default_voices_for` maps a language to a voice, which is what let the podcast join
     invariant 39's language story.** Nothing here previously mapped language to voice: `voice_map`
     came straight from `RN_TTS_VOICE_HOST_A`/`_B` and `synthesize` spoke whatever it was handed. Any
@@ -787,7 +792,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `RN_MAX_UPLOAD_BYTES` is a straight DoS lever. **Moving a safety BOUND onto an unauthenticated
     page is the same mistake as moving a key there, just quieter.** `RN_BASE_URL` is the sharpest
     case: `config.setup` hands it to `configure` alongside `api_key`, so a writable base_url
-    exfiltrates the key on the next run without anyone ever reading it.
+    exfiltrates the key on the next run without anyone ever reading it — **it is not "just a URL",
+    and a later reader must not relax it on that basis.**
 
     **This is the API's first GLOBAL mutation** — every other mutator is scoped to a `notebook_id`;
     this one changes behaviour for notebooks the caller never named and persists it across restarts,
@@ -950,7 +956,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     were wrong, all from unverified sources; the rejected alternatives and why are in `CHANGELOG.md`.
 
 44. **The podcast transcript behaves like subtitles, and the timing comes from the PROVIDER rather
-    than from measuring the audio.** `TTSProvider.synthesize` returns each utterance's start offset;
+    than from measuring the audio.** `TTSProvider.synthesize` returns each utterance's start offset
+    IN SECONDS — the unit is the contract between every provider, `Podcast.offsets` and `app.js`'s
+    seek handler, so it is stated rather than inferred from a call site;
     every provider here already synthesizes utterance by utterance, so it knows them, and parsing MP3
     frame headers to recover a number the provider already reports would be a second, worse
     implementation.
@@ -1135,7 +1143,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     `instructions.CITATION_RULES` teaches it as the deliberate MIRROR of `quote`: `quote` is in the
     source's language, `answer_span` is in the model's. (NOT `VERBATIM_COORDINATES`, which does not
-    mention `answer_span` at all.)
+    mention `answer_span` at all.) Same residual-risk hedge as invariants 4 and 11 — whether the model
+    emits a usable span at all is a compliance claim, and the offline suite drives a scripted LM.
 
 50. **A source can be REMOVED now, which ended append-only id numbering — and the survivors are never
     renumbered.** `notebook.next_source_id` derives from the MAX id in use; `len(sources) + 1` was
@@ -1188,6 +1197,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     **`detail` is the model's own prose in the main case, and not ONLY that**: a `main_step` with no
     `reasoning` falls back to the step's CODE, and a `result` event carries its output dict's KEY NAMES.
+    **`detail` CAN therefore quote ingested source text** — the model's prose and the step's code both
+    routinely repeat what they just read — which is the same materially-different exposure invariant 29
+    records for the trace endpoints, on an API with no authentication (invariant 25). Do not read the
+    next sentence as a promise that no source text reaches this stream; it is narrower than that.
     The step's `output` is where whole corpus spans land and is deliberately NOT streamed; its SIZE is
     reported instead, which is the part that tells a reader whether a step did much. `_DETAIL_CHARS`
     bounds the rest, because this goes down an SSE stream once per step. The full text stays in the
@@ -1241,7 +1254,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     non-visible axis forces the other to `auto`), which is why both tab rows anchor their tips to the tab
     ROW rather than to a tab, in their EXPANDED state. The collapsed rail deliberately does not: it
     anchors to the button and opens LEFTWARD, safe only because `.col-studio.is-collapsed` sets
-    `overflow: visible`.
+    `overflow: visible`. **`.notebook-menu` is the other such ancestor** (`overflow-y: auto`), so the
+    picker's running-dot tip needed the same row treatment — worth naming because this is precisely
+    the case the test above CANNOT see, which makes this file its only record.
 
     **A drag threshold pair must not be inverted.** A two-state toggle driven by one continuous value is
     stable only while the OPEN threshold is at or above the CLOSE one; setting `STUDIO_EXPAND_AT` below
@@ -1262,6 +1277,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     Every string here came out of a model that has been reading source content an attacker may have
     written (invariant 6); one missed `esc()` in a string-building renderer is an XSS sink, and building
     nodes removes the failure mode instead of guarding it.
+    **`test_the_markdown_renderer_builds_nodes_rather_than_markup` pins it**, and its coverage floor is
+    part of the rule: mutation testing got THREE navigable links past the test's first version —
+    `setAttribute("href", …)`, a template-literal ``createElement(`a`)``, and a click handler assigning
+    `window.location`. A future widening must still catch all three.
 
     **A `[label](url)` renders its label with the URL revealed on hover and COPIED on click, never an
     `<a href>`.** Invariant 1 refuses to let the MODEL reach a URL because a prompt-injected source could
@@ -1298,8 +1317,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     context when it submits, so asking for two or three next questions in the same SUBMIT costs nothing;
     a separate `dspy.Predict` per turn would be a real call per answer for the same words. Deliberately
     NOT citation-grounded: a question is a prompt, not a claim, so invariant 5 has nothing to check. The
-    instruction still requires each be answerable from `sources` — prompt compliance, with the usual
-    hedge. Optional and defaulting to empty, so turns persisted before the field existed still load.
+    instruction still requires each be answerable from `sources` — a PROMPT-COMPLIANCE claim carrying the
+    same hedge as invariants 4 and 11, spelled out rather than referred to: the offline suite drives a
+    scripted LM whose turns are fixed dicts, so it can demonstrate none of it. Optional and defaulting to
+    empty, so turns persisted before the field existed still load.
 
     **The two labels are deliberately NOT unified**: the overview's row says "Start with" and a turn's
     says "Ask next", sharing one renderer (`starterQuestionRow`). The overview's appears before any
@@ -1451,7 +1472,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     matching. `_close_gap` is a replacement function on the marker match itself, so it can only ever edit
     the whitespace the marker sat between.
 
-    The prompt gained the rule as well. A display-layer strip is a NET, not a reason to stop asking.
+    The prompt gained the rule as well. A display-layer strip is a NET, not a reason to stop asking: the
+    same residual-risk hedge as invariants 4 and 11 applies to whether the model complies, and the net is
+    what makes non-compliance cost nothing.
 
 63. **The podcast has a LENGTH, chosen at generation time, and the tiers are numbers rather than
     adjectives.** `short` / `default` / `long` (about 3-5 / 8-12 / 18-25 minutes, 12-18 / 30-45 / 60-90
@@ -1474,7 +1497,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `{"len": "long"}` would otherwise return a `default` episode with nothing indicating the knob was
     ignored.
 
-    **The CHOICE is remembered in the browser (`localStorage`), deliberately not on the server.** It is a
+    **The CHOICE is remembered in the browser (`localStorage`, key `rlmnb-podcast-length`), deliberately
+    not on the server.** It is a
     per-reader habit, not a notebook property — one person who always wants `long` should not impose it on
     a shared notebook. This is the WHERE-IT-LIVES half of invariant 48's split, only that half: the length
     IS sent on every generate and DOES reach the prompt, because it changes what the model writes.
@@ -1491,8 +1515,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     is the second time a truncation could have been answered by raising `max_tokens` and the first time it
     should not have been: invariant 59's raise was correct because the PLANNER's reasoning did not fit, and
     this is an OUTPUT that should never have been one reply. **If a finished object will not comfortably
-    fit in one reply, it must not be written in one reply** (also `instructions.ACCUMULATE_LARGE_OUTPUTS`,
-    invariant 65).
+    fit in one reply, it must not be written in one reply** — recorded in the `corpus-navigation` skill
+    (named because it is one of exactly two shipped, and invariant 65's split decides what belongs in a
+    skill rather than a prompt), and as `instructions.ACCUMULATE_LARGE_OUTPUTS` (invariant 65).
 
 65. **Every RLM task here carries `rlm_harness.skills` with `discovery="inject"`, and the prompt/skill
     split is a rule rather than a preference.** (This is `rlm-harness`'s own mechanism, distinct from the
@@ -1602,8 +1627,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     weaker validator, which is exactly how the marker check spent a slice living only on the podcast.
 
     **Consequence: `Task.tools` is now EMPTY at class level.** Tests asserting invariant 1 against that
-    ClassVar would pass against a tuple of nothing, checking precisely what a run does not use. They
-    construct an instance instead.
+    ClassVar — and `rlm_harness.testing.assert_repl_safe` alongside it, which is half of what those tests
+    check — would pass against a tuple of nothing, checking precisely what a run does not use. They
+    construct an instance instead, which makes them stronger than before rather than merely repaired.
 
 68. **A wall-clock backstop scales with the work that was asked for (`schema.PODCAST_TIMEOUT_FACTOR`).** A
     `long` episode 502'd at the 300s default having written three trace events, and on the same notebook an
@@ -1726,8 +1752,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `rebuildHistory` re-appends the SAME `overviewEl` node, and invariant 60 makes the reverse safe. Nothing
     is lost either way; the reason is that a question asked into a thread whose overview is being rewritten
     READS as two things fighting whether or not they are. Recorded so a later reader does not "simplify" it
-    away as redundant with the locking. Every exit thaws it — cancel, success, error, and a notebook switch,
-    which strands the run rather than ending it and would otherwise freeze the NEW notebook's composer.
+    away as redundant with the locking. **Clearing the conversation was offered as the alternative and is
+    the one thing NOT to do**: it would destroy history to signal a transient state. Every exit thaws it —
+    cancel, success, error, and a notebook switch, which strands the run rather than ending it and would
+    otherwise freeze the NEW notebook's composer.
 
     **A chat answer can be regenerated, and only the LAST one.** Every later answer was produced with this
     one in its `history` (invariant 11), so redoing a turn in the middle would leave the answers after it
@@ -1748,6 +1776,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     overview and the podcast are untouched and nothing is marked stale — an overview's `source_ids` are
     about the CORPUS, which has not moved. The confirmation names what SURVIVES as well as what goes, since
     losing sources is the fear a destructive control in the chat panel invites.
+
+    **The control hides itself when there is no conversation, kept in sync from the EXISTING
+    `chat:turnAdded`/`chat:rerender`/`notebook:switched` handlers rather than three new ones.** A second
+    subscription to one event inside one init is what `test_no_event_is_subscribed_twice_inside_one_init_function`
+    forbids: four inits in `app.js` spell the same event names, so a duplicate handler runs twice and reads
+    as a race that isn't one. That test is the only enforcement, which is why the rule lives here.
 
     **Clearing is DISABLED while a question is in flight**: the server would delete the turns and then
     `ask`'s own persist would append its answer to the now-empty list, so the conversation the reader just

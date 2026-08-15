@@ -52,6 +52,44 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **Restored what the rulebook condensation dropped: enforcement links, one security statement, and
+  four contract details.** The condensation moved incident narrative to this file, which was its
+  stated intent and is right. What it also removed, unintentionally, was the layer of the rulebook
+  that connects a rule to the thing enforcing it — and for rules whose ONLY enforcement is a
+  source-tree assertion (invariant 36: this project has no JavaScript test runner), the rulebook is
+  the only place a later reader would learn the rule exists at all. Every item below was verified
+  live in the code before being restored; nothing was put back on the strength of the old text.
+
+  **One rule had disappeared entirely.** `test_no_event_is_subscribed_twice_inside_one_init_function`
+  (`tests/test_web_assets.py:209`) still runs, and the prohibition it enforces — one subscription per
+  event per init, because four inits in `app.js` spell the same event names and a duplicate handler
+  reads as a race that isn't one — appeared nowhere in CLAUDE.md. Deleting that test would have
+  contradicted nothing.
+
+  **One statement had been inverted, which matters most.** Invariant 52 said the ticker's `detail`
+  "can quote ingested source text — the same category invariant 29 already records". What survived was
+  only "the step's `output` is deliberately NOT streamed", which reads as though no source text
+  reaches the SSE stream at all — on an API with no authentication (invariant 25). The stronger claim
+  is now stated first, with the narrower one explicitly marked as not a promise.
+
+  **Also restored**: the markdown renderer's XSS tripwire together with its coverage floor (mutation
+  testing once got `setAttribute("href")`, a template-literal `` createElement(`a`) `` and a
+  `window.location` assignment past its first version — a future widening must still catch all three);
+  `assert_repl_safe` as half of what the invariant-1 tests check; `TTSProvider.synthesize`'s offsets
+  being **in seconds**, which is the contract between every provider, `Podcast.offsets` and `app.js`'s
+  seek handler; the `rlmnb-podcast-length` storage key; the `corpus-navigation` skill by name;
+  `.notebook-menu` as a clipping ancestor, which invariant 54's own text says the test cannot see;
+  `RN_BASE_URL` being "not just a URL, and a later reader must not relax it on that basis"; clearing
+  the conversation being "the one thing NOT to do" as a freeze signal; and the residual-risk hedge on
+  invariants 39, 49, 56 and 62, whose absence had made those four read as stronger claims than the
+  ones that kept it.
+
+  **Checked and deliberately NOT restored**: six other test names the old file mentioned are still
+  live, but in each case the RULE survived the condensation and only the test's name went — and
+  `test_the_podcast_transcript_is_not_capped_by_a_fixed_height` carries its whole rationale in its own
+  docstring. Naming every test in the rulebook is not the convention; naming the ones that are a
+  rule's only enforcement is.
+
 - **An independent review of the OCR work found three real defects and a hollow test; all fixed.**
   Every finding below was reproduced locally before being acted on.
 
