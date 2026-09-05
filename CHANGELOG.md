@@ -81,6 +81,30 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **A four-column page is declined instead of being cut in half (invariant 73).** Recorded as a
+  limitation when a review found it; now fixed. Three columns already declined themselves — the
+  middle column crosses the centre, so the page-level guard fires — but an even count has its centre
+  in the middle gutter with nothing spanning it, so the split ran and produced
+  `c1r1 c2r1 c1r2 c2r2 … c3r1 c4r1 …`: the page halved, and the rows inside each half interleaved.
+  That is the defect the whole module exists to prevent, at half scale, and it was reproduced before
+  being fixed rather than taken from the note.
+
+  `_column_count` projects a band onto the x-axis and counts the runs a real gutter separates; above
+  two, the band is returned in detection order. **The threshold has less margin than it looks**: the
+  real two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, 0.038 against
+  a 0.02 threshold, so raising it past 0.038 would make that page read as one column and stop being
+  reordered at all. Recorded next to the constant, because a threshold without its measurement is an
+  invitation to tune it.
+
+  One probe was wrong before it was right: counting columns over ALL the page's regions returned 1,
+  because the page number sits IN the gutter. `_order_band` never sees it — `reading_order` peels
+  every centre-crosser off as a band boundary first — so the count on the band it actually receives
+  is 2. The fix was to the probe, not the code.
+
+  Four of five mutations die (dropping the decline, declining at >1, moving the gutter share to
+  0.05, taking `reach = end` instead of the running max). The fifth is `>` versus `>=` at exactly
+  the threshold, accepted unpinned for the same reason as the other exact-equality boundaries here.
+
 - **`line-length = 110` is enforced now, not a convention.** Ruff's default rule set carries no
   `E501`, so the number in `pyproject.toml` was a formatter setting that `check` ignored — about 20
   over-long lines had accumulated, and a name scrub once left a 157-character line that only an

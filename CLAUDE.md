@@ -1892,11 +1892,19 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     directly — a flattened table and a scatter of figure labels are word soup under either ordering, which
     is why that cost is accepted against a +0.331 gain on two-column prose.
 
-    **THREE columns are out of scope and decline themselves.** A three-column scan (Scientific American
-    Supplement, 1890) puts the middle column across the centre, so it crosses on nearly every line and the
-    page is left alone — the same arithmetic that recognises a single-column page, not a case anyone had to
-    special-case. Do not "extend" this to N columns without measuring: the guard is what makes an
-    unsupported layout safe, and a generalisation that removes it trades a decline for a corruption.
+    **MORE than two columns is out of scope, and declines by two different mechanisms.** An ODD count
+    declines itself: a three-column scan (Scientific American Supplement, 1890) puts its middle column
+    across the centre, so it crosses on nearly every line and the page-level guard fires — the same
+    arithmetic that recognises a single-column page. An EVEN count does NOT, and that gap was real: a
+    four-column page has its centre in the middle gutter, nothing spans it, and the split cut the page in
+    half and then interleaved the rows inside each half — the exact defect this module exists to prevent,
+    at half scale. `_column_count` closes it by projecting a band onto the x-axis and counting the runs a
+    real gutter separates; above two, the band is returned in detection order.
+
+    **`_MIN_GUTTER_SHARE` (0.02) has about 2x of margin and is not a knob to tune on taste**: the real
+    two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, i.e. 0.038. Raise the
+    threshold past that and that page reads as ONE column and stops being reordered at all. The count is
+    used only to ask "is this the two-column case", never to locate a column — that stays `centre`'s job.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See

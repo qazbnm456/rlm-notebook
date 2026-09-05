@@ -57,6 +57,17 @@ _MIN_LATIN_SHARE = 0.7
 #: guarantee.
 _MAX_SPANNING_FRACTION = 0.15
 
+#: A gap in a band's horizontal projection this wide, as a fraction of the content width, is a
+#: GUTTER between columns. Below it, a gap is the ragged right edge of one column rather than a
+#: boundary between two. Only the COUNT of resulting runs is used, never their positions.
+#:
+#: Measured against the real two-column page in `tests/fixtures/`: a 38px gutter across 996px of
+#: content, i.e. 0.038 — about twice this threshold, which is the whole margin there is. Raising it
+#: past 0.038 would make that page read as one column and stop being reordered at all, so this is
+#: NOT a knob to tighten on taste. Note the page number sitting IN the gutter does not interfere:
+#: `reading_order` peels every centre-crosser off as a band boundary before `_order_band` counts.
+_MIN_GUTTER_SHARE = 0.02
+
 #: (left edge, right edge, vertical centre, detection index, text) — a detection flattened to the
 #: only numbers ordering needs. The vertical CENTRE rather than the top edge, so a slightly skewed
 #: scan (or a line whose quad is taller on one side) still sorts against its neighbours by where it
@@ -71,9 +82,39 @@ def _flatten(index: int, box: Sequence[Sequence[float]], text: str) -> _Region:
     return min(xs), max(xs), sum(ys) / len(ys), index, text.strip()
 
 
+def _column_count(band: list[_Region]) -> int:
+    """How many columns this band occupies, by projecting every region onto the x-axis and counting
+    the maximal occupied runs a real gutter separates.
+
+    Used only to ask "is this the two-column case this module handles" — never to locate a column,
+    which is `centre`'s job. THREE columns already decline themselves (their middle column crosses
+    the centre, so the page-level guard fires), but an EVEN count does not: a four-column page has
+    its centre in the middle gutter, nothing spans it, and the split cut the page in half and then
+    interleaved the rows inside each half — the exact defect the module exists to prevent, at half
+    scale. Counting is what makes an unsupported layout decline rather than corrupt.
+    """
+    spans = sorted((region[0], region[1]) for region in band)
+    if not spans:
+        return 0
+    left = min(span[0] for span in spans)
+    right = max(span[1] for span in spans)
+    gutter = (right - left) * _MIN_GUTTER_SHARE
+    columns = 1
+    reach = spans[0][1]
+    for start, end in spans[1:]:
+        if start - reach > gutter:
+            columns += 1
+        reach = max(reach, end)
+    return columns
+
+
 def _order_band(band: list[_Region], centre: float) -> list[str]:
     """One horizontal band containing no region that crosses `centre`: read it as two columns when
     both sides are occupied, otherwise leave it alone. Each side keeps its detection order."""
+    # More than two columns is not a layout this handles, and reading it as two halves is worse
+    # than leaving it alone: each half then interleaves its own rows.
+    if _column_count(band) > 2:
+        return [region[4] for region in sorted(band, key=lambda r: r[3])]
     left: list[_Region] = []
     right: list[_Region] = []
     for region in sorted(band, key=lambda r: r[3]):

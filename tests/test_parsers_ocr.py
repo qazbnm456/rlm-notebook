@@ -470,3 +470,41 @@ def test_try_tesseract_returns_none_on_blank_result(monkeypatch):
 def test_try_tesseract_returns_stripped_text(monkeypatch):
     monkeypatch.setattr("pytesseract.image_to_string", lambda image: "real text")
     assert _ocr._try_tesseract(object()) == "real text"
+
+
+def test_reading_order_declines_a_four_column_page_instead_of_halving_it():
+    """THREE columns decline themselves — the middle one crosses the centre, so the page-level
+    guard fires. An EVEN count does not: a four-column page puts the centre in the middle gutter,
+    nothing spans it, and the split cut the page in half and then interleaved the rows inside each
+    half. That is the defect this module exists to prevent, at half scale.
+    """
+    columns = [(0, 100), (150, 250), (300, 400), (450, 550)]
+    regions = [
+        (_quad(x0, x1, 10 + row * 20), f"c{col}r{row + 1}")
+        for row in range(3)
+        for col, (x0, x1) in enumerate(columns, 1)
+    ]
+
+    # Detection order, i.e. left untouched — not the two-halves reading.
+    assert _ocr.reading_order(regions) == " ".join(r[1] for r in regions)
+
+
+def test_reading_order_still_splits_the_real_two_column_page_after_the_column_count():
+    """The regression the column count could plausibly cause. The measured gutter on that page is
+    38px across 996px of content (0.038) against a 0.02 threshold, so the margin is about 2x — this
+    asserts the count itself, which is what a change to the threshold would move."""
+    fixture = json.loads(
+        (Path(__file__).parent / "fixtures" / "ocr_two_column_page.json").read_text()
+    )
+    items = [_ocr._flatten(i, box, f"r{i}") for i, box in enumerate(fixture["boxes"])]
+    centre = (min(r[0] for r in items) + max(r[1] for r in items)) / 2
+    band = [r for r in items if not (r[0] < centre < r[1])]
+
+    assert _ocr._column_count(band) == 2
+
+
+def test_column_count_ignores_a_ragged_right_edge():
+    """Lines of unequal length are one column, not several — the gap that matters is a GUTTER."""
+    band = [_ocr._flatten(i, _quad(0, 300 - i * 4, 10 + i * 20), f"l{i}") for i in range(5)]
+
+    assert _ocr._column_count(band) == 1
