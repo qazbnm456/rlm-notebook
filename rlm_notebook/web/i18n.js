@@ -141,7 +141,7 @@ const STRINGS = {
     "traj.budgetPartial": "這次執行沒有回報生成上限。",
     "traj.budgetNoUsage": "生成上限是 {cap} tokens；這次執行沒有記錄可供比對的 token 用量。",
     "traj.budgetDropped": "步數預算被拒絕並退回函式庫的預設值，所以設定的上限並未生效。",
-    "traj.noTools": "這次執行沒有呼叫任何工具。",
+    "traj.noTools": "這次執行沒有呼叫任何工具 \u2014 包括指示要求它在 SUBMIT 前執行的驗證器。",
     "traj.noMeta": "這次執行沒有留下設定紀錄。",
     "traj.notStarted": "這次執行還沒有留下任何紀錄，可能還在啟動，也可能根本沒跑起來。",
     "traj.search": "搜尋回合…",

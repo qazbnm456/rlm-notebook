@@ -521,3 +521,48 @@ def test_script_family_matches_both_orderings_of_the_language_name():
         assert script_family(name) == "hans", name
     for name in ("English", "Japanese", "", None):
         assert script_family(name) is None, name
+
+
+def test_the_validator_records_a_tool_call():
+    """`record_tool_call` is OPT-IN — every tool wrapper calls it or the event does not exist.
+
+    This one did not, so no `tool_call` event was ever written, the Trajectory drawer's timeline
+    was empty on EVERY run, and its empty state read "this run called no tools" while the turn's
+    own code pane showed `validate_podcastscript(...)` three lines away. Upstream's `read_skill`
+    records; ours simply never did.
+
+    It also closes a gap this project wrote down as a measurement limitation: a live A/B of the
+    script check could not say whether the validator had FIRED.
+
+    The JSON is the whole artifact, so its LENGTH is recorded and its TEXT is not — invariant 52's
+    rule for the ticker and invariant 70's for the drawer.
+    """
+    import json
+    import tempfile
+    from pathlib import Path as _Path
+
+    from rlm_harness.trace import TraceRecorder
+
+    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.schema import PodcastScript
+
+    out = _Path(tempfile.mkdtemp()) / "t.jsonl"
+    validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: None)
+    secret = "這句話是成品本身，不該進 trace"
+    good = json.dumps({"utterances": [{"speaker": "host_a", "text": secret, "citations": []}]})
+    with TraceRecorder(str(out), run_id="x", meta={}):
+        validate(json.dumps([{"speaker": "host_a"}]))
+        validate(good)
+
+    calls = [
+        json.loads(line)["payload"]
+        for line in out.read_text().splitlines()
+        if json.loads(line).get("type") == "tool_call"
+    ]
+    assert len(calls) == 2, f"both calls must be recorded, got {calls}"
+    assert [c["ok"] for c in calls] == [False, True], calls
+    assert all(c["tool"] == "validate_podcastscript" for c in calls), calls
+    assert all(c["duration_s"] is not None for c in calls), calls
+    # The size, never the text.
+    assert calls[1]["args"] == {"chars": len(good)}
+    assert secret not in out.read_text(), "the artifact leaked into the trace"

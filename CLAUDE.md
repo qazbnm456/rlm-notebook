@@ -2051,6 +2051,20 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **A `validate_*` call surfaces its VERDICT**, because on a failed run that is the single most useful
     fact in the whole trace: exactly what the model was told to fix, and how many rounds it took.
 
+    **It only reaches the trace because the validator RECORDS it, and for a long time it did not.**
+    `rlm_harness.record_tool_call` is OPT-IN — every tool wrapper calls it or the event does not
+    exist — and `make_grounded_validator`'s `validate` never did. So no `tool_call` event was ever
+    written by this project, the timeline was empty on EVERY run, and the empty state said "this
+    run called no tools" while the turn's own code pane showed `validate_podcastscript(...)` three
+    lines away. Upstream's `read_skill` records; ours simply never did, and the drawer had no way
+    to know the difference. **It also closed a stated measurement limitation**: a live A/B of
+    invariant 66's script check could not say whether the validator had FIRED, and that caveat was
+    attached to every number in it.
+
+    The JSON handed to the validator is the whole ARTIFACT, so its LENGTH is recorded and its TEXT
+    is not — invariant 52's rule for the ticker applied to the drawer. The verdict is bounded and
+    is the model's own rejection message: paths, coordinates and character names, never source text.
+
     **Interface copy is built from the BOOLEAN, not from the server's sentence.** `timing_note` is English
     prose written in Python, and rendering it verbatim put an English line in the middle of a Chinese
     drawer. The server says WHICH case holds; the interface says it in the reader's language (invariant 48).

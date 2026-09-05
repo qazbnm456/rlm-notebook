@@ -12,13 +12,19 @@ from __future__ import annotations
 
 import os
 import re
+import time
 from collections.abc import Callable
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 import zhconv.zhconv as _zh
-from rlm_harness import RLMTask, load_skills_as_tools, render_skills_manifest
+from rlm_harness import (
+    RLMTask,
+    load_skills_as_tools,
+    record_tool_call,
+    render_skills_manifest,
+)
 from rlm_harness.tools.validation import make_schema_validator
 
 #: This package's own recorded craft and measured failure modes, shipped INSIDE the wheel for the
@@ -354,6 +360,11 @@ def _script_offenders(
     return []
 
 
+#: How much of a verdict reaches the trace. A rejection is short by construction (it names paths,
+#: coordinates or characters); this only bounds a pathological one.
+_VERDICT_CHARS = 1200
+
+
 def make_grounded_validator(
     model: type,
     coordinates: Callable[[], set[str]] | None = None,
@@ -391,6 +402,31 @@ def make_grounded_validator(
         """Validate a JSON string against the expected output schema AND check that no
         `[[SRC:...]]` marker appears in your own prose. Pass your generated JSON here before
         emitting it as the final answer."""
+        started = time.perf_counter()
+        verdict = _validate(data_json_str)
+        # `record_tool_call` is OPT-IN — every tool wrapper calls it or the event does not exist.
+        # This one did not, so `tool_call` events were never written, the Trajectory drawer's
+        # timeline was empty on EVERY run, and its empty state said "this run called no tools"
+        # while the turn's own code pane showed `validate_podcastscript(...)` three lines away.
+        # Upstream's `read_skill` records; ours simply never did.
+        #
+        # It also closes a measurement gap this project wrote down as a limitation: a live A/B of
+        # the script check could not say whether the validator had FIRED, and that caveat had to be
+        # attached to every number in it.
+        #
+        # The JSON is the whole artifact, so its LENGTH goes in and its TEXT does not — invariant
+        # 52's rule for the ticker, and invariant 70's for the drawer. The verdict is the model's
+        # own rejection message: coordinates and character names, never source text.
+        record_tool_call(
+            validate.__name__,
+            args={"chars": len(data_json_str)},
+            ok=not verdict.startswith("Validation failed"),
+            result=verdict[:_VERDICT_CHARS],
+            duration_s=time.perf_counter() - started,
+        )
+        return verdict
+
+    def _validate(data_json_str: str) -> str:
         verdict = schema_check(data_json_str)
         if verdict.startswith("Validation failed"):
             return verdict

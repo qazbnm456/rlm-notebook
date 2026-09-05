@@ -11,6 +11,38 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The Trajectory drawer said "this run called no tools" on every run, and it was wrong every
+  time.** `rlm_harness.record_tool_call` is OPT-IN — a tool wrapper calls it or the event does not
+  exist — and `make_grounded_validator`'s `validate` never did. So this project wrote no
+  `tool_call` events at all, the drawer's tool timeline was structurally empty, and its empty state
+  contradicted the turn's own code pane three lines away, which read
+  `validate_podcastscript(json.dumps(script_list))`.
+
+  Found by a user reading a real trace: "明明就有 `validate_podcastscript` 但仍沒有工具呼叫".
+  Upstream's `read_skill` records; ours simply never did, so the drawer could not tell "no tool was
+  called" from "tools do not report".
+
+  **It also closes a limitation this project had written down rather than fixed**: the live A/B of
+  the script check could not say whether the validator had FIRED, and that caveat is attached to
+  every number in that measurement. It is observable now.
+
+  The JSON is the whole artifact, so its LENGTH is recorded and its TEXT is not (invariant 52's
+  rule for the ticker, applied to the drawer); a test asserts the artifact string is absent from
+  the trace file. `ok` splits a rejection from a pass, and `duration_s` is measured with a
+  monotonic clock around the call. The empty state now says WHICH empty it is — the model never
+  called the validator its own instructions ask for, which is a real signal rather than a bug.
+
+  Three mutations killed: removing the recording, recording the artifact text instead of its size,
+  and reporting `ok` unconditionally.
+
+- **The 32768 raise behaved exactly as the sibling's distribution predicted, on the first run after
+  it.** A `GeneratePodcastScript` call hit the new cap — but it was call 1 of 7, which produced 318
+  characters of reasoning and 128 of code before dying with `Invalid Python syntax`. That is a
+  turn-0 runaway, the class that data says no cap saves; the run recovered on its next turn and
+  finished 65 utterances. **Not evidence for raising again.**
+
+  The close rule held on the same run: one close, at the end.
+
 - **`max_tokens` 16384 -> 32768, sized against a distribution rather than against the truncation
   that prompted it.** A live `GeneratePodcastScript` call hit 16384 exactly on call 5 of 10 and
   came back `[Error] Invalid Python syntax` — cut mid-code — costing an iteration.

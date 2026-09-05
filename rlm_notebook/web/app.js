@@ -4271,7 +4271,13 @@ function renderTrajTimeline(line, turns) {
   if (!line.length) {
     const empty = document.createElement("div");
     empty.className = "traj-empty";
-    empty.textContent = t("traj.noTools", "This run made no tool calls.");
+    // Says WHICH empty it is (invariant 70): the model never called the pre-SUBMIT validator its
+    // own instructions ask for. This used to appear on every run for a different reason — the
+    // validator did not record a `tool_call` event at all — so an empty strip meant nothing.
+    empty.textContent = t(
+      "traj.noTools",
+      "This run called no tools \u2014 including the validator its instructions ask it to run before SUBMIT.",
+    );
     trajEl.timeline.appendChild(empty);
     return;
   }
