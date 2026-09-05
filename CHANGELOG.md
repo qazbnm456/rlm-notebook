@@ -111,6 +111,37 @@ questions with verifiable citations, and get a distilled research artifact out.
   to maintain on faith. The em-dash prohibition is the sibling's house style. The `read_file` /
   `grep_repo` grounding advice has no analogue in a corpus this project hands over whole.
 
+- **Re-measured the Simplified-character claim with a full conversion table, and the earlier zero
+  was an artifact of the tool.** The check that produced it used a sibling's ~90-character hand
+  table — deliberately small, and documented by its author as a script IDENTIFIER rather than a
+  converter. Re-run through `zhconv`'s full mapping over the same fields:
+
+  | | hand table (~90 chars) | zhconv full mapping |
+  |---|---|---|
+  | nb-6f2d49d3, 50 fields | 0 | 6 |
+  | nb-d22c2a9a, 78 fields | 0 | 5 |
+
+  **Most of that difference is not Simplified text.** `zh-hant` rewrites several characters that are
+  correct Traditional in their own right — `台`→`臺`, `群`→`羣` — and `zh-tw` adds Taiwan locale
+  vocabulary on top (`里`→`裡`). Excluding that class leaves **five genuine Simplified characters**:
+  `么 没 干 帮 们`.
+
+  **Where they are is what decides the design, and it inverts the sibling's case.** All five sit in
+  PODCAST UTTERANCES. Titles, overviews, answers and follow-ups are clean — zero across both
+  notebooks. The sibling's strict per-character check exists for a page TITLE: short, in the
+  navigation, on every page, where one drifted character is a visible fraction of the field. Our
+  equivalent short nav field (`naming.SuggestTitle`) is exactly the one with no offenders, and the
+  field that has them is the one meant to be HEARD — `没` and `沒` are the same sound, and the
+  transcript shows one character in a 32-character line.
+
+  **So: still no validator, but now for a reason that survives its own measurement.** Every
+  condition that justifies one (short field, visually prominent, repeated, demonstrably drifting) is
+  absent here, and the one field that would qualify does not drift.
+
+  **Untested, and stated rather than implied**: all five characters predate the script rule added in
+  the entry above. Whether that rule prevents them is unmeasured — it needs a live podcast run, which
+  costs money, and no run has been spent on it.
+
 - **A language name buys neither its script nor its idiom; both now have a rule (invariant 39).**
   Two findings, one observed here and one borrowed from a sibling project after reading how
   it had solved the same class of problem.
@@ -126,10 +157,13 @@ questions with verifiable citations, and get a distilled research artifact out.
   `概覽`) after a real run returned a document set whose body text were Traditional while every page TITLE
   came back Simplified, so the nav and the page disagreed on screen. This project had NO script rule
   at all — just "write your prose in {language}", the exact under-specification that failure came
-  from. **Not reproduced here, and recorded as such**: every model-authored field in the two real
-  notebooks on this machine — titles, overviews, answers, follow-ups, podcast utterances — measured
-  zero Simplified-only characters against the sibling's own character table. Insurance against a
-  measured failure elsewhere, not a fix for one seen here.
+  from.
+
+  **The "not reproduced here" that first accompanied this was itself a bad measurement, and the
+  correction is the entry below.** It reported zero Simplified-only characters across every
+  model-authored field — measured with the sibling's ~90-character hand table, whose own comment
+  says it answers "which script is this text in", not "convert this text". A reader that cannot
+  report a non-zero value reports absence either way.
 
   **What was deliberately NOT taken.** The sibling also carries a two-threshold VALIDATOR: a
   majority comparison for a page body (a repository may legitimately contain Simplified strings) and

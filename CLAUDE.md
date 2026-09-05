@@ -787,9 +787,14 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       a sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
       every page TITLE came back Simplified, so the nav and the page disagreed on screen — the rule
       names the characters (`概览` must be `概覽`) because that cannot be read as a loose synonym.
-      **Borrowed, not observed here**: every model-authored field in two real notebooks measured
-      zero Simplified-only characters, so this is insurance against a sibling's measured failure.
-      Empty for a language whose name already pins one script.
+      **Borrowed, and the local measurement behind it was corrected once**: a first pass reported
+      zero Simplified characters using a ~90-character hand table, which its own author documents as
+      a script identifier rather than a converter. A full `zhconv` mapping over the same fields finds
+      five genuine ones — `么 没 干 帮 们` — and ALL five are in podcast utterances, with titles,
+      overviews, answers and follow-ups clean. **That is the inverse of the sibling's case**, whose
+      failure was in page TITLES, and it is why no validator was added: every condition justifying
+      one (short, navigational, repeated, demonstrably drifting) is absent, and the one field that
+      would qualify here does not drift. Empty for a language whose name already pins one script.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so
