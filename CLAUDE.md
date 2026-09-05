@@ -1801,6 +1801,44 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     - **Replayed against real measured output**: 17 offenders on the episode that motivated it and
       6 on the one after, every one a genuine drift, and 0 on a notebook whose only drift was `么`.
       Zero false positives across 119 utterances produced against a corpus containing Japanese.
+    - **Then measured LIVE, and this is the one number in this area that is significant.** Three
+      episodes off one notebook, same models, same tier, same language:
+
+      | | chars | characters this check would flag |
+      |---|---|---|
+      | rule inert | 5699 | 13 |
+      | rule shipping, no check | 4013 | 6 |
+      | rule + check | 4617 | **0** |
+
+      Against the middle run — whose ONLY difference is the check — the null expectation is 6.9 and
+      zero were observed, Poisson `P(X=0) = 0.001`; against the first, 10.5 expected, `P = 0.00003`.
+      **The honest limitation is that the CLI writes no trace, so whether the validator actually
+      FIRED is unobservable**: the draft may simply have been clean. The measurement is of the
+      configuration, not of the tool being exercised, and it is still one episode per arm.
+      **The accepted 3% recall loss also showed up, once**: `厘清` survived (it should be `釐清`),
+      because `厘` is valid Big5 for `公厘`. The other survivor, `制` in `問責制`, is `zhconv`
+      being wrong rather than the gate — `制度` is correct Traditional.
+
+    **The sibling a sibling project solves the same problem in a DIFFERENT PLACE, and that is why its
+    output was stable while ours was not.** It runs HOST-SIDE and POST-HOC in its pipeline, not
+    before SUBMIT: `output_language_mismatch` is a MAJORITY comparison on page BODIES (advisory,
+    tolerant — "a single stray character in several thousand says nothing"), `strict_script_offenders`
+    is per-character on page TITLES ONLY, and `to_script` actually REWRITES a title and persists it.
+    So a prompt rule that turns out to be inert costs that project nothing; this project had only
+    the prompt, and when the prompt was inert there was nothing underneath. **Its split is by FIELD
+    rather than by a global strictness dial** — strict where the text is short, navigational and
+    entirely the model's own words; majority where it quotes source — and that reasoning is better
+    than ours was.
+
+    **What does NOT transfer is its membership test**, and the difference is measured. It asks "would
+    the zhconv table rewrite this character", with a hand-kept `_KEEP_AS_WRITTEN` of ONE character
+    (`台`). Run against correct Traditional prose, its own shipped functions report `干` in `干預`,
+    `里` in `里程碑` and `群` in `一群`, and `to_script` would PERSIST `幹預`, `裏程碑` and `一羣`
+    into a title. Big5-encodability answers it without any hand list: over zhconv's own 3909
+    single-character rewrites it flags 3774 and lets through 135, and that 135 is almost exactly the
+    genuinely AMBIGUOUS set (`后` 皇后/後, `台` 台灣/臺, `余` 余/餘, `几` 几/幾, `丑` 丑/醜) — so the
+    3% is not an arbitrary recall trade, it is the ambiguity being isolated. The sibling's four
+    measured title offenders (`览 门 块 统`) all survive the gate.
 
     **Three layers, none sufficient alone and all cheap**: this validator (before SUBMIT),
     `citations.strip_markers` at the display boundary (invariant 62), and `tts.spoken_script` before

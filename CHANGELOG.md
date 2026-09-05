@@ -11,6 +11,50 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The script check measured live: zero flaggable characters, `P(X=0) = 0.001` against the run it
+  is the only difference from.** A third episode off `nb-d22c2a9a`, same models, same `long` tier,
+  same Traditional Chinese, 346s.
+
+  | | utterances | chars | characters the check would flag |
+  |---|---|---|---|
+  | rule inert (`scripttest2`) | 80 | 5699 | 13 |
+  | rule shipping, no check | 77 | 4013 | 6 |
+  | **rule + check** | 66 | 4617 | **0** |
+
+  Against the middle run — whose only difference is the check itself — the null expectation is 6.9
+  and zero were observed: Poisson `P(X=0) = 0.001`. Against the inert baseline, 10.5 expected,
+  `P = 0.00003`. That is the first significant number this line of work has produced; the two
+  earlier drift comparisons were `P = 0.23` and `P = 0.31` and were recorded as not significant.
+
+  **What it does NOT establish, stated because the whole area has a history of over-reading:**
+
+  - The CLI writes no trace, so whether the validator FIRED is unobservable. The draft may have
+    been clean on the first attempt. This measures the configuration, not the tool being exercised.
+  - One episode per arm. The Poisson test treats the rate as a property of the configuration.
+  - Two changes are conflated against the baseline (rule + check); only the middle comparison
+    isolates the check.
+
+  **The accepted 3% recall loss appeared, once**: `厘清` survived and should be `釐清`, because
+  `厘` is valid Big5 (`公厘`) and therefore outside the gate by design. The only other `zhconv`
+  hit, `制` in `問責制`, is `zhconv` being wrong rather than the gate being loose — `制度` is
+  correct Traditional, and flagging it would have been exactly the false positive the gate exists
+  to prevent.
+
+- **Confirmed with a sibling project how it keeps its output Traditional, by reading and RUNNING its
+  code rather than taking an answer.** Its stability comes from solving this in a different place:
+  HOST-SIDE and POST-HOC, split BY FIELD — a majority comparison on page bodies (advisory,
+  tolerant), per-character strictness on page TITLES only, and a converter that rewrites a title
+  and persists it. A prompt rule that turns out to be inert therefore costs that project nothing,
+  where this project had only the prompt. Its field split is better reasoning than a global
+  strictness dial and is recorded in invariant 66.
+
+  **Its membership test does not transfer, and its own shipped functions demonstrate why.** Run
+  against correct Traditional prose, `strict_script_offenders` reports `干` in `干預`, `里` in
+  `里程碑` and `群` in `一群`, and `to_script` would persist `幹預`, `裏程碑` and `一羣` into a
+  title; `台` is safe only because `_KEEP_AS_WRITTEN` hand-lists it, while the docstring claims no
+  such list is needed. Reported to that project with the reproduction and the Big5 alternative —
+  their user's call, not ours.
+
 - **A pre-SUBMIT script check now catches Simplified characters in Traditional output, and it is
   the only check here that is allowed to be wrong.** Invariant 39 had declined a validator; two of
   its conditions moved — the drift is real and three times larger than published (19 sites), and
