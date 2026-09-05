@@ -150,15 +150,36 @@ def script_family(language: str | None) -> str | None:
 #: that started its conversion work, which the bare gate would have left unfixed. `构 与 么` are
 #: this project's own measured gaps; `么` is `怎么`, three times.
 #:
-#: **A false positive is NOT cheap just because this check only REPORTS.** `据` in `拮据` and `离`
-#: in a trigram name are correct Traditional, so this list can produce one — and an earlier version
-#: of this note called that affordable HERE and not for a sibling project, whose converter persists a
-#: rewritten title. Retracted: told `干 -> 幹`, an obedient model writes `幹預` and the corruption
-#: lands in the artifact anyway, by a longer route. The once-per-run bound limits how OFTEN, not
-#: whether. Prefer the miss when unsure, on both sides. Measured risk here: all eight appear ZERO
-#: times in this project's real Traditional output apart from `么`'s three genuine drifts.
-_MEASURED_OTHER_SCRIPT: dict[str, frozenset[str]] = {
-    "hant": frozenset("体适荐离据构与么"),
+#: The Big5 gate lets 131 single-character rewrites through (plus four curly quotation marks the
+#: table turns into corner brackets). They are ENUMERATED here rather than characterised, because
+#: an earlier note called them "almost exactly the genuinely ambiguous set" after reading the first
+#: forty — and the tail is `机 网 于 云 并 确 范 优 价 复`, so `基于`, `机器`, `后端`, `优化` and
+#: `价值` produced NO flag at all while `网络`, `标准`, `确认`, `范围` and `复杂` flagged one
+#: character of two. That is this project's own subject matter.
+#:
+#: **SHARED is the unflagged half: a character with a live Traditional use the phrase table does
+#: NOT protect.** Where the table DOES protect the Traditional word (`皇后`, `茶几`, `划船`,
+#: `拮据`, `佣金`, `老么`, `尸位素餐`, `夸父`, `并州`, `云云`, `于右任`, `洪适`), flagging is safe
+#: and the character is SIMPLIFIED — `_actionable` drops the self-suggestion.
+#:
+#: **A PROPER NOUN keeps a character SHARED even when the Simplified drift is commoner**, which is
+#: where this list deliberately diverges from a sibling project's: `范` (范仲淹), `余` (余先生), `涌`
+#: (東涌), `涂`, `朴` (朴槿惠), `杰`, `岳`, `郁`. Invariant 69 forbids translating a name, and an
+#: obedient model told `范 -> 範` writes `範仲淹`. The sibling ranks them the other way because its
+#: corpora are technical rather than literary corpora; the two answers are both defensible and the reason is recorded rather
+#: than averaged. `吁` (長吁短嘆) and `咨` (咨文) are the same call on an idiom rather than a name.
+#:
+#: **Read once, character by character, and pinned.** `test_the_big5_letthrough_is_fully_classified`
+#: asserts SHARED ∪ SIMPLIFIED is EXACTLY the table's Big5-encodable rewrites, so a zhconv upgrade
+#: fails the build instead of silently adding an unread character to neither. Two independent
+#: readings (this one and the sibling's) agreed on 72 and disagreed on 16; each caught real errors
+#: in the other — `伙食`/`凶宅` would have been corrupted by mine, `昵稱`/`腌菜`/`昆虫`/`蚝油`/
+#: `蝎子` were missed by mine.
+_BIG5_SHARED: dict[str, frozenset[str]] = {
+    "hant": frozenset(
+        "丑仆伙余凄准凶占厘台吁吃咨咸唇喂岩岳峰干床征托斗朴杰栖栗涂涌游灶痳痴皂秘"
+        "粽群肴膻苧范蒏蔂跖踊辟郁采里雇霉"
+    ),
     "hans": frozenset(),
 }
 
@@ -177,13 +198,10 @@ def _wrong_script_chars(family: str) -> dict[str, str]:
     rare Traditional character outside Big5 would be flagged.
 
     **Deliberately imperfect RECALL, and the loss is larger than the gate's arithmetic suggests.**
-    127 of the table's 3909 single-character rewrites are Big5-encodable and pass. An ambiguous
-    core is among them (`后 台 余 几 丑 干 里 群`) and is the reason this design is right, but the
-    rest is plain recall loss landing on this project's own subject matter: `基于`, `机器`,
-    `后端`, `优化` and `价值` produce NO flag, and `网络`, `标准`, `确认`, `范围` and `复杂` flag
-    one of their two characters. `_MEASURED_OTHER_SCRIPT` buys eight of them back. **The remaining
-    hole is open**; a sibling project closed its own by reading all 135 once and splitting them, with
-    a test pinning the union so a zhconv upgrade cannot add an unread character silently.
+    Of the table's 3909 single-character rewrites, 131 are Big5-encodable; `_BIG5_SHARED` names
+    the 52 with a live Traditional use the phrase table does not protect, and the other 79 are
+    flagged despite the codec. Before that enumeration all 131 passed, which meant `基于`,
+    `机器`, `后端`, `优化` and `价值` produced NO flag at all — this project's own subject matter.
 
     A missed character costs one wrong glyph on screen; a false one costs a rejection the model
     cannot satisfy (see `make_grounded_validator` and `_actionable`), so the uncertainty is spent
@@ -191,17 +209,17 @@ def _wrong_script_chars(family: str) -> dict[str, str]:
     """
     locale, codec = ("zh-hant", "big5") if family == "hant" else ("zh-hans", "gbk")
     mapping = _zh.getdict(locale)
-    forced = _MEASURED_OTHER_SCRIPT[family]
+    shared = _BIG5_SHARED[family]
     out: dict[str, str] = {}
     for src, dst in mapping.items():
         if len(src) != 1 or len(dst) != 1 or src == dst:
             continue
-        if src not in forced:
-            try:
-                src.encode(codec)
-                continue
-            except (UnicodeEncodeError, UnicodeError):
-                pass
+        if src in shared:
+            continue
+        try:
+            src.encode(codec)
+        except (UnicodeEncodeError, UnicodeError):
+            pass  # not in the target's inventory at all — always the wrong script
         out[src] = _regional(src, dst, family)
     return out
 

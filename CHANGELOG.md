@@ -11,6 +11,33 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The Big5 let-through is enumerated now — all 131 read character by character, 52 SHARED and 79
+  flagged.** It closed the recall hole this project's own subject matter fell into: before it
+  `基于`, `机器`, `后端`, `优化` and `价值` produced NO flag at all, and `网络`, `标准`, `确认`,
+  `范围` and `复杂` flagged one character of two.
+
+  **SHARED means a live Traditional use the PHRASE TABLE does not protect.** Where it does —
+  `皇后`, `茶几`, `划船`, `拮据`, `佣金`, `老么`, `尸位素餐`, `夸父`, `并州`, `云云`, `于右任`,
+  `洪适` — the character is flagged and `_actionable` drops the self-suggestion, so the exemption
+  is spent only where it is needed.
+
+  **Where this diverges from a sibling project and why**: a PROPER NOUN keeps a character SHARED even
+  where the Simplified drift is commoner (`范` 范仲淹, `余`, `涌` 東涌, `涂`, `朴`, `杰`, `岳`,
+  `郁`). Invariant 69 forbids translating a name, and an obedient model told `范 -> 範` writes
+  `範仲淹`. That project ranks them the other way because its corpora are technical rather than literary corpora. Both answers
+  are defensible; the reason is recorded rather than averaged.
+
+  **Two independent readings, and each caught real errors in the other.** 72 agreed, 16 disagreed.
+  Mine would have corrupted `伙食` and `凶宅`; mine missed `昵稱`, `腌菜`, `昆虫`, `蚝油` and
+  `蝎子`, all of which convert to the standard Taiwan forms. What survived is five characters —
+  `余 范 涌 吁 咨` — which is EXACTLY the set the sibling's own reviewer predicted would move under
+  a different reading. Neither list is adopted from the other; the diff is the artifact.
+
+  Pinned by `test_the_big5_letthrough_is_fully_classified`: the two halves must cover the codec's
+  let-through exactly, so a zhconv upgrade fails the build instead of landing an unread character
+  in the unflagged half. Verified: zero false positives across 43 correct Traditional words, and
+  the three measured episodes are unchanged at 13 / 7 / 0.
+
 - **Retracted: "a looser gate is affordable here because this check only reports".** It was used to
   justify diverging from a sibling project's direction-when-unsure, and it is wrong. A reporting
   check whose advice is wrong is advice a model may FOLLOW — told `干 -> 幹`, an obedient model

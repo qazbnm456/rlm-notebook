@@ -1819,15 +1819,33 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       SINGLE-CHARACTER only, because `zh-tw` carries a
       VOCABULARY layer that rewrites `鼠标` to `滑鼠` and would misalign a positional zip. Found by
       a sibling project, which hit it first.
-    - **Eight characters are flagged DESPITE the gate, each measured** (`_MEASURED_OTHER_SCRIPT`:
-      `体 适 荐 离 据` from the sibling's 89,160-character deployment, `构 与 么` from this
-      project's own output). Not the "~90-character hand table" this project condemned — that was
-      a hand list used as the WHOLE detector; this is a short sourced addition on top of a derived
-      one, in the SAFE direction only. `据` in `拮据` is correct Traditional, so it CAN produce a
-      false positive: affordable here because the check reports and fires once, and NOT affordable
-      for the sibling, whose converter persists a rewritten title. Of the eight, only `么` occurs at
-      all — three times, all `怎么` — across every model-authored string in both notebooks plus both
-      live transcripts (39,770 characters with verbatim quotes, 27,047 without).
+    - **The 131 characters the codec lets through are ENUMERATED, not characterised**
+      (`_BIG5_SHARED`, 52 of them). An earlier note called them "almost exactly the genuinely
+      ambiguous set" after reading the first forty; the tail is `机 网 于 云 并 确 范 优 价 复`, so
+      `基于`, `机器`, `后端`, `优化` and `价值` produced NO flag at all and `网络`, `标准`, `确认`,
+      `范围`, `复杂` flagged one character of two — this project's own subject matter. The other 79
+      are flagged despite the codec.
+
+      **SHARED means a live Traditional use the PHRASE TABLE does not protect.** Where it does
+      (`皇后`, `茶几`, `划船`, `拮据`, `佣金`, `老么`, `尸位素餐`, `夸父`, `并州`, `云云`,
+      `于右任`, `洪适`) the character is flagged and `_actionable` drops the self-suggestion, so
+      the exemption is spent only where it is needed. `_actionable` is NOT a substitute for the
+      list: over 27 ordinary Traditional words it rescues four and leaves 23 (`干預`->`幹`,
+      `台灣`->`臺`, `里程碑`->`裏`, `高峰`->`峯`, `秘密`->`祕`, `神采`->`採`, `征服`->`徵` …).
+
+      **A PROPER NOUN keeps a character SHARED even where the Simplified drift is commoner**, and
+      that is where this list deliberately diverges from a sibling project's: `范` (范仲淹), `余`,
+      `涌` (東涌), `涂`, `朴`, `杰`, `岳`, `郁`. Invariant 69 forbids translating a name and an
+      obedient model told `范 -> 範` writes `範仲淹`. The sibling ranks them the other way because
+      its corpora are technical rather than literary corpora; both answers are defensible and the reason is recorded rather
+      than averaged. `吁` and `咨` are the same call on an idiom, and are its weaker half.
+
+      **Two independent readings, agreeing on 72 and disagreeing on 16, and each caught real
+      errors in the other**: `伙食` and `凶宅` would have been corrupted by this one, `昵稱`,
+      `腌菜`, `昆虫`, `蚝油` and `蝎子` were missed by it. The residual disagreement is exactly the
+      five the sibling's own reviewer predicted would move. `test_the_big5_letthrough_is_fully_classified`
+      asserts the two halves cover the codec's let-through EXACTLY, so a zhconv upgrade fails the
+      build rather than landing an unread character in the unflagged half.
     - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
       tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
       project's real notebooks use correctly (`干預`, `一台`, `里程碑`) — so it would condemn good

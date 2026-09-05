@@ -223,26 +223,81 @@ def test_the_wrong_script_table_names_the_fix_for_every_measured_drift_character
         assert wrong.get(bad) == good, f"{bad} should be reported as {good}"
 
 
-def test_measured_other_script_characters_are_flagged_despite_the_gate():
-    """Eight characters the Big5 gate lets through that are REAL Simplified forms, each measured.
+def test_the_big5_letthrough_is_fully_classified():
+    """Every character the codec lets through is READ, not characterised.
 
-    `体 适 荐 离 据` are five of a sibling project's 29 real Simplified sites across 89,160 Han
-    characters; `适` is the exact title (`執行環境與作業系統适配`) the bare gate would have left
-    unfixed. `构 与 么` are this project's own gaps, `么` being `怎么` three times.
+    An earlier note called them "almost exactly the genuinely ambiguous set" after reading the
+    first forty of 131; the tail is `机 网 于 云 并 确 范 优 价 复`, so `基于`, `机器`, `后端`,
+    `优化` and `价值` produced NO flag at all — this project's own subject matter.
 
-    A short SOURCED addition on top of a derived gate, in the safe direction only — not the
-    "~90-character hand table" this project condemned, which was a hand list used as the WHOLE
-    detector. `据` in `拮据` is correct Traditional, so this list CAN produce a false positive —
-    and a false positive is NOT cheap just because this check only reports: told `干 -> 幹`, an
-    obedient model writes `幹預` and the corruption lands anyway, by a longer route. Prefer the
-    miss when unsure.
+    This is the guard that keeps the enumeration honest: a zhconv upgrade adding a character to
+    neither half fails the build, instead of silently landing it in the unflagged one.
     """
+    import zhconv.zhconv as zh
+
+    from rlm_notebook.instructions import _BIG5_SHARED
+
+    table = {
+        src: dst
+        for src, dst in zh.getdict("zh-hant").items()
+        if len(src) == 1 and len(dst) == 1 and src != dst
+    }
+    encodable = set()
+    for src in table:
+        try:
+            src.encode("big5")
+        except (UnicodeEncodeError, UnicodeError):
+            continue
+        if src.isalnum():
+            encodable.add(src)
+
+    shared = _BIG5_SHARED["hant"]
+    assert shared <= encodable, f"SHARED names characters the gate already flags: {shared - encodable}"
+    unread = encodable - shared - set(_wrong_script_chars_keys())
+    assert not unread, f"unclassified Big5-encodable rewrites: {''.join(sorted(unread))}"
+
+
+def _wrong_script_chars_keys():
     from rlm_notebook.instructions import _wrong_script_chars
 
+    return _wrong_script_chars("hant").keys()
+
+
+def test_no_shared_character_is_ever_flagged_in_its_own_word():
+    """The 52 unflagged characters, each with the Traditional word that earns it the exemption.
+
+    Two independent readings produced this list — this project's and a sibling project's — agreeing on
+    72 characters and disagreeing on 16, and EACH caught real errors in the other: `伙食` and
+    `凶宅` would have been corrupted by this one, while `昵稱`, `腌菜`, `昆虫`, `蚝油` and `蝎子`
+    were missed by it.
+    """
+    from rlm_notebook.instructions import _actionable, _script_offenders, _wrong_script_chars
+
     wrong = _wrong_script_chars("hant")
-    for bad, good in {"体": "體", "适": "適", "荐": "薦", "离": "離",
-                      "据": "據", "构": "構", "与": "與", "么": "麼"}.items():
-        assert wrong.get(bad) == good, f"{bad} must be flagged despite being Big5-encodable"
+    words = [
+        "干預", "台灣", "一群人", "里程碑", "高峰會", "秘密", "神采飛揚", "准許", "上游",
+        "伙食", "凶宅", "范仲淹", "余光中", "東涌", "朴槿惠", "岳父", "咸豐", "濃郁",
+        "涂先生", "公厘", "北斗", "占卜", "佳肴", "粽子", "肥皂", "痴心", "栗子", "床鋪",
+        "征服", "托盤", "岩石", "嘴唇", "吃飯", "小丑", "復辟", "雇用", "發霉", "灶神",
+        "杰出", "凄涼", "苧麻", "喂", "兩棲",
+    ]
+    for word in words:
+        flagged = _actionable(_script_offenders(word, wrong, "hant"))
+        assert not flagged, f"{word} is correct Traditional but was flagged: {flagged}"
+
+
+def test_a_proper_noun_keeps_its_character_unflagged():
+    """Where this list deliberately diverges from a sibling project's, and the reason is invariant 69.
+
+    That project ranks `范`, `余`, `涌` as Simplified because the drift is commoner in technical rather than literary corpora
+    than the surname. Here a name outranks it: told `范 -> 範`, an obedient model writes `範仲淹`,
+    and a reader who wants to look the name up needs the string the sources used. `吁` and `咨` are
+    the same call on an idiom rather than a name, and are the weaker half of it.
+    """
+    from rlm_notebook.instructions import _BIG5_SHARED
+
+    for char in "范余涌涂朴杰岳郁":
+        assert char in _BIG5_SHARED["hant"], f"{char} names a person or a place"
 
 
 def test_the_suggestion_is_the_regional_standard_not_just_a_traditional_form():
