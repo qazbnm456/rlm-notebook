@@ -11,6 +11,22 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The trajectory drawer's two notes share one row.** Stacked, they were two full-width rows of
+  one short sentence each, pushing the timeline strip down for no information (reported).
+
+  They remain two ELEMENTS. Merging the text would have cost the thing the note colours exist for:
+  the budget note turns red on a truncation and the timing note never does, and telling those apart
+  without reading the sentence is invariant 75's whole point.
+
+  The row carries both guards its own `display: flex` creates — a `[hidden]` pairing (invariant
+  36's rule, pre-emptive the way `.btn`'s is) and a `:has()` rule that removes it when both notes
+  are hidden, since otherwise its margins hold 11px of blank exactly where the space was reclaimed.
+
+  **One of the three mutations survived the first version of the test and that is the finding.**
+  Moving the budget note back OUT of the container left it inside the 400-character slice the
+  assertion was reading, so "both notes are inside the row" passed against markup where one was
+  not. It reads INDENTATION now — the container's children, by depth — and the mutation fails.
+
 - **Two defects a user found in the trajectory strip, both reported from screenshots.**
 
   **The strip numbered turns from zero while every other surface counted from one.** The nav rail

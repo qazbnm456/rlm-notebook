@@ -2098,6 +2098,14 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     rebuilding the LMs instead would mean a second construction of `runtime.configure`'s
     `lm_kwargs` that would drift from upstream's.
 
+    **The timing note and the budget note share ONE ROW, and stay TWO ELEMENTS.** Stacked, they
+    were two full-width rows of one short sentence each pushing the strip down for no information.
+    Merging the TEXT would have cost the thing the note colours exist for: the budget note turns
+    red on a truncation and the timing note never does. The row carries the two guards its own
+    `display: flex` creates — a `[hidden]` pairing (invariant 36, pre-emptive as `.btn`'s is) and a
+    `:has()` rule that removes it entirely when both notes are hidden, or its margins hold 11px of
+    blank above the strip, which is the space the change exists to reclaim.
+
     **Interface copy is built from the BOOLEAN, not from the server's sentence.** `timing_note` is English
     prose written in Python, and rendering it verbatim put an English line in the middle of a Chinese
     drawer. The server says WHICH case holds; the interface says it in the reader's language (invariant 48).

@@ -3466,6 +3466,37 @@ body.is-resizing .studio-grip {
 
 /* A labelled callout, not a stray sentence: the tag says WHICH case holds and the body says what
    that means for the numbers below it. */
+/* The two notes SIDE BY SIDE rather than stacked — two full-width rows of one short sentence each
+   pushed the strip down for no information (reported). They stay two ELEMENTS: the budget note
+   turns red on a truncation and the timing note never does, and that separation is the one thing
+   the colours exist for, so merging the text into one row would cost it. */
+.traj-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 9px 0 2px;
+}
+
+/* Pre-emptive pairing, the same one `.btn` carries: an author `display` on a class anyone might
+   later `hidden`-toggle outranks the UA rule and the element stays visible (invariant 36). */
+.traj-notes[hidden] {
+  display: none;
+}
+
+/* Both notes hidden is no ROW at all — otherwise the container's own margins hold 11px of blank
+   above the strip, which is the space this change exists to reclaim. */
+.traj-notes:not(:has(> .traj-note:not([hidden]))) {
+  display: none;
+}
+
+.traj-notes > .traj-note {
+  /* Share the row, wrap to two lines when the drawer is narrow, and never overflow: a long
+     sentence in a flex item whose `min-width` is `auto` pushes its sibling off the row. */
+  flex: 1 1 22rem;
+  min-width: 0;
+  margin: 0;
+}
+
 .traj-note {
   display: flex;
   align-items: baseline;

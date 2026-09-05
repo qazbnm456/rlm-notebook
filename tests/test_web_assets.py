@@ -1781,3 +1781,45 @@ def test_the_strip_numbers_turns_the_way_every_other_surface_does():
     # ...and the two panes it has to agree with.
     assert "`Turn ${entry.turn_index + 1}`" in js
     assert "`\\u2191 Open turn ${entry.turn_index + 1}`" in js
+
+
+def test_the_two_trajectory_notes_share_one_row_and_stay_two_elements():
+    """Two full-width rows of one short sentence each pushed the timeline strip down for no
+    information. They share a row now — and remain two ELEMENTS, because the budget note turns red
+    on a truncation while the timing note never does, and keeping those separable is the whole
+    reason the note colours exist (invariant 75).
+
+    The container also carries the two guards its own `display: flex` creates: a `[hidden]` pairing
+    (invariant 36's rule, pre-emptive as `.btn`'s is) and a rule that removes the row entirely when
+    both notes are hidden — otherwise its margins hold 11px of blank above the strip, which is the
+    space this change exists to reclaim.
+    """
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+    markup = (WEB / "index.html").read_text(encoding="utf-8")
+
+    # Both notes are INSIDE the row, by INDENTATION rather than by proximity: a first version of
+    # this took a 400-character slice, and moving the budget note back OUT of the container left it
+    # inside that window, so the mutation survived.
+    lines = markup.splitlines()
+    start = next(i for i, line in enumerate(lines) if 'class="traj-notes"' in line)
+    depth = len(lines[start]) - len(lines[start].lstrip())
+    children = []
+    for line in lines[start + 1 :]:
+        indent = len(line) - len(line.lstrip())
+        if line.strip() and indent <= depth:
+            break
+        children.append(line)
+    nested = "\n".join(children)
+    assert 'id="traj-note"' in nested, f"the timing note is not inside the row:\n{nested}"
+    assert 'id="traj-budget"' in nested, f"the budget note is not inside the row:\n{nested}"
+
+    rules = dict(_rules(css))
+    assert "display: flex" in rules.get(".traj-notes", ""), "the notes no longer share a row"
+    assert "display: none" in rules.get(".traj-notes[hidden]", ""), (
+        "an author display with no [hidden] guard — invariant 36's exact failure"
+    )
+    empty = next((body for sel, body in _rules(css) if ":has(> .traj-note" in sel), "")
+    assert "display: none" in empty, "an empty note row still holds its margins open"
+    # The two notes keep their own tones, so neither may be restyled into the other.
+    for tone in (".traj-note.is-cut", ".traj-note.is-live", ".traj-note.is-info"):
+        assert tone in css, f"{tone} is gone, so a truncation no longer reads differently"
