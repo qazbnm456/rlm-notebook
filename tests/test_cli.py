@@ -581,7 +581,6 @@ def test_the_audio_command_passes_the_chosen_length_to_the_task(monkeypatch, tmp
     the call site and the WHOLE suite stayed green: the flag became inert — the `RN_OCR_PROVIDER`
     shape (invariant 7) on the entry point no test covered. The API half was pinned; this was not.
     """
-    import argparse
 
     from rlm_notebook import cli
     from rlm_notebook.schema import PodcastScript, Source, SourceBlock
@@ -605,7 +604,117 @@ def test_the_audio_command_passes_the_chosen_length_to_the_task(monkeypatch, tmp
 
     for tier in ("short", "long"):
         seen.clear()
-        cli._cmd_audio(argparse.Namespace(length=tier, out=str(tmp_path / "a.mp3")))
+        # Parsed by the REAL parser rather than hand-built, so a flag added to the shared
+        # `_add_source_and_notebook_args` cannot make this test fail for a reason unrelated to
+        # what it checks — and so the namespace it drives is the one the product builds.
+        args = cli.build_parser().parse_args(["audio", "--length", tier, "--out", str(tmp_path / "a.mp3")])
+        cli._cmd_audio(args)
         assert seen.get("target_length") == tier, (
             f"--length {tier} never reached the task; the flag is inert"
         )
+
+
+def _audio_cli(monkeypatch, seen, *, script=None):
+    """The `audio` command with its model call faked, so a test can drive the real argument parsing
+    and the real `_cmd_audio` body without a model, a network call or a sandbox."""
+    from rlm_notebook import cli
+    from rlm_notebook.schema import PodcastScript, Source, SourceBlock
+
+    source = Source(
+        id="s1", kind="text", origin="o", blocks=[SourceBlock(locator="whole", text="content")]
+    )
+
+    class _FakeTask:
+        def run(self, **kwargs):
+            seen["ran"] = True
+            seen.update(kwargs)
+            return script or PodcastScript(utterances=[])
+
+    monkeypatch.setattr(cli, "_prepare", lambda args: (None, Corpus([source])))
+    monkeypatch.setattr(cli, "GeneratePodcastScript", lambda *a, **kw: _FakeTask())
+    monkeypatch.setenv("RN_MAIN_MODEL", "test/model")
+    monkeypatch.setenv("RN_OUTPUT_LANGUAGE", "English")
+    monkeypatch.delenv("RN_INTERPRETER", raising=False)
+    return cli
+
+
+def test_every_run_taking_subcommand_offers_trace():
+    """On the SHARED argument helper, not per command. A rule with one silent exception is the kind
+    that gets rediscovered as a bug report (invariant 46 records the same lesson for `/title`)."""
+    from rlm_notebook import cli
+
+    parser = cli.build_parser()
+    for command in ("ask", "guide", "audio"):
+        argv = {"ask": ["ask", "q"], "guide": ["guide", "summary"], "audio": ["audio"]}[command]
+        assert parser.parse_args(argv).trace is None, f"{command} has no --trace"
+        assert parser.parse_args([*argv, "--trace", "/tmp/x.jsonl"]).trace == "/tmp/x.jsonl"
+
+
+def test_the_cli_writes_no_trace_unless_one_is_asked_for(monkeypatch, tmp_path):
+    """OFF by default, and that is the design rather than caution.
+
+    The API's `traces/` is a bare relative directory resolved against the server's working
+    directory and swept by `prune_traces` at startup and after every run — a CLI has neither, so a
+    default-on trace would scatter directories into whatever directory the command was invoked
+    from and leave files nobody collects. A trace can hold FULL ingested source text (invariant 34).
+    """
+    seen: dict = {}
+    cli = _audio_cli(monkeypatch, seen)
+    monkeypatch.chdir(tmp_path)
+    args = cli.build_parser().parse_args(["audio", "--out", str(tmp_path / "a.mp3")])
+    cli._cmd_audio(args)
+
+    assert seen.get("ran"), "the fake task never ran, so this proves nothing"
+    assert not list(tmp_path.rglob("*.jsonl")), "a trace was written without being asked for"
+    assert not (tmp_path / "traces").exists(), "a traces/ directory was scattered into the cwd"
+
+
+def test_a_requested_trace_records_the_run_and_what_it_was_configured_with(monkeypatch, tmp_path):
+    """The path the caller named is the path that gets written — no directory of its own choosing."""
+    import json
+
+    seen: dict = {}
+    cli = _audio_cli(monkeypatch, seen)
+    out = tmp_path / "nested" / "run.jsonl"
+    out.parent.mkdir()
+    args = cli.build_parser().parse_args(
+        ["audio", "--length", "long", "--out", str(tmp_path / "a.mp3"), "--trace", str(out)]
+    )
+    cli._cmd_audio(args)
+
+    events = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    start = next(e for e in events if e.get("type") == "run_start")
+    meta = start["payload"]["meta"]
+    assert meta["task"] == "test_cli:_FakeTask", (
+        "the task is read off the object that actually RAN, not off a hardcoded name — which is "
+        f"why the fake shows up here: {meta['task']}"
+    )
+    assert meta["target_length"] == "long", "the run's own inputs are what make a trace worth reading"
+    assert meta["source_chars"] > 0
+    # Same contract as the worker's traces: the corpus SIZE, never its text, and no credentials.
+    assert "sources" not in meta and "api_key" not in meta and "base_url" not in meta
+
+
+def test_an_unwritable_trace_path_fails_before_the_model_runs(monkeypatch, tmp_path):
+    """Invariant 19's discipline, which is also why `_cmd_audio` resolves its TTS provider first: a
+    knowable configuration mistake must not surface after a real model call has been paid for.
+
+    A MISSING directory is not that mistake — `TraceRecorder.__enter__` calls `os.makedirs(...,
+    exist_ok=True)`, so `--trace new/dir/run.jsonl` creates the path rather than failing, which a
+    first version of this test assumed the opposite of. Genuinely unwritable is what this covers:
+    here, a parent that is a regular file.
+    """
+    import pytest
+
+    seen: dict = {}
+    cli = _audio_cli(monkeypatch, seen)
+    blocker = tmp_path / "not-a-dir"
+    blocker.write_text("")
+    args = cli.build_parser().parse_args(
+        ["audio", "--out", str(tmp_path / "a.mp3"), "--trace", str(blocker / "d.jsonl")]
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        cli._cmd_audio(args)
+
+    assert "cannot write the trace" in str(excinfo.value)
+    assert not seen.get("ran"), "the model ran anyway; the whole point is that it must not have"

@@ -619,6 +619,22 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       invariant 30's reason: a server with no model configured must still tidy up after itself.
     - **`api._prune_traces` snapshots `set(_RUN_PROCESSES)` on the EVENT LOOP, before dispatching to
       the thread**, or it races the loop's own mutation of the dict.
+    - **The CLI writes a trace ONLY on request, to a path the caller names (`--trace PATH`), and
+      NOTHING prunes it.** Everything above belongs to the server: `traces/` is a bare relative
+      directory resolved against the process's working directory, and `prune_traces` runs from
+      `api.py`'s lifespan and after every API run — a CLI has neither. Tracing by default would
+      scatter a `traces/` directory into whatever directory the command was invoked from and leave
+      files nobody ever collects, holding what invariant 34 calls the one artifact here that can
+      contain FULL ingested source text. An explicit path is a path the caller owns, so retention
+      is theirs and there is no directory to sweep. The flag lives on the SHARED
+      `_add_source_and_notebook_args`, so no run-taking subcommand can be given it by accident and
+      no other one can be forgotten (invariant 46's lesson). **A missing directory is CREATED, not
+      refused** — `TraceRecorder.__enter__` calls `os.makedirs(..., exist_ok=True)` — so only a
+      genuinely unwritable path fails, and it fails BEFORE the model call (invariant 19).
+
+      **The gap this closed was measurable, not hypothetical**: a live measurement of the
+      pre-SUBMIT script check could not say whether the validator had FIRED, because the cheap path
+      for such a measurement is the CLI and the CLI produced no evidence at all.
 
     **Accepted limitation**: every call shares the asyncio default `ThreadPoolExecutor` with ingestion
     and TTS synthesis, so a lock held by an external process can queue writes for unrelated notebooks.
@@ -1976,7 +1992,11 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     icon, label and duration at the browser's ~1.5 default measures 74.3px and slices the MIDDLE line
     through its letterforms; a test recomputes the sum from the stylesheet.
 
-    **`worker.py` records what the run was configured with AND what it was asked to do** — model names,
+    **`traces.run_meta` records what the run was configured with AND what it was asked to do**, for
+    BOTH entry points — it moved out of `worker.py` when the CLI gained `--trace`, because two
+    copies would drift on the next field added (invariant 20). It lives in `traces.py`, which is
+    already about what a trace file IS and stays free of `dspy`/`rlm_harness` so importing it costs
+    a CLI invocation nothing. It records model names,
     budgets, the corpus SIZE, and every short scalar input by name (the question, the resolved language, the
     requested podcast tier). Each answers "why did it produce that" and none is derivable afterwards from a
     notebook that has since moved on. **The corpus TEXT never goes in** — its size does, invariant 52's

@@ -3012,16 +3012,25 @@ def test_the_run_records_what_it_was_configured_with_and_no_secrets():
     moves.
 
     A trace is already the most exposed artifact this project writes (invariant 29), so what goes
-    into it is a decision: model NAMES and budgets, never credentials."""
-    import inspect
+    into it is a decision: model NAMES and budgets, never credentials.
 
-    from rlm_notebook import worker
+    Asserted on the BUILT dict rather than on `worker.main`'s source, because both entry points
+    write traces now and the builder moved to `traces.run_meta` to stop the two drifting
+    (invariant 20). A source slice would have kept passing against whichever copy it happened to
+    be pointed at."""
+    from types import SimpleNamespace
 
-    src = inspect.getsource(worker.main)
-    meta = src[src.index("meta = {") : src.index("}", src.index("meta = {")) + 1]
+    from rlm_notebook.traces import run_meta
+
+    config = SimpleNamespace(
+        main_model="m", sub_model="s", max_iterations=25, max_tokens=16384, max_retries=1,
+        api_key="SECRET-KEY", base_url="https://secret.example",
+    )
+    meta = run_meta("mod:Task", config, {})
     for key in ("task", "main_model", "sub_model", "max_iterations", "max_tokens", "max_retries"):
-        assert f'"{key}"' in meta, f"{key} is no longer recorded: {meta}"
-    for secret in ("api_key", "base_url", "RN_API_KEY"):
+        assert key in meta, f"{key} is no longer recorded: {meta}"
+    assert "SECRET-KEY" not in repr(meta) and "secret.example" not in repr(meta)
+    for secret in ("api_key", "base_url"):
         assert secret not in meta, f"{secret} would be written into a world-readable trace"
 
 
@@ -3034,7 +3043,12 @@ def test_a_runs_inputs_reach_its_trace_but_the_corpus_never_does():
     The corpus itself is megabytes and a trace is the most exposed artifact this project writes
     (invariant 29), so its SIZE goes in and its TEXT never does — the same reasoning invariant 52
     gives for streaming a step's output size rather than its text."""
-    from rlm_notebook.worker import _input_meta
+    from types import SimpleNamespace
+
+    from rlm_notebook.traces import run_meta
+
+    def _input_meta(kwargs):
+        return run_meta("mod:Task", SimpleNamespace(), kwargs)
 
     blob = "[[SRC:s1|whole]]\n" + ("corpus " * 20_000)
     meta = _input_meta(

@@ -751,7 +751,10 @@ def test_both_audio_entry_points_validate_before_running_the_model():
     root = Path(__file__).resolve().parent.parent / "rlm_notebook"
 
     cli = (root / "cli.py").read_text()
-    assert cli.index("provider.validate(") < cli.index("GeneratePodcastScript().run(")
+    # Anchored on the CONSTRUCTION, not on `().run(`: the run moved inside a `_traced(...)` block
+    # when `--trace` was added, and an assertion keyed on the old spelling would have gone looking
+    # for a substring that no longer exists rather than checking the ordering it names.
+    assert cli.index("provider.validate(") < cli.index("GeneratePodcastScript()")
 
     api = (root / "api.py").read_text()
     audio = api[api.index("async def audio("):]

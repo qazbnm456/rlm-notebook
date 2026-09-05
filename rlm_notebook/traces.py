@@ -134,3 +134,46 @@ def prune_traces(
             continue
         removed.append(path.stem)
     return removed
+
+
+#: Kwargs whose VALUE must never reach a trace: the corpus blob and its relatives are megabytes,
+#: and a trace is the most exposed artifact this project writes (invariant 29). Their SIZE is
+#: recorded instead, which is the part that tells a reader what the run was working against — the
+#: same reasoning invariant 52 gives for streaming a step's output size and not its text.
+_BULKY_INPUTS = frozenset({"sources", "sources_excerpt", "history", "questions", "origins"})
+
+#: Above this, a value is prose rather than a setting, and belongs in the run itself.
+_INPUT_MAX = 200
+
+
+def run_meta(task: str, config: object, kwargs: dict) -> dict:
+    """What a run was CONFIGURED with and what it was ASKED to do, stamped once at the top of its
+    own trace (invariant 70). The Trajectory drawer's "Initial state" panel is built from this.
+
+    **Shared by `worker.py` and `cli.py` rather than copied**, for invariant 20's reason: both
+    entry points write traces now, and the two would drift on the next field added. It lives here
+    because this module is already about what a trace file IS, and it stays free of `dspy`/
+    `rlm_harness` so importing it costs a CLI invocation nothing.
+
+    **No secrets: model NAMES and budgets, never `api_key` or `base_url`.** A trace is the most
+    exposed artifact this project writes, so what goes in it is a decision rather than a
+    convenience. The corpus SIZE goes in; its text never does.
+    """
+    meta: dict = {
+        "task": task,
+        "main_model": getattr(config, "main_model", None),
+        "sub_model": getattr(config, "sub_model", None),
+        "max_iterations": getattr(config, "max_iterations", None),
+        "max_tokens": getattr(config, "max_tokens", None),
+        "max_retries": getattr(config, "max_retries", None),
+    }
+    sources = kwargs.get("sources") or kwargs.get("sources_excerpt")
+    if isinstance(sources, str):
+        meta["source_chars"] = len(sources)
+    for name, value in kwargs.items():
+        if name in _BULKY_INPUTS or not isinstance(value, (str, int, float, bool)):
+            continue
+        if isinstance(value, str) and (not value.strip() or len(value) > _INPUT_MAX):
+            continue
+        meta[name] = value
+    return meta

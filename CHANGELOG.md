@@ -11,6 +11,36 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The CLI can write a trace now (`--trace PATH`), and the reason it never could is recorded
+  rather than left as an accident.** Everything about `traces/` belonged to the server: it is a
+  bare relative directory resolved against the process's working directory, and `prune_traces`
+  runs from `api.py`'s lifespan and after every API run. A CLI has neither, so tracing by default
+  would scatter a `traces/` directory into whatever directory the command was invoked from and
+  leave files nobody collects — holding the one artifact here that can contain FULL ingested
+  source text.
+
+  **Opt-in with an explicit path answers both halves**: the caller names the file, so nothing is
+  scattered and retention is theirs; off by default, so nothing accumulates silently. The flag sits
+  on the SHARED `_add_source_and_notebook_args`, so `ask`, `guide` and `audio` all get it and none
+  can be forgotten — invariant 46's "a rule with one silent exception gets rediscovered as a bug
+  report". The recorder is entered before the model call, so an unwritable path costs nothing
+  (invariant 19).
+
+  **A missing directory is CREATED, not refused.** `TraceRecorder.__enter__` calls
+  `os.makedirs(..., exist_ok=True)`, so `--trace new/dir/run.jsonl` works; only a genuinely
+  unwritable path (a parent that is a regular file) fails. The first version of the test asserted
+  the opposite and was wrong about the library it was testing.
+
+  **The gap was measurable, not hypothetical.** The live measurement of the pre-SUBMIT script
+  check could not say whether the validator had FIRED, and that caveat is attached to every number
+  in it — because the cheap path for such a measurement is the CLI and the CLI produced no
+  evidence at all.
+
+  `worker.py`'s meta builder moved to `traces.run_meta`, shared by both entry points rather than
+  copied (invariant 20); two of `test_api.py`'s assertions moved with it, and the one that sliced
+  `worker.main`'s SOURCE for a `meta = {` literal now checks the BUILT dict — a source slice would
+  have kept passing against whichever copy it happened to point at.
+
 - **Two fixes from a sibling project, both measured before adopting, and one of them was a live defect
   on this side.** That project confirmed its own prompt script rule was inert in all four
   production prompts exactly as read here, and that its stability came from host-side title

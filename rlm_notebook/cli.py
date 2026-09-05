@@ -19,8 +19,12 @@ note for what is not built yet.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import sys
+from collections.abc import Iterator
 from pathlib import Path
+from typing import Any
+from uuid import uuid4
 
 from pydantic import ValidationError
 
@@ -187,6 +191,41 @@ def _print_citations(citations: list[Citation], corpus: Corpus) -> None:
             print(f"        ({v.reason})")
 
 
+@contextlib.contextmanager
+def _traced(args, task: Any, config: Any, kwargs: dict) -> Iterator[None]:
+    """Record this run to `--trace` if one was asked for, otherwise do nothing at all.
+
+    **OPT-IN with an EXPLICIT path, and both halves are the design.** The API's `traces/` is a bare
+    relative directory resolved against the server's working directory, swept by `prune_traces` at
+    startup and after every run — neither of which a CLI has. Writing there by default would
+    scatter a `traces/` directory into whatever directory the command was invoked from and leave
+    files nobody ever collects, and a trace is the one artifact here that can hold FULL ingested
+    source text (invariant 34). A path the caller named is a path the caller owns.
+
+    The recorder is entered BEFORE the model call, so an unwritable path fails for free rather than
+    after a run has been paid for — invariant 19's discipline, which is also why `_cmd_audio`
+    resolves its TTS provider first. **A missing directory is not unwritable**: `TraceRecorder`
+    calls `os.makedirs(..., exist_ok=True)`, so `--trace new/dir/run.jsonl` creates the path. That
+    is a side effect of naming a path, not of running the command, and it is stated because a first
+    reading of this assumed the opposite.
+    """
+    if not args.trace:
+        yield
+        return
+
+    from rlm_harness.trace import TraceRecorder
+
+    from .traces import run_meta
+
+    dotted = f"{type(task).__module__}:{type(task).__name__}"
+    run_id = f"cli-{uuid4().hex[:12]}"
+    try:
+        with TraceRecorder(args.trace, run_id=run_id, meta=run_meta(dotted, config, kwargs)):
+            yield
+    except OSError as exc:
+        raise SystemExit(f"cannot write the trace to {args.trace!r}: {exc}") from exc
+
+
 def _cmd_ask(args) -> int:
     prepared = _prepare(args)
     if prepared is None:
@@ -200,12 +239,15 @@ def _cmd_ask(args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    result = AnswerQuestion().run(
-        sources=blob,
-        history=history_text(notebook),
-        question=args.question,
-        output_language=_language_for(notebook, _DEFAULT_CHAT_LANGUAGE),
-    )
+    task = AnswerQuestion()
+    kwargs = {
+        "sources": blob,
+        "history": history_text(notebook),
+        "question": args.question,
+        "output_language": _language_for(notebook, _DEFAULT_CHAT_LANGUAGE),
+    }
+    with _traced(args, task, config, kwargs):
+        result = task.run(**kwargs)
 
     print(result.text)
     _print_citations(result.citations, corpus)
@@ -232,9 +274,13 @@ def _cmd_guide(args) -> int:
         print(str(exc), file=sys.stderr)
         return 1
 
-    result = _GUIDE_TASKS[args.kind]().run(
-        sources=blob, output_language=_language_for(_notebook, _DEFAULT_ARTIFACT_LANGUAGE)
-    )
+    task = _GUIDE_TASKS[args.kind]()
+    kwargs = {
+        "sources": blob,
+        "output_language": _language_for(_notebook, _DEFAULT_ARTIFACT_LANGUAGE),
+    }
+    with _traced(args, task, config, kwargs):
+        result = task.run(**kwargs)
 
     if args.kind == "summary":
         print(result.text)
@@ -302,9 +348,10 @@ def _cmd_audio(args) -> int:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
-    script = GeneratePodcastScript().run(
-        sources=blob, output_language=language, target_length=args.length
-    )
+    task = GeneratePodcastScript()
+    kwargs = {"sources": blob, "output_language": language, "target_length": args.length}
+    with _traced(args, task, config, kwargs):
+        script = task.run(**kwargs)
 
     if not script.utterances:
         # A source with nothing worth discussing is a legitimate answer (audio.py's instructions
@@ -348,6 +395,11 @@ def _add_source_and_notebook_args(sub: argparse.ArgumentParser) -> None:
         "--notebook", default=None,
         help="persist sources under this id across invocations (default: ephemeral, nothing is "
              "saved)",
+    )
+    sub.add_argument(
+        "--trace", default=None, metavar="PATH",
+        help="write this run's reasoning trace to PATH (JSONL). Off by default; the API writes "
+             "traces of its own and prunes them, this one is yours to keep or delete",
     )
 
 
