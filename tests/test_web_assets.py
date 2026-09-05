@@ -1144,8 +1144,22 @@ def test_the_timeline_segment_width_tracks_real_time():
     #   BASIS — a fast call keeps a readable minimum instead of collapsing to a sliver.
     flex = re.search(r"seg\.style\.flex = `([^`]*)`", js)
     assert flex, "timeline segments no longer size themselves"
-    assert "dur" in flex.group(1), f"the grow factor is not the call's duration: {flex.group(1)}"
     assert "${basis}px" in flex.group(1), f"no flex-basis floor: {flex.group(1)}"
+
+    # GROW is the duration NORMALISED by the strip's total, and the normalisation is not cosmetic:
+    # CSS distributes free space in proportion to the grow values and STOPS AT THEIR SUM, so four
+    # millisecond calls floored to 0.01 each summed to 0.04 and left 96% of the strip empty
+    # (reported, with a screenshot). Dividing by the total makes the sum exactly 1 while leaving
+    # every ratio between segments untouched.
+    assert "weight(entry) / weightTotal" in flex.group(1), (
+        f"the grow factor is not a normalised duration: {flex.group(1)}"
+    )
+    weight = re.search(r"const weight = \(entry\) => ([^;]*);", js)
+    assert weight and "entry.duration_s" in weight.group(1), "the weight is no longer the duration"
+    assert "0.01" in weight.group(1), "a zero-duration call must still get a share, not vanish"
+    assert re.search(r"const weightTotal = line\.reduce\(\(sum, e\) => sum \+ weight\(e\)", js), (
+        "the weights are no longer summed, so grow cannot reach 1 and the strip will not fill"
+    )
     basis = re.search(r"const basis = ([^;]*);", js)
     assert basis and "TRAJ_SEG_MIN_PX" in basis.group(1), "the floor is gone"
     # ...and the constant must EXIST. An earlier edit landed the use without the declaration and
@@ -1748,3 +1762,22 @@ def test_a_tool_segment_offers_a_way_back_to_the_turn_that_called_it():
     # Translated, or a Chinese drawer grows an English button (invariant 48's tripwire covers the
     # key; this asserts the literal is not left bare at the call site).
     assert 'Open turn ${entry.turn_index + 1}' in around, around
+
+
+def test_the_strip_numbers_turns_the_way_every_other_surface_does():
+    """The nav rail says "Turn 3", the detail head says "Turn 3", and the strip's mark said `T2`
+    for the same call — the trace data is 0-indexed and only the strip forgot to add one.
+
+    Pinned as the EXPRESSION, not as the token: `entry.turn_index` appears either way, and the
+    whole defect was the missing `+ 1`.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    mark = re.search(r"markLabel\.textContent = `T\$\{([^}]*)\}`", js)
+    assert mark, "the turn mark no longer labels itself"
+    assert mark.group(1).strip() == "entry.turn_index + 1", (
+        f"the strip is numbering turns from zero again: {mark.group(1)}"
+    )
+    # ...and the two panes it has to agree with.
+    assert "`Turn ${entry.turn_index + 1}`" in js
+    assert "`\\u2191 Open turn ${entry.turn_index + 1}`" in js

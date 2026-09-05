@@ -4291,6 +4291,13 @@ function renderTrajTimeline(line, turns) {
     return;
   }
   const total = line.reduce((sum, e) => sum + (e.duration_s || 0), 0) || 1;
+  // **`flex-grow` must SUM to at least 1 or the strip does not fill.** CSS distributes free space
+  // in proportion to the grow values and stops at their sum: four millisecond calls floored to
+  // 0.01 each sum to 0.04, so 96% of the strip stayed empty (reported, with a screenshot).
+  // Normalising by the total makes the sum exactly 1 — the free space is fully distributed and the
+  // RATIOS between segments are unchanged, which is the half that has to survive.
+  const weight = (entry) => Math.max(entry.duration_s || 0, 0.01);
+  const weightTotal = line.reduce((sum, e) => sum + weight(e), 0) || 1;
   let markedTurn = -1;
   line.forEach((entry) => {
     // A "from here = Turn N" marker wherever the owning turn changes, so the strip and the nav are
@@ -4302,7 +4309,11 @@ function renderTrajTimeline(line, turns) {
       mark.className = "turn-mark";
       const markLabel = document.createElement("span");
       markLabel.className = "tm-lab";
-      markLabel.textContent = `T${entry.turn_index}`;
+      // `+ 1`, because every OTHER surface counts turns from one — the nav rail says "Turn 3" and
+      // the detail head says "Turn 3" for the call this mark sits on. The trace data stays
+      // 0-indexed; only the label is human. Without it the strip said T2 for what the two panes
+      // beside it both called turn 3.
+      markLabel.textContent = `T${entry.turn_index + 1}`;
       mark.appendChild(markLabel);
       const markArrow = document.createElement("span");
       markArrow.className = "tm-arrow";
@@ -4327,7 +4338,7 @@ function renderTrajTimeline(line, turns) {
     // reported, from the version before that, which grew against the strip's total with no basis).
     const dur = Math.max(entry.duration_s || 0, 0);
     const basis = Math.max(TRAJ_SEG_MIN_PX, Math.round((dur / total) * 720));
-    seg.style.flex = `${Math.max(dur, 0.01).toFixed(3)} 0 ${basis}px`;
+    seg.style.flex = `${(weight(entry) / weightTotal).toFixed(4)} 0 ${basis}px`;
 
     const icon = document.createElement("span");
     icon.className = "seg-ic";

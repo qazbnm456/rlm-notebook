@@ -11,6 +11,30 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **Two defects a user found in the trajectory strip, both reported from screenshots.**
+
+  **The strip numbered turns from zero while every other surface counted from one.** The nav rail
+  said "Turn 3", the detail head said "Turn 3", and the mark above them said `T2` for the same
+  call. Display-only fix (`T${entry.turn_index + 1}`); the trace data stays 0-indexed. Pinned as
+  the EXPRESSION rather than the token, because `entry.turn_index` reads the same either way and
+  the whole defect was a missing `+ 1`.
+
+  **The strip left most of its width empty.** `flex-grow` distributes free space in proportion to
+  the grow values and STOPS AT THEIR SUM — a run whose calls were 0ms/0ms/25ms/1ms floored to 0.01
+  each summed to **0.06**, so CSS filled 6% of the free space and left 94% blank:
+
+  ```
+  before: grow [0.010, 0.010, 0.025, 0.010]  sum 0.06  ->  6% filled
+  after : grow [0.182, 0.182, 0.455, 0.182]  sum 1.00  -> 100% filled
+  ```
+
+  Normalising by the total makes the sum exactly 1 and leaves every ratio between segments
+  untouched, which is the half that had to survive. The existing test asserted the grow factor was
+  "the duration" and now asserts it is the duration NORMALISED, with the arithmetic in the comment.
+
+  Three mutations killed: numbering from zero again, dropping the normalisation, and making every
+  segment equal.
+
 - **A turn's FIRST tool call no longer shows a gap-derived duration.** The gap reaches back to the
   previous timeline event, which for a turn's first call is on the far side of the model generating
   that whole code cell — so the number displayed was mostly model time wearing a tool's name.

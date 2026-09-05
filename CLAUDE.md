@@ -2116,10 +2116,21 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     one a reader then has to find in the nav by eye is the two-lists-to-correlate problem the
     strip's own turn marks exist to remove.
 
-    **A timeline segment is sized `flex: <duration> 0 <floor>px`, and BOTH halves fix the other's failure**:
-    `flex-grow` against the strip's TOTAL divides it into unreadable slivers, while a fixed `width` leaves a
-    one-call run stranded beside empty space. Grow makes a short run fill the strip; the basis is a floor so
-    a fast call stays legible and the strip SCROLLS rather than squashing. **A segment's label is the
+    **A timeline segment is sized `flex: <normalised duration> 0 <floor>px`, and all three parts fix
+    another's failure**: `flex-grow` against the strip's TOTAL divides it into unreadable slivers,
+    while a fixed `width` leaves a one-call run stranded beside empty space. Grow makes a short run
+    fill the strip; the basis is a floor so a fast call stays legible and the strip SCROLLS rather
+    than squashing.
+
+    **The NORMALISATION is the third part and it is not cosmetic.** CSS distributes free space in
+    proportion to the grow values and STOPS AT THEIR SUM, so a run whose calls are all milliseconds
+    — floored to 0.01 each — summed to 0.06 and left **94% of the strip empty**. Dividing each
+    weight by the total makes the sum exactly 1 while leaving every ratio between segments
+    untouched.
+
+    **A turn mark is labelled `T<index + 1>`.** The trace data is 0-indexed and every other surface
+    counts from one, so the strip said `T2` for the call the nav rail and the detail head both
+    called turn 3. Reported from a screenshot; the fix is display-only and the data stays 0-based. **A segment's label is the
     TARGET, not the family** — the family, offset and owning turn live in the detail pane, which is where
     clicking a segment lands anyway. A `data-tip` on a `.seg` is doomed twice over: the segment clips
     itself, and `.traj-timeline` is an `overflow-x` ancestor (invariant 54's uncovered case). **A
