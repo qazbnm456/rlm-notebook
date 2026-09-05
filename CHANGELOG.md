@@ -11,6 +11,31 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A real episode ended, then restarted: the close rule and the accumulate-across-turns rule had
+  never been checked together.** Invariant 45 asks for an opening, a body and a CLOSE; invariant 64
+  asks for a long script to be built across REPL turns. Neither said WHERE the close goes.
+
+  Measured on a 70-utterance run (`nb-443d7daa`): step 7 appended twenty utterances including a
+  close, reaching 50; step 8 then read a source section it had not covered (`ACT THREE CONTENT`);
+  step 9 appended twenty more, ending in a second close. On screen that is `6:49 感謝大家收聽` ->
+  `6:57 我們回到 AI 挑戰賽的最後一關`.
+
+  The prompt now says the close is written once and last, names the batching as the mechanism, and
+  says what to do if more material turns up afterwards. Prompt-only, same hedge as invariants 4
+  and 11.
+
+  **Two observations from the same traces, neither acted on yet:**
+
+  - **The Trajectory drawer shows NO tool calls for any of these tasks, and that is correct.** The
+    only tools are the validator and `read_skill`; the validator is called from inside REPL Python
+    (`print(validate_podcastscript(...))` in the submitting step) so it produces no `sub_call`
+    event and no timeline segment. It DID run, in all six traced runs. Worth knowing before reading
+    an empty timeline as a compliance failure.
+  - **`read_skill` was called ZERO times across all eight runs of that notebook.** Invariant 65
+    defaults skills ON "because a planner that has to be told to consult its own knowledge base
+    will not" — measured, it does not consult it either way. The catalog is still paid for on every
+    planner turn.
+
 - **The Big5 let-through is enumerated now — all 131 read character by character, 52 SHARED and 79
   flagged.** It closed the recall hole this project's own subject matter fell into: before it
   `基于`, `机器`, `后端`, `优化` and `价值` produced NO flag at all, and `网络`, `标准`, `确认`,

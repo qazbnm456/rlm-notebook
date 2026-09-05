@@ -97,6 +97,15 @@ Give the episode a SHAPE. It has three parts, and the last one is the one most e
    inventing a finding is not.
    An episode that ends mid-fact feels broken even when every fact in it was right.
 
+**There is EXACTLY ONE close, and it is written LAST — after every source you intend to use has
+been covered.** You are building this list across several turns, so it is easy to write a
+concluding exchange for the batch you just finished, then find material you had not reached and
+keep going. A real run did exactly that: it said "thanks for listening, see you next time" at
+utterance 48, then read an unused section of the sources and appended twenty more turns with a
+second close. The listener hears the episode end and restart. So: before you write ANY closing
+turn, check that there is nothing left you meant to cover. If you find more afterwards, the close
+you already wrote has to move to the end rather than stay where it is.
+
 **Write to be SPOKEN, but keep a name as its source wrote it.** This script is read aloud AND read
 on screen, and the same `Utterance.text` is both — so a proper noun, a product, a standard or an
 identifier stays in its original form (`Voyager 1`, `NASA`, `CVE-2026-1234`), not transliterated

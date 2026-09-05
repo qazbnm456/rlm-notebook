@@ -1220,6 +1220,16 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     that draws the threads together, with any reflection grounded in the sources ("what this makes me
     wonder" is honest, inventing a finding is not).
 
+    **There is EXACTLY ONE close and it is written LAST, after every source the model means to use
+    has been covered — a rule that exists because this one and invariant 64 had never been checked
+    together.** The shape rule asks for a close; invariant 64 asks for a long script to be
+    ACCUMULATED across REPL turns. Neither said where the close goes, so a model that finishes a
+    batch writes a concluding exchange for it, then finds material it had not reached and keeps
+    going. Measured on a real 70-utterance episode: `感謝大家收聽` / `再見` at utterances 48-49,
+    then a step that read an unused section of the sources, then twenty more turns ending in a
+    SECOND close. The listener hears the episode end and restart. Prompt-only, with invariant 4's
+    residual-risk hedge.
+
     **Foreign proper nouns stay as the source wrote them — this REVERSES an earlier transliteration
     rule, and the reversal is the point.** That rule existed because kokoro's Chinese G2P passed Latin
     text through unconverted, mangling `NASA`; kokoro is gone, and the assumption that this

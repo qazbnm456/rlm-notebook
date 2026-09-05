@@ -248,3 +248,29 @@ def test_no_prompt_hardcodes_a_skill_name():
                 f"{cls.__name__}'s prompt names the `{name}` skill, so pointing `skills_dir` "
                 f"elsewhere leaves it asking for something the catalog does not list"
             )
+
+
+def test_the_close_is_written_once_and_last():
+    """Two rules that had never met. The shape rule asks for an opening, a body and a CLOSE;
+    `ACCUMULATE_LARGE_OUTPUTS` asks for a long script to be built across REPL turns. Nothing said
+    the close is written ONCE, at the END, after every source is covered.
+
+    Measured, not hypothetical: a real 70-utterance run wrote `感謝大家收聽` / `再見` at utterances
+    48-49, then read an unused section of its sources (`ACT THREE CONTENT`) and appended twenty
+    more turns with a second close. The listener heard the episode end and restart.
+
+    Prompt-only, with the same residual-risk hedge as invariants 4 and 11 — the offline suite
+    drives a scripted LM and can demonstrate compliance with none of it.
+    """
+    # The CLASS attribute, composed at import time — constructing needs a configured runtime, and
+    # a first version of this test passed only because an earlier test in this file had configured
+    # one. In isolation it raised. That is this project's own "green for an unrelated reason".
+    instructions = GeneratePodcastScript.instructions
+
+    assert "EXACTLY ONE close" in instructions
+    # It has to sit with the SHAPE, after the close is introduced — a rule about where the close
+    # goes is unreadable before the reader knows there is one.
+    assert instructions.index("EXACTLY ONE close") > instructions.index("3. A CLOSE")
+    # And it must name the batching, since that is the mechanism that produces the second close.
+    tail = instructions[instructions.index("EXACTLY ONE close") :][:900]
+    assert "across several turns" in tail, tail
