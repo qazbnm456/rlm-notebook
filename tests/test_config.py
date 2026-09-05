@@ -275,20 +275,30 @@ def test_setup_forwards_every_budget_to_the_harness(monkeypatch):
 
 
 def test_the_planner_token_cap_is_this_projects_own_choice(monkeypatch):
-    """16384, not `RLMConfig`'s own 8192. dspy reads `content` and DISCARDS `reasoning_content`, so
-    a reasoning model's chain-of-thought is billed against a cap it never appears in — the reply
-    comes back empty or cut mid-JSON, and `max_retries=1` makes that terminal.
+    """32768, not `RLMConfig`'s own 8192 and no longer the 16384 that replaced it. dspy reads
+    `content` and DISCARDS `reasoning_content`, so a reasoning model's chain-of-thought is billed
+    against a cap it never appears in — the reply comes back empty or cut mid-JSON, and
+    `max_retries=1` makes that terminal.
 
     Pinned because it looks like a value someone drifted, and because it is invisible until a model
-    switch: verified as a single-variable change on a real run, where 8192 killed
-    `GeneratePodcastScript` at turn 0 and 16384 produced a full script from the same corpus.
-    `ctx-distillery` documents the same trap and recommends the same number.
+    switch: 8192 killed `GeneratePodcastScript` at turn 0 and 16384 produced a full script from the
+    same corpus; then a live run hit 16384 exactly and came back `Invalid Python syntax`, cut
+    mid-code, while the model was already batching its output across turns.
+
+    **The size is measured, not doubled on principle.** a sibling project ran 3,683 calls on the same
+    model under 32768: median 1,621, p99 15,030, at cap 0.71%, and the band from 60% to 90% of that
+    cap is EMPTY — legitimate long turns end below ~16k and everything at the cap is a runaway no
+    cap would save. So this buys the tail the old value was cutting, and a further doubling buys
+    nothing by that data. Raise it again only against a distribution, never against one truncation.
     """
     monkeypatch.setenv("RN_MAIN_MODEL", "openai/gpt-5")
     monkeypatch.delenv("RN_INTERPRETER", raising=False)
     monkeypatch.delenv("RN_MAX_TOKENS", raising=False)
-    assert NotebookConfig.from_env().max_tokens == 16384
-    assert NotebookConfig().max_tokens == 16384
+    assert NotebookConfig.from_env().max_tokens == 32768
+    assert NotebookConfig().max_tokens == 32768
+    # It reaches BOTH seats: runtime.configure builds one lm_kwargs for main and sub alike.
+    monkeypatch.setenv("RN_MAX_TOKENS", "1234")
+    assert NotebookConfig.from_env().max_tokens == 1234
 
 
 def test_the_repl_output_cap_is_this_projects_own_choice(monkeypatch):

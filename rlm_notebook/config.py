@@ -155,7 +155,29 @@ class NotebookConfig:
     #: with two trace events and `Expected to find output fields: [reasoning, code]. Actual: []`,
     #: the LM response being a fragment of the schema from its own prompt. Raising the cap is the
     #: fix; retrying is not, because the second attempt hits the same ceiling.
-    max_tokens: int = 16384
+    #:
+    #: **RAISED AGAIN, 16384 -> 32768, and the size is measured rather than doubled on principle.**
+    #: A live `GeneratePodcastScript` run hit 16384 exactly on call 5 of 10 and came back
+    #: `[Error] Invalid Python syntax` — cut mid-code — costing an iteration. That call left 407
+    #: characters of reasoning and 995 of code in the trace, and the model was ALREADY batching
+    #: 5-20 utterances per step, so this is invariant 59's case (the planner's chain-of-thought did
+    #: not fit) and NOT invariant 64's (an output that should never have been one reply). The
+    #: project's own rule says only the first justifies a raise.
+    #:
+    #: a sibling project supplied the distribution this project cannot produce for itself — 3,683
+    #: model calls on the same `qwen36_35b_a3b` under a 32768 cap: median 1,621, p90 6,993, p99
+    #: 15,030, at cap 26 (0.71%). **The band from 60% to 90% of that cap is EMPTY.** Legitimate
+    #: long turns end below ~16k — the 26 calls in the 13-16k bucket are exactly what THIS cap was
+    #: cutting — and everything reaching 32768 is a runaway no cap would save (three of their six
+    #: fatal parses were the model writing `{The user wants to write…` until it ran out). So the
+    #: doubling buys the legitimate tail and a further doubling buys nothing, by that data.
+    #:
+    #: **The cost, also theirs, measured**: a run WITH a cap hit is ~2.5x the completion tokens and
+    #: ~2.5x the wall clock of one without. At 0.71% of calls that is noise, and the same runaways
+    #: under the old cap cost half each and failed the same runs anyway. One thing that does NOT
+    #: transfer: their cap hits are single turns, while `max_iterations` here is 25 and the budgets
+    #: MULTIPLY — `run_timeout_seconds` (scaled per podcast tier) is the only bound on that.
+    max_tokens: int = 32768
     #: How much of a REPL OUTPUT reaches the planner's prompt — dspy head+tail-truncates past this.
     #: The LAST field of the same shape as `max_tokens`, and `ctx-distillery`'s own audit says a full
     #: sweep of `RLMConfig` found exactly those two. It raised its own to 40000; this project sat at
@@ -223,7 +245,7 @@ class NotebookConfig:
             max_iterations=_env_int("RN_MAX_ITERATIONS", 25),
             max_llm_calls=_env_int("RN_MAX_LLM_CALLS", 30),
             max_retries=_env_int("RN_MAX_RETRIES", 1),
-            max_tokens=_env_int("RN_MAX_TOKENS", 16384),
+            max_tokens=_env_int("RN_MAX_TOKENS", 32768),
             max_output_chars=_env_int("RN_MAX_OUTPUT_CHARS", 40_000),
             adapter=(os.getenv("RN_ADAPTER") or "json").strip(),
             max_corpus_chars=_env_int("RN_MAX_CORPUS_CHARS", _DEFAULT_MAX_CORPUS_CHARS),

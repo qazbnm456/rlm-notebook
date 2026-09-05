@@ -11,6 +11,41 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **`max_tokens` 16384 -> 32768, sized against a distribution rather than against the truncation
+  that prompted it.** A live `GeneratePodcastScript` call hit 16384 exactly on call 5 of 10 and
+  came back `[Error] Invalid Python syntax` — cut mid-code — costing an iteration.
+
+  It is invariant 59's case and not invariant 64's, which is what makes a raise the right answer
+  rather than a restructure: the model was ALREADY batching 5-20 utterances per step, and the
+  truncated call left 407 characters of reasoning and 995 of code in the trace. The tokens went
+  into chain-of-thought that dspy discards.
+
+  **One truncation is not a size.** a sibling project supplied the distribution this project cannot
+  produce for itself — 3,683 calls on the same `qwen36_35b_a3b` under a 32768 cap:
+
+  | | |
+  |---|---|
+  | median / p90 / p99 | 1,621 / 6,993 / 15,030 |
+  | at cap | 26 calls, 0.71% |
+  | 40-50% of cap (13-16k) | 26 calls — exactly what the old cap was cutting |
+  | 50-60% | 1 call |
+  | **60-90%** | **ZERO** |
+
+  That empty band is the finding: legitimate long turns end below ~16k and everything reaching the
+  cap is a runaway no cap would save (three of their six fatal parses were the model writing
+  `{The user wants to write…` until it ran out). The doubling buys the tail; a second one buys
+  nothing. **Do not raise it again without a distribution.**
+
+  Their measured cost: a run with a cap hit is ~2.5x tokens and ~2.5x wall clock, which at 0.71% is
+  noise. What does NOT transfer: their cap hits are single turns, while `max_iterations` here is 25
+  and the budgets multiply — `run_timeout_seconds` is the only bound on a looping runaway.
+
+  Also checked, because the sibling suggested it before concluding the model declines the skill:
+  `read_skill` IS wired and IS advertised — a real instance carries
+  `[validate_podcastscript, read_skill]` and the prompt holds a closed `<available_skills>` catalog
+  naming it. So the zero calls are a genuine decline, consistent with that project's 15% overall
+  and 2-of-16 on its craft skill.
+
 - **A real episode ended, then restarted: the close rule and the accumulate-across-turns rule had
   never been checked together.** Invariant 45 asks for an opening, a body and a CLOSE; invariant 64
   asks for a long script to be built across REPL turns. Neither said WHERE the close goes.
