@@ -34,6 +34,14 @@ dependencies = [
     # this project's whole OCR path (rapidocr -> cv2) with it. Verified on 3.11 with numpy 1.26.4.
     "numpy>=2",
     "pydantic>=2.9",
+    # Simplified/Traditional character mapping, used ONLY by `instructions`'s pre-SUBMIT script
+    # check. It earns its place by producing the SUGGESTION, not the detection: Big5-encodability
+    # (a stdlib codec) is what decides whether a character belongs to the Traditional inventory,
+    # because zhconv's own SIMPONLY set includes `干`, `台`, `群` and `里`, which are correct
+    # Traditional in their own right — measured, and the reason a zhconv-as-converter design was
+    # rejected. What zhconv supplies is `对 -> 對` for the rejection message. Pure Python plus one
+    # JSON table, loaded lazily and only for a run whose output language is Chinese.
+    "zhconv>=1.4",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",
     # PDF text extraction + page rasterization (for OCR dispatch — parsers/_ocr.py). Wraps Google's

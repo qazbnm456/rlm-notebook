@@ -138,3 +138,211 @@ def test_the_chat_answer_shape_rules_reach_the_prompt(phrase):
     from rlm_notebook.task import AnswerQuestion
 
     assert phrase in AnswerQuestion.instructions
+
+
+# --- the pre-SUBMIT script check ------------------------------------------------------------
+
+#: Correct Traditional characters a `zhconv` diff flags but this check must never touch. All nine
+#: were measured in real prose in this project's own notebooks (`干預`, `一台`, `一群`, `里程碑`).
+CORRECT_TRADITIONAL = "干台群里面系松板折繁體字概覽模組臺灣麼對點問題爾茲峽個們這"
+#: Measured Simplified drift in two real notebooks' podcast fields.
+MEASURED_DRIFT = {"尔": "爾", "兹": "茲", "峡": "峽", "对": "對", "点": "點", "问": "問", "题": "題"}
+
+
+def _drifted(text, quote="正體"):
+    import json
+
+    return json.dumps(
+        {
+            "utterances": [
+                {
+                    "speaker": "host_a",
+                    "text": text,
+                    "citations": [
+                        {"source_id": "s1", "locator": "whole", "quote": quote, "answer_span": ""}
+                    ],
+                }
+            ]
+        }
+    )
+
+
+def test_the_wrong_script_table_never_flags_a_correct_traditional_character():
+    """PRECISION is the property that matters, and it is bought with recall.
+
+    A false positive is a rejection the model cannot satisfy, which spends the step budget looping
+    and loses a paid-for episode over one glyph. So the table is built from BIG5-ENCODABILITY, not
+    from `zhconv`'s own `SIMPONLY` set — that set contains `干`, `台`, `群` and `里`, all of which
+    appear in correct prose in this project's real notebooks.
+    """
+    from rlm_notebook.instructions import _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+    assert not [c for c in CORRECT_TRADITIONAL if c in wrong]
+    # The mirror table must not condemn ordinary Simplified either.
+    assert not [c for c in "简体字概览模块对点问题" if c in _wrong_script_chars("hans")]
+
+
+def test_the_wrong_script_table_names_the_fix_for_every_measured_drift_character():
+    """The rejection has to be mechanically actionable, so each offender carries its right form.
+
+    `么` is deliberately ABSENT: it is a valid Big5 character, so `怎么` is not caught. Recall is
+    where this design spends its uncertainty — a missed character is one wrong glyph on screen.
+    """
+    from rlm_notebook.instructions import _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+    for bad, good in MEASURED_DRIFT.items():
+        assert wrong.get(bad) == good, f"{bad} should be reported as {good}"
+    assert "么" not in wrong, "the accepted false negative; see the docstring before 'fixing' it"
+
+
+def test_the_script_check_blocks_once_and_never_holds_a_run_hostage():
+    """It fires AT MOST ONCE per run, and that bound is the design.
+
+    Every other check here rejects something WRONG; a Simplified character is cosmetic, and the
+    detector cannot tell one from a Japanese glyph being quoted inline. A check the model cannot
+    satisfy loses the whole episode — the trade invariant 66 already refuses elsewhere.
+    """
+    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.schema import PodcastScript
+
+    validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: "hant")
+    first = validate(_drifted("這有点像人類的合作，海峡的问题。"))
+    assert first.startswith("Validation failed"), first
+    # Named WITH its fix, or the model is being told only that it is wrong.
+    assert "点 -> 點" in first and "峡 -> 峽" in first and "问 -> 問" in first
+    # ...and the second call passes the identical input.
+    assert not validate(_drifted("這有点像人類的合作，海峡的问题。")).startswith("Validation failed")
+
+
+def test_a_quoted_character_is_exempt_from_the_script_check():
+    """`quote` is verbatim source text, and this project's own corpora carry JAPANESE, whose
+    shinjitai collide with Chinese simplified forms — `学`, `会`, `国` and `峡` are all flagged by
+    the character test and are correct inside a Japanese quotation. Same exemption, and the same
+    reason, as `_marker_offenders`."""
+    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.schema import PodcastScript
+
+    validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: "hant")
+    clean_prose_japanese_quote = _drifted("這一段完全是正體字。", quote="ホルムズ海峡の学会")
+    assert not validate(clean_prose_japanese_quote).startswith("Validation failed")
+
+
+def test_the_script_check_is_inert_when_the_language_pins_no_script():
+    """`script_family` matches on the language NAME, which is correct HERE and was wrong in the
+    prompt: `arun` receives the RESOLVED value, while a class-level `instructions` string is
+    composed at import time and only ever sees the placeholder. Do not unify the two."""
+    from rlm_notebook.instructions import make_grounded_validator, script_family
+    from rlm_notebook.schema import PodcastScript
+
+    assert script_family("Traditional Chinese") == "hant"
+    assert script_family("zh-Hant") == "hant"
+    assert script_family("Simplified Chinese") == "hans"
+    assert script_family("English") is None and script_family(None) is None
+
+    validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: None)
+    assert not validate(_drifted("這有点像人類的合作。")).startswith("Validation failed")
+
+
+def test_every_shipped_task_wires_the_script_check_to_its_own_run():
+    """Through the SHIPPED classes and their real `tools`, not a hand-built validator.
+
+    This file exists because its first version tested a call shape the product never makes, and a
+    green suite hid a feature that was entirely dead. The validator is built in `GroundedTask.
+    __init__` from a `lambda: self._script`, so pointing that attribute at a family and calling the
+    task's own tool is the same path a run takes.
+    """
+    import rlm_harness.runtime as rt
+    from rlm_harness import RLMConfig
+    from rlm_harness.testing import scripted_lm
+
+    dummy = scripted_lm([{"reasoning": "r", "code": "SUBMIT"}])
+    rt.configure(
+        RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False),
+        main_lm=dummy,
+        sub_lm=dummy,
+    )
+
+    from rlm_notebook.audio import GeneratePodcastScript
+    from rlm_notebook.guide import (
+        GenerateFAQ,
+        GenerateKeyInsight,
+        GenerateSummary,
+        GenerateTimeline,
+    )
+    from rlm_notebook.task import AnswerQuestion
+
+    for cls in (
+        AnswerQuestion,
+        GenerateSummary,
+        GenerateFAQ,
+        GenerateTimeline,
+        GenerateKeyInsight,
+        GeneratePodcastScript,
+    ):
+        task = cls(skills_dir=None)
+        assert task._script is None, f"{cls.__name__} must start with no script pinned"
+        task._script = "hant"
+        payload = _payload_for(task.output_model, "這有点像合作，海峡的问题。")
+        verdict = task.tools[0](payload)
+        assert verdict.startswith("Validation failed"), f"{cls.__name__}: {verdict}"
+        assert "点 -> 點" in verdict, cls.__name__
+
+
+def test_arun_captures_the_resolved_output_language():
+    """`_script` comes from the run's own kwargs. A task that never captured it would leave the
+    check inert everywhere, which is exactly how the prompt rule this file already records spent
+    its life shipping and doing nothing."""
+    import rlm_harness.runtime as rt
+    from rlm_harness import RLMConfig
+    from rlm_harness.testing import scripted_lm
+
+    dummy = scripted_lm([{"reasoning": "r", "code": "SUBMIT"}])
+    rt.configure(
+        RLMConfig(main_model="x", sub_model="x", interpreter="pyodide", observe=False),
+        main_lm=dummy,
+        sub_lm=dummy,
+    )
+
+    import asyncio
+
+    from rlm_harness import RLMTask
+
+    from rlm_notebook.task import AnswerQuestion
+
+    task = AnswerQuestion(skills_dir=None)
+    seen = {}
+
+    async def fake(self, **inputs):
+        seen["script"] = self._script
+
+    original = RLMTask.arun
+    RLMTask.arun = fake
+    try:
+        asyncio.run(task.arun(sources="", question="q", output_language="Traditional Chinese"))
+        assert seen["script"] == "hant"
+        asyncio.run(task.arun(sources="", question="q", output_language="English"))
+        assert seen["script"] is None
+    finally:
+        RLMTask.arun = original
+
+
+def _payload_for(model, text):
+    """One minimal valid instance of `model` carrying `text` in a prose field."""
+    import json
+
+    name = model.__name__
+    cite = {"source_id": "s1", "locator": "whole", "quote": "q", "answer_span": ""}
+    shapes = {
+        "Answer": {"text": text, "citations": [cite], "follow_ups": []},
+        "Summary": {"text": text, "citations": [cite]},
+        "KeyInsight": {"text": text, "citations": [cite]},
+        "FAQ": {"items": [{"question": text, "answer": text, "citations": [cite]}]},
+        "Timeline": {"events": [{"when": "2026", "description": text, "citations": [cite]}]},
+        "PodcastScript": {"utterances": [{"speaker": "host_a", "text": text, "citations": [cite]}]},
+    }
+    # Read off `model_fields` rather than trusted: a task whose output shape changes must fail
+    # LOUDLY here instead of silently testing a payload the schema no longer accepts.
+    assert name in shapes, f"no payload shape for {name}; add one rather than skipping it"
+    return json.dumps(shapes[name])

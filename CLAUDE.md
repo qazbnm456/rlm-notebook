@@ -822,9 +822,14 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       block of it. The exclusion was never checked against the corpus, only against the plausible
       story that a name in a foreign script must have come from somewhere.
 
-      **That is the inverse of the sibling's case**, whose failure was in page TITLES, and it is
-      why no validator was added: every condition justifying one (short, navigational, repeated,
-      demonstrably drifting) is absent, and the one field that would qualify here does not drift.
+      **That is the inverse of the sibling's case**, whose failure was in page TITLES. It is why a
+      validator was declined for a long time — every condition justifying one (short, navigational,
+      repeated, demonstrably drifting) was read as absent, and the one field that would qualify
+      does not drift. **Two of those moved and one is now built** (invariant 66's fourth check):
+      the drift is real and three times larger than published, and the correct output is
+      demonstrably knowable BY THE MODEL — asked directly it writes `霍爾木茲海峽` correctly — which
+      is what separates a reject-and-look-again check from a converter. A `zhconv` CONVERTER stays
+      wrong for the reason recorded above: it rewrites `干`, `台`, `群` and `里`.
 
       **Measured live, A/B on one notebook, and NOT significant.** Same four sources, same
       `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long` tier, 258s — only
@@ -1768,6 +1773,34 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     is the same hole; and telling a model to "put the coordinate in the accompanying `citations` entry" when
     the offender IS a citation field is advice it cannot follow, costing the whole step budget looping on
     it. **A guard that fails open is worse than no guard, because the prompt still promises it.**
+
+    **A FOURTH check, and the only one here that is allowed to be wrong**: when the run's resolved
+    `output_language` names a Chinese variety (`script_family`, from the `arun` kwarg — matching on
+    the language NAME is correct HERE and was wrong in the prompt, which only ever sees invariant
+    39's placeholder), every character of the model's own prose is tested against the other
+    script's inventory.
+
+    - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
+      tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
+      project's real notebooks use correctly (`干預`, `一台`, `里程碑`) — so it would condemn good
+      prose. Big5 answers the question that matters, "does this glyph exist in the Traditional
+      inventory at all". `zhconv` is still the dependency, for the SUGGESTION (`对 -> 對`) and to
+      bound the set to known Simplified forms so a rare Traditional character outside Big5 is not
+      flagged.
+    - **Recall is deliberately imperfect and precision is not.** `么` is a valid Big5 character, so
+      `怎么` passes. A missed character is one wrong glyph on screen; a false one is a rejection the
+      model cannot satisfy.
+    - **It fires AT MOST ONCE per run, and that bound is the design.** Every other check here
+      rejects something WRONG; a Simplified character is COSMETIC, and the detector cannot tell one
+      from a Japanese glyph being quoted inline — `学`, `会`, `国` and `峡` are shinjitai, and this
+      project's own corpora carry Japanese. A blocking check the model cannot satisfy spends the
+      step budget looping and loses a paid-for episode over one glyph, which is the trade the "net
+      must not destroy what it was protecting" rule below already refuses. So the model is made to
+      look at the list exactly once and is never held hostage to it. `quote` is exempt for the same
+      reason it is exempt from the marker walk, one step sharper.
+    - **Replayed against real measured output**: 17 offenders on the episode that motivated it and
+      6 on the one after, every one a genuine drift, and 0 on a notebook whose only drift was `么`.
+      Zero false positives across 119 utterances produced against a corpus containing Japanese.
 
     **Three layers, none sufficient alone and all cheap**: this validator (before SUBMIT),
     `citations.strip_markers` at the display boundary (invariant 62), and `tts.spoken_script` before

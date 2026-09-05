@@ -13,6 +13,7 @@ from __future__ import annotations
 import os
 import re
 from collections.abc import Callable
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
@@ -109,8 +110,90 @@ def _cited_coordinates(value: Any, path: str = "") -> list[tuple[str, str]]:
     return found
 
 
+#: Languages whose name pins a SCRIPT, for the runtime check below. Matching on the language NAME is
+#: correct HERE and was wrong in the prompt: `arun` receives the RESOLVED value ("Traditional
+#: Chinese"), while a class-level `instructions` string is composed at import time and only ever sees
+#: the literal placeholder. That distinction is the whole reason `SCRIPT_PINNED` is worded
+#: conditionally and this is not — do not "unify" them.
+_SCRIPT_NEEDLES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("hant", ("traditional chinese", "zh-hant", "zh-tw", "zh-hk", "繁體", "繁体", "正體")),
+    ("hans", ("simplified chinese", "zh-hans", "zh-cn", "简体")),
+)
+
+
+def script_family(language: str | None) -> str | None:
+    """`"hant"`, `"hans"`, or `None` when the language does not pin a Chinese script."""
+    lowered = (language or "").lower()
+    for family, needles in _SCRIPT_NEEDLES:
+        if any(needle in lowered for needle in needles):
+            return family
+    return None
+
+
+@lru_cache(maxsize=2)
+def _wrong_script_chars(family: str) -> dict[str, str]:
+    """Characters that are unambiguously the WRONG script for `family`, mapped to the right one.
+
+    **The membership test is a legacy CODEC, not zhconv's own `SIMPONLY`/`TRADONLY` sets.** Those
+    sets were tried first and are unusable here: `SIMPONLY` contains `干`, `台`, `群` and `里`,
+    which are ordinary Traditional characters (`干預`, `一台`, `里程碑`) that a correct episode
+    uses — measured on this project's own notebooks, where all four appear in prose that is not
+    wrong. Big5 answers the question that actually matters, "does this glyph exist in the
+    Traditional inventory at all", and `干` is in Big5 while `对` is not. zhconv is still needed,
+    for the SUGGESTION (`对 -> 對`) and to bound the set to known Simplified forms, without which a
+    rare Traditional character outside Big5 would be flagged.
+
+    **Deliberately imperfect RECALL, never precision.** `么` is a valid Big5 character, so `怎么`
+    is not flagged even though it is Simplified usage. A missed character costs one wrong glyph on
+    screen; a false one costs a paid-for run (see `make_grounded_validator`), so the whole
+    uncertainty is spent on the safe side.
+    """
+    import zhconv.zhconv as _zh
+
+    locale, codec = ("zh-hant", "big5") if family == "hant" else ("zh-hans", "gbk")
+    mapping = _zh.getdict(locale)
+    out: dict[str, str] = {}
+    for src, dst in mapping.items():
+        if len(src) != 1 or len(dst) != 1 or src == dst:
+            continue
+        try:
+            src.encode(codec)
+        except (UnicodeEncodeError, UnicodeError):
+            out[src] = dst
+    return out
+
+
+def _script_offenders(value: Any, wrong: dict[str, str], path: str = "") -> list[tuple[str, str, str]]:
+    """`(path, character, correct form)` for every wrong-script character in the model's own prose.
+
+    `quote` is EXEMPT for `_marker_offenders`' reason ONE step sharper: a quote is copied verbatim
+    out of a source, and this project's own corpora include JAPANESE, whose shinjitai collide with
+    Chinese simplified forms — `学`, `会`, `国`, `峡` and thirty-odd others are flagged by the test
+    above and are correct inside a Japanese quotation. The same walk shape as `_marker_offenders`,
+    including reading `model_fields` off `type(value)` rather than the instance, for the reason
+    recorded there: that walk must never fail open.
+    """
+    if isinstance(value, str):
+        return [(path, c, wrong[c]) for c in dict.fromkeys(value) if c in wrong]
+    if isinstance(value, (list, tuple, set, frozenset)):
+        return [o for i, v in enumerate(value) for o in _script_offenders(v, wrong, f"{path}[{i}]")]
+    if isinstance(value, dict):
+        return [o for k, v in value.items() for o in _script_offenders(v, wrong, f"{path}[{k!r}]")]
+    fields = getattr(type(value), "model_fields", None)
+    if fields:
+        out: list[tuple[str, str, str]] = []
+        for name in fields:
+            if name == "quote":
+                continue
+            out += _script_offenders(getattr(value, name), wrong, f"{path}.{name}" if path else name)
+        return out
+    return []
+
+
 def make_grounded_validator(
-    model: type, coordinates: Callable[[], set[str]] | None = None
+    model: type,
+    coordinates: Callable[[], set[str]] | None = None,
+    script: Callable[[], str | None] | None = None,
 ) -> Callable[[str], str]:
     """`rlm_harness`'s schema validator PLUS a check the schema cannot express: no `[[SRC:...]]`
     marker anywhere in the model's own prose.
@@ -129,6 +212,16 @@ def make_grounded_validator(
     A guard on the one task that made a noise is a guard on the symptom.
     """
     schema_check = make_schema_validator(model)
+    # The script check fires AT MOST ONCE per run, and that bound is the design rather than an
+    # optimisation. Every other check here rejects something that would be WRONG — a leaked marker,
+    # a coordinate that resolves to nothing. A Simplified character in Traditional prose is
+    # COSMETIC, and the detector cannot distinguish it from a Japanese glyph the model is quoting
+    # inline (`学`, `会`, `国` and `峡` are all shinjitai, and this project's own corpora carry
+    # Japanese). A blocking check the model cannot satisfy spends the whole step budget looping and
+    # loses a paid-for episode over one wrong glyph — the trade invariant 66 already refuses for
+    # `tts.spoken_script`. So the model is made to look at the list exactly once and is never held
+    # hostage to it.
+    script_reported = False
 
     def validate(data_json_str: str) -> str:
         """Validate a JSON string against the expected output schema AND check that no
@@ -180,6 +273,24 @@ def make_grounded_validator(
                     f"never composed from the passage's wording. Real markers in this corpus look "
                     f"like: {', '.join(repr(s) for s in sample)}. Search `sources` for the marker "
                     f"that precedes the block you are citing and copy both parts of it verbatim."
+                )
+        nonlocal script_reported
+        family = script() if script else None
+        if family and not script_reported:
+            wrong = _wrong_script_chars(family)
+            offenders = _script_offenders(model.model_validate_json(data_json_str), wrong)
+            if offenders:
+                script_reported = True
+                want = "Traditional" if family == "hant" else "Simplified"
+                listed = "; ".join(f"{path}: {bad} -> {good}" for path, bad, good in offenders[:8])
+                more = f" (and {len(offenders) - 8} more)" if len(offenders) > 8 else ""
+                return (
+                    f"Validation failed: {len(offenders)} field(s) carry a character from the wrong "
+                    f"script for {want} Chinese — {listed}{more}. Rewrite each in {want} and "
+                    f"validate again. A character that is verbatim from a source — a name or a "
+                    f"title the sources spell that way, or Japanese text you are quoting — is the "
+                    f"one exception, and this check cannot see the difference; keep those as they "
+                    f"are."
                 )
         return verdict
 
@@ -250,7 +361,12 @@ class GroundedTask(RLMTask):
     #: base will not.
     def __init__(self, *, skills_dir: str | None = SKILLS_DIR, **kw: Any) -> None:
         self._coordinates: set[str] = set()
-        self.tools = [make_grounded_validator(self.output_model, lambda: self._coordinates)]
+        self._script: str | None = None
+        self.tools = [
+            make_grounded_validator(
+                self.output_model, lambda: self._coordinates, lambda: self._script
+            )
+        ]
         apply_skills(self, skills_dir)
         super().__init__(**kw)
 
@@ -269,6 +385,10 @@ class GroundedTask(RLMTask):
         guard that silently stops checking is the failure mode invariant 66 already records.
         """
         self._coordinates = coordinates_in(inputs.get("sources", "") or "")
+        # The RESOLVED language, which only exists per run — the prompt beside it can only ever
+        # hold the placeholder (see `_SCRIPT_NEEDLES`). `None` for any language that does not pin a
+        # Chinese script, which is what makes the check inert for every other run.
+        self._script = script_family(inputs.get("output_language"))
         return await super().arun(**inputs)
 
 
@@ -423,10 +543,11 @@ def validate_before_submit_rule(tool_name: str) -> str:
     """
     return (
         f"Before you SUBMIT, validate your draft JSON with the `{tool_name}` tool, and only\n"
-        f"submit after it reports success. It checks three things: the JSON shape, that no\n"
-        f"`[[SRC:...]]` marker leaked into your own prose, and that every citation's\n"
-        f"`source_id`/`locator` pair actually occurs as a marker in `sources`. That last one is\n"
-        f"the common mistake — a locator is COPIED from a marker, never composed from the\n"
-        f"passage's own wording. It still cannot confirm your prose faithfully represents the\n"
-        f"passage you cited; that remains yours to get right."
+        f"submit after it reports success. It checks four things: the JSON shape, that no\n"
+        f"`[[SRC:...]]` marker leaked into your own prose, that every citation's\n"
+        f"`source_id`/`locator` pair actually occurs as a marker in `sources`, and — when you were\n"
+        f"asked to write in a Chinese variety — that no character belongs to the other script.\n"
+        f"The coordinate one is the common mistake: a locator is COPIED from a marker, never\n"
+        f"composed from the passage's own wording. It still cannot confirm your prose faithfully\n"
+        f"represents the passage you cited; that remains yours to get right."
     )

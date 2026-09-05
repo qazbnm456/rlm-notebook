@@ -11,6 +11,44 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A pre-SUBMIT script check now catches Simplified characters in Traditional output, and it is
+  the only check here that is allowed to be wrong.** Invariant 39 had declined a validator; two of
+  its conditions moved — the drift is real and three times larger than published (19 sites), and
+  the correct output is demonstrably knowable BY THE MODEL, which is what separates a
+  reject-and-look-again check from a converter.
+
+  **The membership test is Big5-encodability, and that is the finding that made it possible.**
+  `zhconv`'s own `SIMPONLY` set was tried first and is unusable: it contains `干`, `台`, `群` and
+  `里`, which are ordinary Traditional characters this project's real notebooks use correctly. Big5
+  answers "does this glyph exist in the Traditional inventory at all" — `干` is in it, `对` is not.
+  `zhconv` is still the dependency, for the SUGGESTION (`对 -> 對`) and to bound the set to known
+  Simplified forms.
+
+  **Three properties, each a deliberate loss:**
+
+  | property | choice | cost |
+  |---|---|---|
+  | precision | absolute — no correct Traditional character may be flagged | `么` passes, because it is valid Big5 |
+  | blocking | fires AT MOST ONCE per run | a determined model can submit drifted prose |
+  | scope | `quote` exempt | a Simplified character inside a quotation is never caught |
+
+  **The one-shot bound is the design, not an optimisation.** Every other check in
+  `make_grounded_validator` rejects something WRONG; a Simplified character is COSMETIC, and the
+  detector cannot distinguish one from a Japanese glyph being quoted inline — `学`, `会`, `国` and
+  `峡` are shinjitai and this project's own corpora carry Japanese. A blocking check the model
+  cannot satisfy spends the step budget looping and loses a paid-for episode over one glyph, which
+  is the trade invariant 66 already refuses for `tts.spoken_script`.
+
+  **Replayed against real measured output**: 17 offenders on the episode that motivated this, 6 on
+  the one after it, every one a genuine drift; 0 on the notebook whose only drift was `么`. Zero
+  false positives across 119 utterances produced against a corpus containing Japanese.
+
+  Six mutations run against the new tests, all killed: removing the check, dropping the `quote`
+  exemption, removing the one-shot bound, using the raw `zhconv` table without the Big5 gate,
+  dropping the `arun` capture, and unwiring it from `GroundedTask`. `validate_before_submit_rule`
+  now says four things rather than three, because a prompt describing three checks while four run
+  is the drift invariant 13 exists to prevent.
+
 - **"The model cannot write `峽`" was falsified for about 600 tokens.** The live episode left one
   character of `霍爾木茲海峡` unconverted, and the obvious reading was a vocabulary limit no prompt
   could reach. Asked directly, the same configured LM returns `霍爾木茲海峽` — all six characters
