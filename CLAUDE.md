@@ -1838,6 +1838,15 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     shipped it. **`_SCRIPT_REPORT_LIMIT` cannot rescue that** — the limit governs how many times the
     validator will REJECT, and this model asked ONCE. The rule now names the anti-pattern with the
     task's own tool name substituted in, and offers a guarded single cell as the alternative.
+
+    **Confirmed live, and it needed BOTH halves.** The first run after the rule shipped called the
+    validator three times: rejected on shape, rejected on five wrong-script characters, then
+    `Validation successful.` — with the SUBMIT alone in a later turn. **At the old
+    `_SCRIPT_REPORT_LIMIT` of one, that second rejection would have returned success and the five
+    characters would have shipped**; without the ordering rule the model would not have read either
+    verdict. The episode came out at 62 utterances with ZERO drift and one close, at its last
+    utterance. Still a prompt-compliance claim with invariant 4's hedge — one run is evidence, not
+    proof — but it is the first end-to-end pass this check has produced.
  The marker check was written for the podcast, whose
     failure was loud (the voices read the markers aloud), but it was a guard on the SYMPTOM:
     `GenerateSummary` produced the same defect silently. Six tasks each holding their own validator is how

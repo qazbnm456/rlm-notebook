@@ -11,6 +11,25 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The whole validate chain passed end to end for the first time, and it needed BOTH of the last
+  two fixes.** One run, `long`, same notebook:
+
+  ```
+  validate  ok=False   shape error (a list where an object was expected)
+  validate  ok=False   5 character(s) across 5 fields in the wrong script
+  validate  ok=True    Validation successful.
+  final turn:  script = {'utterances': script_utterances}; SUBMIT(script)
+  ```
+
+  **At the old `_SCRIPT_REPORT_LIMIT` of one, the second rejection would have returned success and
+  five characters would have shipped.** Without the later-turn ordering rule the model would not
+  have read either verdict — the run before this one printed a verdict beside its SUBMIT and
+  shipped the character it had just been told about. Neither fix alone would have produced this.
+
+  Result: 62 utterances (off the 60 floor for the first time), **zero** drift, and exactly one
+  close, at the last utterance. Prompt-compliance claims still carry invariant 4's hedge — one run
+  is evidence, not proof.
+
 - **"Only submit after it reports success" was read as an ordering within ONE CELL.** A run wrote:
 
   ```python
