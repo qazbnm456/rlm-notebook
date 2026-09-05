@@ -11,6 +11,25 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The proper-noun carve-out now forbids a PARTIAL conversion in as many words.** The live A/B
+  below found the model producing `霍爾木茲海峡` six times where the sources say `霍尔木兹海峡` —
+  two characters converted, one not — a string searchable in neither script. "Stays exactly as
+  they spell it" had been read as permitting that, and nothing in the paragraph ruled out either a
+  whole conversion or a half one: "keep the name" and "convert the name" were assumed to be the
+  only outcomes, so the worst of the three went unnamed.
+
+  The rule now states all three and which is worst, and shows BOTH strings, because a hybrid is
+  only visibly wrong beside the two things it is not. Pinned by
+  `tests/test_instructions.py::test_a_proper_noun_outranks_the_script_rule_in_every_shipped_task`;
+  three mutations (removing the every-character clause, the half-converted clause, and the
+  example) each fail it.
+
+  **UNVERIFIED, and stated as such rather than shipped as a fix.** Confirming it costs another
+  live episode. If `峡`/`峽` is simply a character `qwen36_35b_a3b` does not write, no wording
+  reaches it — which is the point where the validator invariant 39 declined comes back into
+  scope: the condition it lacked was a measured instance of a name being mangled, and there is now
+  exactly one.
+
 - **The script rule was measured live, and the run bought a REGRESSION rather than a
   confirmation.** A/B on one notebook (`nb-d22c2a9a`): same four sources, same
   `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long` tier, 258s — only

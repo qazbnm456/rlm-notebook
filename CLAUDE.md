@@ -844,8 +844,16 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       route nobody had considered, because "keep the name" and "convert the name" were assumed to
       be the only two outcomes. Six consistent occurrences in one episode, so it is a settled
       spelling rather than a slip; still ONE name in ONE run on ONE model, and `峡`/`峽` may simply
-      be a character this model does not write. OPEN: whether "stays exactly as they spell it" has
-      to forbid a partial conversion in as many words — it plainly was not read that way once.
+      be a character this model does not write.
+
+      **So the rule now names all THREE outcomes and says which is worst**, rather than trusting
+      "stays exactly as they spell it" to be read as "every character of it" — it plainly was not
+      read that way once, and the paragraph ruled out neither whole conversion nor a half one. The
+      example shows BOTH strings, because the hybrid is only visibly wrong beside what it is not.
+      **UNVERIFIED**: confirming it costs another live episode, and if the unconverted character is
+      one the model cannot write, no wording reaches it. That is the point at which the validator
+      this invariant declined would be back on the table — the condition it lacked was a measured
+      instance of a name being mangled, and there is now one.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so

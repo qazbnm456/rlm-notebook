@@ -112,7 +112,19 @@ def test_a_proper_noun_outranks_the_script_rule_in_every_shipped_task():
     # It is not direction-specific: one carve-out serves Traditional and Simplified alike.
     # Whitespace-collapsed, because the constant is hard-wrapped prose and a rewrap must not
     # be able to break this.
-    assert "the other variety" in " ".join(SCRIPT_PINNED.split())
+    flat = " ".join(SCRIPT_PINNED.split())
+    assert "the other variety" in flat
+
+    # A PARTIAL conversion is forbidden in as many words, because the first live run with this
+    # rule shipping produced exactly that and nothing else in the paragraph ruled it out: the
+    # model wrote 霍爾木茲海峡 six times — two characters converted, one not — which matches
+    # neither the sources' spelling nor correct Traditional, so it is searchable in neither.
+    # "Keep the name" and "convert the name" had been assumed to be the only two outcomes.
+    assert "EVERY character of it, or none" in flat
+    assert "HALF-converted" in flat
+    # The example must show BOTH strings, or it does not demonstrate why the hybrid is the worst
+    # of the three: a reader has to see what it is not.
+    assert "霍爾木茲海峡" in flat and "霍尔木兹海峡" in flat
 
     for name, instructions in _shipped_tasks().items():
         assert instructions.index("PROPER NOUN is the exception") < instructions.index(
