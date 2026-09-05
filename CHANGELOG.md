@@ -84,8 +84,9 @@ questions with verifiable citations, and get a distilled research artifact out.
 - **Design constraint recorded for the `run_end.budgets`/`usage` follow-up, BEFORE building it.**
   The kit upgrade made those fields available; `trajectory.py` reads `run_end` and surfaces neither,
   which is a real gap for a drawer whose whole purpose is "why did it produce that"
-  (`accepted-not-done`). The constraint arrived from the kit maintainer as a measurement, and it
-  rules out the obvious design:
+  (`accepted-not-done`). Guidance arrived from the kit maintainer as a measurement, was recorded,
+  and was then overturned by its own author — both halves are kept below, because which half
+  survived is the useful part:
 
   **First guidance, since CORRECTED — recorded because the correction is the lesson.** The initial
   advice was "do not build a proximity indicator, there is no gradient": on the measured corpus the
