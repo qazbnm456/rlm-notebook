@@ -274,3 +274,26 @@ def test_the_close_is_written_once_and_last():
     # And it must name the batching, since that is the mechanism that produces the second close.
     tail = instructions[instructions.index("EXACTLY ONE close") :][:900]
     assert "across several turns" in tail, tail
+
+
+def test_the_script_is_counted_against_its_target_before_it_is_submitted():
+    """Building across turns puts the count in a VARIABLE and not in front of the model, so a run
+    that spends turns recovering from an error arrives at the end with no sense of how far it got.
+
+    Measured across eight `long` episodes: seven landed at 60-80 and the one that did not — 43 —
+    was the one that lost turns to an `IndexError` and a sub-model escalation, then submitted
+    without ever comparing 43 against 60. Both a 70-turn run and the 43-turn run printed their
+    count in the step before validating; neither compared it to anything.
+
+    The rule has to sit with the TIERS, since it is about their numbers, and BEFORE the
+    filler rule, which says the opposite thing about a different case — short is legitimate when
+    the sources are exhausted, and this is about a gap that exists because material is uncovered.
+    """
+    instructions = GeneratePodcastScript.instructions
+
+    assert "COUNT what you have accumulated" in instructions
+    assert instructions.index("COUNT what you have") > instructions.index("60 to 90 turns")
+    assert instructions.index("COUNT what you have") < instructions.index("never with filler")
+    # It has to say what to do about a shortfall, not merely to notice one.
+    tail = instructions[instructions.index("COUNT what you have") :][:900]
+    assert "back to the sources" in tail, tail

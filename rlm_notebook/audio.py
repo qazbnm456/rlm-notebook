@@ -69,6 +69,16 @@ A `default` or `long` script does NOT fit in one reply — accumulate `utterance
 as described below. Writing all 60-90 of them into a single code block is the one way this task
 reliably fails.
 
+**COUNT what you have accumulated against that target BEFORE you validate, and if you are short,
+go back to the sources rather than forward to the close.** Building across turns means the number
+lives in a variable and not in front of you, so a run that spends turns recovering from an error
+arrives at the end with no sense of how far it got. Measured across eight `long` episodes: seven
+landed at 60-80, and the one that did not — 43 — was the one that lost turns to an `IndexError`
+and a sub-model escalation, then submitted without ever comparing 43 against 60. Short is a
+legitimate answer ONLY when the sources are exhausted, which is a different sentence from the one
+above about filler: check the count first, and if the gap is because material is left uncovered,
+cover it.
+
 Reach the target with SUBSTANCE, never with filler — no restating what was just said, no "that's
 fascinating", no summarising the episode back to the listener mid-way. If the sources genuinely do
 not hold enough to fill the target, stop short and say so briefly rather than padding: a short

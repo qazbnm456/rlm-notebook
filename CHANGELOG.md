@@ -11,6 +11,29 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A `long` episode came back at 43 turns against a 60-90 target, and the reason is a rule the
+  accumulate-across-turns pattern needed and did not have.** That run hit an `IndexError` at step
+  9, escalated to the sub-LM for 1m45s, spent two turns re-parsing the corpus, and submitted at 43
+  — without ever comparing 43 against 60.
+
+  **Building across turns keeps the count in a VARIABLE and not in front of the model.** A 70-turn
+  run and the 43-turn run both printed their count in the step before validating, and neither
+  compared it to anything; six of seven landing inside the band was luck, not a check. The prompt
+  now says to count against the target before validating and, when short, to go back to the SOURCES
+  rather than forward to the close — deliberately a different sentence from the filler rule beside
+  it, which is about a corpus with nothing left in it.
+
+  **Invariant 63's calibration note went from one sample to eight**, and the target turns out to be
+  met at its FLOOR:
+
+  | corpus | utterances |
+  |---|---|
+  | 18,466 chars | 70, 70, 65, 65, 61, 60, **43** |
+  | 131,057 chars | 80 |
+
+  So length tracks the CORPUS at least as much as the tier, and six of seven small-corpus runs sat
+  in the bottom sixth of a 60-90 band. The recorded figure had been a single 80 on the large corpus.
+
 - **The live ticker carried the whole validator verdict, which is written for the MODEL.** A
   rejection names the offenders, then explains what to do about them and which exception applies —
   so the status line read `2 character(s) … 么 -> 麼` followed by "Rewrite each in Traditional and

@@ -1756,6 +1756,21 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     computed from an assumed ~90 characters per turn and the real figure is ~56). One sample per tier is
     not enough to recalibrate on, so both numbers stand.
 
+    **Eight `long` episodes later the picture is sharper, and the target is met at its FLOOR.** On a
+    18,466-character corpus: 70, 70, 65, 65, 61, 60 and one 43; on a 131,057-character one: 80. So
+    length tracks the CORPUS at least as much as the tier, and six of seven small-corpus runs sat in
+    the bottom sixth of a 60-90 band rather than in the middle.
+
+    **The 43 is explained, and the explanation is a rule that was missing.** That run hit an
+    `IndexError` at step 9, escalated to the sub-LM for 1m45s, spent two more turns re-parsing the
+    corpus, and submitted at 43 without ever comparing 43 against 60. Building across turns keeps
+    the count in a VARIABLE and not in front of the model: a 70-turn run and the 43-turn run BOTH
+    printed their count in the step before validating, and neither compared it to anything.
+    `GeneratePodcastScript` now says to count against the target before validating and, when short,
+    to go back to the SOURCES rather than forward to the close — which is deliberately a different
+    sentence from the filler rule beside it, since that one is about a corpus with nothing left in
+    it and this one is about material still uncovered. Prompt-only, invariant 4's hedge.
+
 64. **A `long` script is built across REPL turns, and that is what the sandbox is FOR.** Written as one
     code block it was TRUNCATED by the per-call generation cap mid-structure and the run failed;
     accumulated in a list across turns — printing only its LENGTH, never its contents — the same corpus and
