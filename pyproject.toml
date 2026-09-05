@@ -40,7 +40,8 @@ dependencies = [
     # because zhconv's own SIMPONLY set includes `干`, `台`, `群` and `里`, which are correct
     # Traditional in their own right — measured, and the reason a zhconv-as-converter design was
     # rejected. What zhconv supplies is `对 -> 對` for the rejection message. Pure Python plus one
-    # JSON table, loaded lazily and only for a run whose output language is Chinese.
+    # JSON table. The module import is cheap; its 1MB+ character table is what loads lazily, on
+    # the first `getdict` — i.e. only for a run whose output language names a Chinese script.
     "zhconv>=1.4",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",

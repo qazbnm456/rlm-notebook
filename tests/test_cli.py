@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
 from rlm_notebook import cli
@@ -627,6 +629,12 @@ def _audio_cli(monkeypatch, seen, *, script=None):
     class _FakeTask:
         def run(self, **kwargs):
             seen["ran"] = True
+            # Whether the recorder was already open WHEN THE MODEL RAN. Asserting on the finished
+            # file cannot tell: `TraceRecorder` writes `run_start` on `__enter__` and `run_end` on
+            # `__exit__`, so a recorder entered AFTER the run produces a trace that looks correct
+            # and contains none of the run. An independent review found the first version of these
+            # tests survived exactly that move.
+            seen["trace_open"] = bool(seen.get("trace_path")) and Path(seen["trace_path"]).exists()
             seen.update(kwargs)
             return script or PodcastScript(utterances=[])
 
@@ -677,12 +685,16 @@ def test_a_requested_trace_records_the_run_and_what_it_was_configured_with(monke
     cli = _audio_cli(monkeypatch, seen)
     out = tmp_path / "nested" / "run.jsonl"
     out.parent.mkdir()
+    seen["trace_path"] = str(out)
     args = cli.build_parser().parse_args(
         ["audio", "--length", "long", "--out", str(tmp_path / "a.mp3"), "--trace", str(out)]
     )
     cli._cmd_audio(args)
 
+    assert seen["trace_open"], "the recorder must be open before the model runs, not after"
+
     events = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+    assert any(e.get("type") == "run_end" for e in events), "the recorder never closed"
     start = next(e for e in events if e.get("type") == "run_start")
     meta = start["payload"]["meta"]
     assert meta["task"] == "test_cli:_FakeTask", (
@@ -718,3 +730,27 @@ def test_an_unwritable_trace_path_fails_before_the_model_runs(monkeypatch, tmp_p
 
     assert "cannot write the trace" in str(excinfo.value)
     assert not seen.get("ran"), "the model ran anyway; the whole point is that it must not have"
+
+
+def test_a_model_failure_is_not_reported_as_a_bad_trace_path(monkeypatch, tmp_path):
+    """`TimeoutError`, `BrokenPipeError` and `ConnectionResetError` are all `OSError` subclasses, so
+    a `try:` around the whole traced block caught a DYING SANDBOX and told the operator to fix a
+    path that was fine — who then re-ran and paid for the model call again. Only `__enter__` is
+    wrapped now.
+
+    The trace must still be written: a failed run is exactly the one worth reading afterwards.
+    """
+    import types
+
+    from rlm_notebook import cli
+
+    out = tmp_path / "t.jsonl"
+    args = types.SimpleNamespace(trace=str(out))
+
+    class _Task:
+        pass
+
+    with pytest.raises(TimeoutError), cli._traced(args, _Task(), types.SimpleNamespace(), {}):
+        raise TimeoutError("the sandbox went away")
+
+    assert out.exists() and out.read_text().strip(), "a failed run must still leave its trace"

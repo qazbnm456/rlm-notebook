@@ -104,8 +104,9 @@ def _column_count(band: list[_Region]) -> int:
 
     **The real-detector fixture does not demonstrate that and cannot**: it carries ONE spanning
     region, so the page is a single band of 104 and the two schemes agree on it exactly. The hazard
-    was measured over contiguous windows of that page's own geometry instead — 7.8-10.2% of its
-    3-to-8-region slices count more than two — which is a claim about PLAUSIBLE bands. An earlier
+    was measured over contiguous windows of that page's own geometry instead — 7.8-11.1% of its
+    3-to-8-region slices count more than two (the peak is at seven regions, not at either end) —
+    which is a claim about PLAUSIBLE bands. An earlier
     wording here reported it as a band the fixture actually holds.
     """
     spans = sorted((region[0], region[1]) for region in band)

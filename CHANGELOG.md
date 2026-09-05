@@ -11,6 +11,69 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **An independent review of the previous ten commits found two defects the model could not have
+  worked around, and re-derived every headline number. Two were wrong; one of them was a
+  "correction" this batch had already made once.**
+
+  **`峡` is in the corpus 67 times, so the corpus correction was itself over-broad.** `nb-d22c2a9a`'s
+  sources hold 5,456 Han characters of JAPANESE, containing `海峡` 67 times and `ホルムズ海峡` 24,
+  while `霍`, `尔` and `兹` appear ZERO times. The first reading excluded the whole name as copied;
+  the second counted the whole name as drift; **only the per-character split is true**, and the
+  live A/B had already said so — the two characters absent from the corpus converted, the one
+  present 67 times did not.
+
+  That reaches the one significant number this line of work produced. Six of the middle arm's seven
+  flags are `峡`, which the check's own rejection message tells the model it may keep. On the
+  remainder alone the expectation is 1.15 and `P(X=0) = 0.32`. `CLAUDE.md` now carries the
+  breakout beside the `0.0003`.
+
+  **The check rejected correct Traditional with an instruction it could not follow.**
+  `_suggest` returns the phrase-aware conversion at the position, and where zhconv's phrase table
+  leaves a character alone — because it is already right in that word — the "fix" was the character
+  itself: `拮据` was rejected with `据 -> 据`, `恒生` with `恒 -> 恒`. **Sixteen** gate characters
+  have such a context (`么 农 冲 别 叶 广 恒 据 汤 温 灯 联 胆 荐 适 鹰`), so the one documented
+  `拮据` was not the extent of it, and the once-per-run bound capped the cost without making the
+  message coherent — the exact failure invariant 66 forbids. `_actionable` drops any offender whose
+  fix equals the character it already has: the phrase-aware pass agreeing with the input IS the
+  evidence the character is right.
+
+  **`--trace` reported a model failure as a bad path.** `TimeoutError`, `BrokenPipeError` and
+  `ConnectionResetError` are all `OSError` subclasses, so a `try:` around the whole traced block
+  caught a dying sandbox and told the operator to fix a path that was fine — while the trace sat on
+  disk, complete, with `run_end ok=false` in it. Only `__enter__` is wrapped now; the run's own
+  exception propagates and the trace is still written.
+
+  **Counts corrected**, each re-derived rather than taken from the review: the gate flags 3782 of
+  3909 and lets through 127 (was 3774/135, stale by exactly the eight `_MEASURED_OTHER_SCRIPT`
+  added); source- and destination-keyed `zh-tw` disagree on NINE characters, not four, and
+  via-source is right on all nine (`账`->`帳` plus eight Taiwan element names); the OCR sparse-band
+  sweep is 7.8-11.1% peaking at seven-region windows, not "7.8-10.2%" — that first correction
+  reported the sweep's ENDPOINTS as its range; "40,521 characters" was unreproducible and is now
+  stated with its scope (39,770 with verbatim quotes, 27,047 without); `么` was documented in three
+  places as deliberately unflagged after `420c979` started flagging it; the rejection said
+  "N field(s)" while counting `(path, character, fix)` triples.
+
+  **`script_family` was silently inert for two ordinary spellings.** `Chinese (Traditional)`,
+  `Chinese (Simplified)` and `簡體中文` all returned `None`, turning the whole check off — and
+  `RN_OUTPUT_LANGUAGE` and the settings file accept any string, since `clean_language` bounds
+  length rather than the character set.
+
+- **The Big5 gate's recall loss is larger than recorded, and the hole is now stated rather than
+  characterised away.** a sibling project enumerated all 135 let-through characters and reported that
+  the "almost exactly the genuinely ambiguous set" claim — made here after reading the first forty —
+  holds for about eight of them. Verified: `基于`, `机器`, `后端`, `优化` and `价值` produce NO
+  flag, and `网络`, `标准`, `确认`, `范围` and `复杂` flag one of their two characters. That is this
+  project's own subject matter.
+
+  **It did not invalidate the existing measurements**: across the three measured episodes the only
+  characters falling in the miss surface were `干`x3 (correct Traditional), `么`x1 (since bought
+  back) and `厘`x1 (the recorded accepted miss). None of the software vocabulary appeared.
+
+  The sibling closed its own hole by reading all 135 once into a shared/simplified split with a
+  test pinning the union so a zhconv upgrade cannot add an unread character silently. Not adopted
+  here yet — it is 135 characters of human classification and belongs to a decision, not to a
+  cleanup pass.
+
 - **The check's SUGGESTION was a character lookup and a character lookup cannot answer it.** `历`
   is `歷` in `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is `匯` in
   `汇率` and `彙` in `词汇`. The table carried whichever form is commoner, so the validator named

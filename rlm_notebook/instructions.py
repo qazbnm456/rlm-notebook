@@ -117,8 +117,16 @@ def _cited_coordinates(value: Any, path: str = "") -> list[tuple[str, str]]:
 #: the literal placeholder. That distinction is the whole reason `SCRIPT_PINNED` is worded
 #: conditionally and this is not — do not "unify" them.
 _SCRIPT_NEEDLES: tuple[tuple[str, tuple[str, ...]], ...] = (
-    ("hant", ("traditional chinese", "zh-hant", "zh-tw", "zh-hk", "繁體", "繁体", "正體")),
-    ("hans", ("simplified chinese", "zh-hans", "zh-cn", "简体")),
+    # Both orderings of the English name, because `Chinese (Traditional)` is as ordinary a
+    # spelling as `Traditional Chinese` and matched NOTHING — which turns the check off silently,
+    # and `RN_OUTPUT_LANGUAGE`/the settings file accept any string (`clean_language` bounds length,
+    # not the character set). `簡體` alongside `简体` for the same reason in the other direction: a
+    # Traditional-script interface naming Simplified wrote it the Traditional way.
+    ("hant", (
+        "traditional chinese", "chinese (traditional", "zh-hant", "zh-tw", "zh-hk",
+        "繁體", "繁体", "正體", "正体",
+    )),
+    ("hans", ("simplified chinese", "chinese (simplified", "zh-hans", "zh-cn", "简体", "簡體")),
 )
 
 
@@ -168,10 +176,18 @@ def _wrong_script_chars(family: str) -> dict[str, str]:
     for the SUGGESTION (`对 -> 對`) and to bound the set to known Simplified forms, without which a
     rare Traditional character outside Big5 would be flagged.
 
-    **Deliberately imperfect RECALL, never precision.** `么` is a valid Big5 character, so `怎么`
-    is not flagged even though it is Simplified usage. A missed character costs one wrong glyph on
-    screen; a false one costs a paid-for run (see `make_grounded_validator`), so the whole
-    uncertainty is spent on the safe side.
+    **Deliberately imperfect RECALL, and the loss is larger than the gate's arithmetic suggests.**
+    127 of the table's 3909 single-character rewrites are Big5-encodable and pass. An ambiguous
+    core is among them (`后 台 余 几 丑 干 里 群`) and is the reason this design is right, but the
+    rest is plain recall loss landing on this project's own subject matter: `基于`, `机器`,
+    `后端`, `优化` and `价值` produce NO flag, and `网络`, `标准`, `确认`, `范围` and `复杂` flag
+    one of their two characters. `_MEASURED_OTHER_SCRIPT` buys eight of them back. **The remaining
+    hole is open**; a sibling project closed its own by reading all 135 once and splitting them, with
+    a test pinning the union so a zhconv upgrade cannot add an unread character silently.
+
+    A missed character costs one wrong glyph on screen; a false one costs a rejection the model
+    cannot satisfy (see `make_grounded_validator` and `_actionable`), so the uncertainty is spent
+    on the safe side.
     """
     locale, codec = ("zh-hant", "big5") if family == "hant" else ("zh-hans", "gbk")
     mapping = _zh.getdict(locale)
@@ -259,6 +275,25 @@ def _suggest(text: str, family: str, wrong: dict[str, str]) -> dict[int, str]:
         in_context = converted[i]
         out[i] = wrong[char] if in_context == plain.get(char) else in_context
     return out
+
+
+def _actionable(offenders: list[tuple[str, str, str]]) -> list[tuple[str, str, str]]:
+    """Drop any offender whose "fix" is the character it already has.
+
+    `_suggest` returns the phrase-aware conversion at the position, and when zhconv's phrase table
+    leaves a character alone — because it is already correct in THAT word — that is the character
+    itself. The rejection then read `据 -> 据` for `拮据` and `恒 -> 恒` for `恒生`, both ordinary
+    Traditional, telling a model to rewrite a character into itself.
+
+    **A rejection the model cannot satisfy is the failure `make_grounded_validator` exists to
+    avoid** (invariant 66: advice it cannot follow costs the whole step budget looping on it). The
+    once-per-run bound capped the damage and did not make the message coherent. Sixteen gate
+    characters have such a context — `么 农 冲 别 叶 广 恒 据 汤 温 灯 联 胆 荐 适 鹰`, which covers
+    `恒生`/`恒隆`/`恒基` in any finance corpus — so this is not the single documented `拮据`.
+
+    The phrase-aware pass agreeing with the input IS the evidence the character is right in
+    context; this reads that answer instead of overriding it."""
+    return [(path, bad, good) for path, bad, good in offenders if good != bad]
 
 
 def _script_offenders(
@@ -389,14 +424,21 @@ def make_grounded_validator(
         family = script() if script else None
         if family and not script_reported:
             wrong = _wrong_script_chars(family)
-            offenders = _script_offenders(model.model_validate_json(data_json_str), wrong, family)
+            offenders = _actionable(
+                _script_offenders(model.model_validate_json(data_json_str), wrong, family)
+            )
             if offenders:
                 script_reported = True
                 want = "Traditional" if family == "hant" else "Simplified"
                 listed = "; ".join(f"{path}: {bad} -> {good}" for path, bad, good in offenders[:8])
                 more = f" (and {len(offenders) - 8} more)" if len(offenders) > 8 else ""
+                # CHARACTERS, not fields: an offender is a (path, char, fix) triple, so one field
+                # holding four wrong characters used to be reported as "4 field(s)".
+                fields = len({path for path, _, _ in offenders})
+                where = "field" if fields == 1 else "fields"
                 return (
-                    f"Validation failed: {len(offenders)} field(s) carry a character from the wrong "
+                    f"Validation failed: {len(offenders)} character(s) across {fields} {where} "
+                    f"belong to the wrong "
                     f"script for {want} Chinese — {listed}{more}. Rewrite each in {want} and "
                     f"validate again. A character that is verbatim from a source — a name or a "
                     f"title the sources spell that way, or Japanese text you are quoting — is the "

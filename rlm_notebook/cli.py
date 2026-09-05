@@ -219,11 +219,20 @@ def _traced(args, task: Any, config: Any, kwargs: dict) -> Iterator[None]:
 
     dotted = f"{type(task).__module__}:{type(task).__name__}"
     run_id = f"cli-{uuid4().hex[:12]}"
+    recorder = TraceRecorder(args.trace, run_id=run_id, meta=run_meta(dotted, config, kwargs))
+    # ONLY `__enter__` is wrapped. A `try:` around the `yield` also catches an `OSError` raised by
+    # the MODEL RUN — and `TimeoutError`, `BrokenPipeError` and `ConnectionResetError` are all
+    # `OSError` subclasses, so a dying sandbox pipe or a timed-out call was reported as
+    # "cannot write the trace to ...". The path was fine, the trace was on disk and complete with
+    # `run_end ok=false` in it, and the operator re-ran and paid for the model call again.
     try:
-        with TraceRecorder(args.trace, run_id=run_id, meta=run_meta(dotted, config, kwargs)):
-            yield
+        recorder.__enter__()
     except OSError as exc:
         raise SystemExit(f"cannot write the trace to {args.trace!r}: {exc}") from exc
+    try:
+        yield
+    finally:
+        recorder.__exit__(*sys.exc_info())
 
 
 def _cmd_ask(args) -> int:

@@ -823,20 +823,23 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       identifier rather than a converter; a full `zhconv` mapping then reported five, of which the
       published list was wrong on four. A `zhconv` diff counts characters that are correct
       Traditional in their own right (`干` in 干預/干擾, `台` in 一台, `群`, `里` in 里程碑), counts
-      and counts Japanese entirely (391 hits — one notebook holds Japanese sources, and shinjitai
-      maps to Traditional). Excluding those two, two real notebooks carry
+      and it counts Japanese entirely (386 Han-only diff positions in `nb-d22c2a9a`'s sources alone,
+      which are Japanese and whose shinjitai map to Traditional). Excluding both classes, two real
+      notebooks carry
       **`尔 兹 峡 么 对 点 问 题` — eight characters, 19 sites, ALL in podcast fields**, with
       titles, overviews, answers and follow-ups clean. `没 帮 们` appear zero times.
 
-      **A THIRD exclusion was applied and was itself wrong**: `霍尔木兹海峡` (12 of the 19) was
-      excluded as "a Simplified place name copied from a Simplified source", giving a published
-      figure of five characters and five sites. **Neither notebook's corpus contains a single
-      Chinese character.** `nb-d22c2a9a`'s sources say `the Strait of Hormuz` in English, 22 times,
-      with Japanese around it; `nb-6f2d49d3`'s hold no CJK at all. So no source spells that name in
-      any script, the model rendered it into Chinese out of its own priors, and Simplified is
-      simply what those priors produce — which makes it ORDINARY DRIFT and the largest single
-      block of it. The exclusion was never checked against the corpus, only against the plausible
-      story that a name in a foreign script must have come from somewhere.
+      **A THIRD exclusion was applied, and CORRECTING it produced a second wrong answer — only the
+      CHARACTER-level split is true.** `霍尔木兹海峡` (12 of the 19) was first excluded whole as "a
+      Simplified place name copied from a Simplified source"; the correction said no source spells
+      it in any script and counted all 12 as drift. Measured per character: `nb-d22c2a9a`'s sources
+      hold **5,456 Han characters of JAPANESE**, containing `海峡` **67 times** and `ホルムズ海峡`
+      24, and `霍`, `尔`, `兹` **zero** times. `nb-6f2d49d3`'s hold no CJK at all.
+
+      So `霍尔木兹` is the model's own rendering and IS drift, while `峡` is a character its sources
+      spell that way sixty-seven times. The live A/B says so without being asked: the two
+      characters ABSENT from the corpus converted (`尔`->`爾`, `兹`->`茲`) and the one present 67
+      times did not. Both earlier readings argued about the whole NAME, and the name is not the unit.
 
       **That is the inverse of the sibling's case**, whose failure was in page TITLES. It is why a
       validator was declined for a long time — every condition justifying one (short, navigational,
@@ -1810,8 +1813,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       above reintroduced from the other side.** `zh-hant` maps
       `为` to `爲` where Taiwan writes `為`, and the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
       `伪`/`偽` — 22 of the flagged characters. Each is post-mapped through `zh-tw`, from the SOURCE
-      character rather than from `zh-hant`'s answer (`账` reaches `賬`, which `zh-tw` leaves alone,
-      while `账` itself maps to `帳`), and SINGLE-CHARACTER only, because `zh-tw` carries a
+      character rather than from `zh-hant`'s answer — the two disagree on NINE characters (`账`->
+      `帳` plus the Taiwan element names `鈽 鍅 鉲 鎝 鉳 鑀 鋂 錼`) and via-source is right on all
+      nine, because `zh-tw` maps `账` straight to `帳` and has no `賬`->`帳` entry — and
+      SINGLE-CHARACTER only, because `zh-tw` carries a
       VOCABULARY layer that rewrites `鼠标` to `滑鼠` and would misalign a positional zip. Found by
       a sibling project, which hit it first.
     - **Eight characters are flagged DESPITE the gate, each measured** (`_MEASURED_OTHER_SCRIPT`:
@@ -1820,8 +1825,9 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       a hand list used as the WHOLE detector; this is a short sourced addition on top of a derived
       one, in the SAFE direction only. `据` in `拮据` is correct Traditional, so it CAN produce a
       false positive: affordable here because the check reports and fires once, and NOT affordable
-      for the sibling, whose converter persists a rewritten title. Zero of the eight occur in
-      40,521 characters of this project's real Traditional output, apart from `么`'s three drifts.
+      for the sibling, whose converter persists a rewritten title. Of the eight, only `么` occurs at
+      all — three times, all `怎么` — across every model-authored string in both notebooks plus both
+      live transcripts (39,770 characters with verbatim quotes, 27,047 without).
     - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
       tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
       project's real notebooks use correctly (`干預`, `一台`, `里程碑`) — so it would condemn good
@@ -1829,9 +1835,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       inventory at all". `zhconv` is still the dependency, for the SUGGESTION (`对 -> 對`) and to
       bound the set to known Simplified forms so a rare Traditional character outside Big5 is not
       flagged.
-    - **Recall is deliberately imperfect and precision is not.** `么` is a valid Big5 character, so
-      `怎么` passes. A missed character is one wrong glyph on screen; a false one is a rejection the
-      model cannot satisfy.
+    - **Recall is deliberately imperfect; precision is BOUGHT, not free.** `_actionable` drops any
+      offender whose fix equals the character it already has — which is what `_suggest` returns
+      wherever the phrase-aware pass confirms the character is right in that word. Without it the
+      check rejected `拮据` with `据 -> 据` and `恒生` with `恒 -> 恒`, and sixteen gate characters
+      have such a context, so the one documented `拮据` was not the extent of it. A missed character
+      is one wrong glyph on screen; a false one is a rejection the model cannot satisfy, which is
+      the failure invariant 66 exists to forbid.
     - **It fires AT MOST ONCE per run, and that bound is the design.** Every other check here
       rejects something WRONG; a Simplified character is COSMETIC, and the detector cannot tell one
       from a Japanese glyph being quoted inline — `学`, `会`, `国` and `峡` are shinjitai, and this
@@ -1841,7 +1851,7 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       look at the list exactly once and is never held hostage to it. `quote` is exempt for the same
       reason it is exempt from the marker walk, one step sharper.
     - **Replayed against real measured output**: 17 offenders on the episode that motivated it and
-      6 on the one after, every one a genuine drift, and 0 on a notebook whose only drift was `么`.
+      7 on the one after, every one a genuine drift, and 2 on the notebook whose only drift is `么`.
       Zero false positives across 119 utterances produced against a corpus containing Japanese.
     - **Then measured LIVE, and this is the one number in this area that is significant.** Three
       episodes off one notebook, same models, same tier, same language:
@@ -1854,6 +1864,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
       Against the middle run — whose ONLY difference is the check — the null expectation is 8.1 and
       zero were observed, Poisson `P(X=0) = 0.0003`; against the first, 10.5 expected, `P = 0.00003`.
+      **Six of those seven middle-arm flags are `峡`, and the check's own rejection message tells the
+      model it may keep exactly that** — a character verbatim from a source, or Japanese being
+      quoted, and `海峡` is in those sources 67 times. Broken out, the middle arm is `峡`x6 plus
+      `么`x1, so on the remainder alone the expectation is 1.15 and `P(X=0) = 0.32`. **The one
+      significant number in this area rests on a character the rule does not clearly require
+      changing**, and is stated with that attached rather than as a clean result.
       **The honest limitation is that the CLI writes no trace, so whether the validator actually
       FIRED is unobservable**: the draft may simply have been clean. The measurement is of the
       configuration, not of the tool being exercised, and it is still one episode per arm.
@@ -1878,10 +1894,18 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     (`台`). Run against correct Traditional prose, its own shipped functions report `干` in `干預`,
     `里` in `里程碑` and `群` in `一群`, and `to_script` would PERSIST `幹預`, `裏程碑` and `一羣`
     into a title. Big5-encodability answers it without any hand list: over zhconv's own 3909
-    single-character rewrites it flags 3774 and lets through 135, and that 135 is almost exactly the
-    genuinely AMBIGUOUS set (`后` 皇后/後, `台` 台灣/臺, `余` 余/餘, `几` 几/幾, `丑` 丑/醜) — so the
-    3% is not an arbitrary recall trade, it is the ambiguity being isolated. The sibling's four
-    measured title offenders (`览 门 块 统`) all survive the gate.
+    single-character rewrites (3909 of them) it flags 3782 and lets through 127. A real ambiguous
+    core is in there (`后` 皇后/後, `台` 台灣/臺, `余` 余/餘, `几` 几/幾, `丑` 丑/醜, `干`, `里`,
+    `群`) and is what makes the gate the right shape. **It is NOT "almost exactly the ambiguous
+    set", which an earlier wording claimed after reading the first forty**: the 127 also hold four
+    curly quotation marks (`zh-hant` maps them to corner brackets — not characters at all) and a
+    long tail nobody writes in modern Traditional (`优 听 党 网 极 确 范 触 规 监 随 异 价 种 复`).
+    That tail is RECALL LOST and it lands on this project's own subject matter: `基于`, `机器`,
+    `后端`, `优化` and `价值` flag NOTHING, while `网络`, `标准`, `确认`, `范围` and `复杂` flag
+    only one of their two characters. **The hole is open and recorded rather than closed** —
+    a sibling project closed its own by reading all 135 once and splitting them into shared and
+    simplified with a test pinning the union. The sibling's four measured title offenders
+    (`览 门 块 统`) are all CAUGHT.
 
     **Three layers, none sufficient alone and all cheap**: this validator (before SUBMIT),
     `citations.strip_markers` at the display boundary (invariant 62), and `tts.spoken_script` before
@@ -2182,9 +2206,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     spanning elements — reads its own intra-column whitespace as a gutter, counts 3 and declines,
     returning the interleaved order this exists to remove. **The real fixture does not demonstrate this
     and cannot**: it carries one spanning region, so that page is a single band of 104 and both schemes
-    agree on it. The hazard is measured over contiguous windows of its own geometry — 7.8-10.2% of
-    3-to-8-region slices count more than two — a claim about PLAUSIBLE bands, and the hedge the commit
-    message carried was dropped in the docstring and here.
+    agree on it. The hazard is measured over contiguous windows of its own geometry — 7.8-11.1% of
+    3-to-8-region slices count more than two, peaking at seven-region windows — a claim
+    about PLAUSIBLE bands, and the hedge the commit message carried was dropped in the docstring and
+    here. A first correction then reported the sweep's ENDPOINTS (7.8 and 10.2) as its range.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See

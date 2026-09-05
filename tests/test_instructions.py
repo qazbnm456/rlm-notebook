@@ -211,8 +211,10 @@ def test_the_suggestion_is_phrase_aware_not_a_character_lookup():
 def test_the_wrong_script_table_names_the_fix_for_every_measured_drift_character():
     """The rejection has to be mechanically actionable, so each offender carries its right form.
 
-    `么` is deliberately ABSENT: it is a valid Big5 character, so `怎么` is not caught. Recall is
-    where this design spends its uncertainty — a missed character is one wrong glyph on screen.
+    Recall is where this design spends its uncertainty — a missed character is one wrong glyph on
+    screen, a false one is a rejection the model cannot satisfy. `么` was ABSENT for exactly that
+    reason (a valid Big5 character) until it was measured drifting three times, at which point
+    `_MEASURED_OTHER_SCRIPT` bought it back; the test below is the one that pins it now.
     """
     from rlm_notebook.instructions import _wrong_script_chars
 
@@ -409,3 +411,57 @@ def _payload_for(model, text):
     # LOUDLY here instead of silently testing a payload the schema no longer accepts.
     assert name in shapes, f"no payload shape for {name}; add one rather than skipping it"
     return json.dumps(shapes[name])
+
+
+def test_the_script_check_never_asks_for_a_character_it_already_has():
+    """`拮据` and `恒生` are ordinary Traditional, and the check rejected them with `据 -> 据` and
+    `恒 -> 恒` — an instruction that cannot be followed.
+
+    `_suggest` returns the phrase-aware conversion at the position, and where zhconv's phrase table
+    leaves a character alone (because it is already right in THAT word) that is the character
+    itself. A rejection the model cannot satisfy is the exact failure invariant 66 forbids; the
+    once-per-run bound capped the cost and did not make the message coherent. Sixteen gate
+    characters have such a context, so the documented `拮据` was not the only one.
+    """
+    from rlm_notebook.instructions import _actionable, _script_offenders, _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+    for text in ("公司財務拮据", "恒生指數", "溫度計與温泉", "推薦與草荐"):
+        kept = _actionable(_script_offenders(text, wrong, "hant"))
+        assert not [o for o in kept if o[1] == o[2]], f"{text}: told to rewrite a character as itself"
+
+    # It must not swallow a real one: 这 has no phrase entry that leaves it alone.
+    real = _actionable(_script_offenders("这个问题", wrong, "hant"))
+    assert ("", "这", "這") in real
+
+
+def test_the_rejection_counts_characters_not_fields():
+    """`len(offenders)` counts `(path, char, fix)` triples, so one field holding four wrong
+    characters reported "4 field(s) carry a character" — a sentence that is wrong twice."""
+    import json
+
+    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.schema import PodcastScript
+
+    validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: "hant")
+    verdict = validate(
+        json.dumps({"utterances": [{"speaker": "host_a", "text": "这个问题很难", "citations": []}]})
+    )
+    assert "across 1 field" in verdict, verdict
+    assert "field(s)" not in verdict
+
+
+def test_script_family_matches_both_orderings_of_the_language_name():
+    """`Chinese (Traditional)` is as ordinary a spelling as `Traditional Chinese` and matched
+    NOTHING, which turns the whole check off silently — and `RN_OUTPUT_LANGUAGE` and the settings
+    file accept any string, since `clean_language` bounds length rather than the character set. A
+    needle list is inherently incomplete; these are the spellings a person actually writes.
+    """
+    from rlm_notebook.instructions import script_family
+
+    for name in ("Traditional Chinese", "Chinese (Traditional)", "zh-Hant", "繁體中文", "正體中文"):
+        assert script_family(name) == "hant", name
+    for name in ("Simplified Chinese", "Chinese (Simplified)", "zh-Hans", "简体中文", "簡體中文"):
+        assert script_family(name) == "hans", name
+    for name in ("English", "Japanese", "", None):
+        assert script_family(name) is None, name
