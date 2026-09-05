@@ -264,7 +264,14 @@ def test_parse_pdf_raises_when_every_page_is_empty(tmp_path):
 
 
 def _ocr_orderings(pdf_path):
-    """`(detector_order, reading_order)` for a rendered page, as normalised word lists."""
+    """`(detector_order, reading_order, region_count)` for a rendered page.
+
+    The two orderings are normalised WORD lists, so a comparison does not depend on how well the
+    OCR read the characters. `region_count` is the detector's own region count, reported separately
+    because a caller that wants to know the layout rules were REACHED is asking about regions and a
+    word count is only a proxy for it — RapidOCR merges words that share a line (`encoderis`,
+    `astackof`), so the two numbers are not interchangeable.
+    """
     import re
 
     import numpy as np
@@ -279,7 +286,8 @@ def _ocr_orderings(pdf_path):
         return re.findall(r"[a-z]+", text.lower())
 
     raw = words(" ".join(t for _, t, _ in result if t.strip()))
-    return raw, words(reading_order([(box, t) for box, t, _ in result]))
+    ordered = words(reading_order([(box, t) for box, t, _ in result]))
+    return raw, ordered, [box for box, t, _ in result if t.strip()]
 
 
 def test_reading_order_beats_detection_order_on_a_real_two_column_render(tmp_path):
@@ -298,7 +306,7 @@ def test_reading_order_beats_detection_order_on_a_real_two_column_render(tmp_pat
 
     pdf_path = tmp_path / "two-column.pdf"
     make_two_column_pdf(pdf_path)
-    raw, ordered = _ocr_orderings(pdf_path)
+    raw, ordered, _boxes = _ocr_orderings(pdf_path)
 
     joined = " ".join(ordered)
     last_left = joined.rfind(TWO_COLUMN_LEFT[-1].split()[-1].lower())
@@ -316,10 +324,23 @@ def test_reading_order_does_not_damage_a_real_single_column_render(tmp_path):
     so the page-level guard should leave it exactly as the detector reported it."""
     pdf_path = tmp_path / "one-column.pdf"
     make_single_column_pdf(pdf_path)
-    raw, ordered = _ocr_orderings(pdf_path)
+    raw, ordered, boxes = _ocr_orderings(pdf_path)
 
     # The guard has to be REACHED, not merely passed: an earlier fixture drew one unwrapped line,
     # so OCR returned a single region and `reading_order` short-circuited before any layout rule
     # ran. Mutating the page-level threshold left that version green.
-    assert len(raw) > 20, "the fixture must produce several regions, or nothing is exercised"
+    #
+    # Asserted on the GEOMETRY rather than on a count, because that is what actually decides: this
+    # page must be declined BY the spanning guard, not by the two-region short-circuit above it and
+    # not by the column count below it. Computed here with plain arithmetic rather than through
+    # `_ocr`'s own helpers, so the fixture is validated independently of the code under test — the
+    # same discipline the two-column fixture's gutter bounds already follow. An earlier version
+    # counted normalised WORDS (`> 20`) and reported them as regions; this page has 4 regions and
+    # would have failed that guard read literally.
+    spans = [(min(p[0] for p in box), max(p[0] for p in box)) for box in boxes]
+    centre = (min(s for s, _ in spans) + max(e for _, e in spans)) / 2
+    crossing = sum(1 for start, end in spans if start < centre < end)
+    assert crossing > len(spans) * 0.15, (
+        f"a single-column page must cross the centre on most lines: {crossing}/{len(spans)}"
+    )
     assert ordered == raw

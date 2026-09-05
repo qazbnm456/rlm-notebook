@@ -11,6 +11,80 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The script rule never reached a prompt: it shipped inert, and three documents described it as
+  working.** `instructions._script_rule` matched on the language NAME, but invariant 39 carries the
+  language as a SIGNATURE FIELD — so all three call sites (`task.py:37`, `guide.py:37`,
+  `audio.py:110`) compose their rule at import time with the literal placeholder
+  `"the language named by the `output_language` variable"`, which matches nothing. It returned `""`
+  for all six tasks, in production, from the day it shipped. Measured on the shipped classes: every
+  one scored `script-rule-text=False`. Found by an independent review of the batch that added it.
+
+  **Replaced by `instructions.SCRIPT_PINNED`, worded conditionally and shipped unconditionally** —
+  the same shape the sentence beside it (`Write your prose in {language}`) had always had. All six
+  now carry exactly one copy. The proper-noun carve-out moved with it and is stated ONCE covering
+  both directions; the superseded table carved it out of the Traditional rule only and left the
+  Simplified rule with the mirror-image exposure.
+
+  **The test could not have caught it, and that is the transferable part.**
+  `tests/test_instructions.py` called `artifact_language_rule("Traditional Chinese")` — a call shape
+  that occurs nowhere in the product. A mutation making `_script_rule` `return ""` was duly KILLED
+  by it while the feature was entirely dead. That is a test passing for a reason unrelated to its
+  name at FEATURE level rather than assertion level, which is a level the project had not written
+  down. Every assertion in that file now goes through a shipped task class.
+
+  **Consequence for the live run this batch spent**: it cost 459s and could not have tested what it
+  was spent on — the "after" prompt differed from the "before" only by `NATURAL_REGISTER`, which is
+  an unconditional constant and did ship correctly. Whether the script rule prevents Simplified
+  drift remains UNMEASURED.
+
+- **The Simplified-character measurement was wrong on four of its five characters.** `CLAUDE.md`
+  recorded "five genuine ones — `么 没 干 帮 们`". Re-run over the same two notebooks (675 string
+  fields), excluding the three classes the batch had itself identified:
+
+  | excluded | hits | why |
+  |---|---|---|
+  | Japanese context | 391 | one notebook holds Japanese sources; shinjitai maps to Traditional |
+  | punctuation | 78 | zhconv rewrites `“ ” ’` |
+  | correct Traditional already | 14 | `干` (干預/干擾), `台` (一台), `群`, `里` (里程碑) |
+  | proper nouns | 12 | `霍尔木兹海峡`, copied verbatim from a Simplified source |
+
+  What survives is **`么 对 点 问 题` — five characters, five sites, all in podcast utterances**.
+  `没 帮 们` appear ZERO times in either notebook. The "all in podcast utterances, titles and
+  answers clean" half of the claim stands and is now verified against field paths rather than
+  asserted. No validator is still the right call, for the reason already recorded.
+
+- **Three fixes from the previous batch had no regression test, and the sparse-band measurement was
+  overstated in two places.** All from the same review.
+
+  - `tests/test_web_assets.py` now pins the budget note's cap-without-usage branch (by ORDER, so a
+    run with both fields cannot take the weaker one), the `dropped` notice's preservation of
+    `is-cut` (by the DIRECTION of the conditional), and — as a general rule rather than a token
+    name — that **no `var()` fallback in the stylesheet hardcodes a colour**. That last one is
+    stated as a property of the fallback because `var(--danger, #d9534f)` is how a typo'd token
+    ships looking healthy: the fallback renders, so nothing is visibly broken, and the value
+    silently ignores all three theme blocks. `--danger` is assigned nowhere in the tree; `--bad` is
+    defined in all three.
+  - `tests/test_instructions.py` pins `AnswerQuestion`'s answer-first and "say what the sources did
+    NOT settle" rules, which had no enforcement anywhere — mutations deleting each survived the
+    full suite.
+  - **The real-detector fixture cannot demonstrate the per-band defect and never could**: it
+    carries ONE spanning region, so that page is a single band of 104 and both schemes agree on it
+    exactly. `_ocr.py`'s docstring and `CLAUDE.md` both reported it as a three-region band the
+    fixture holds. The 6-15% figure is sound and was reproduced (7.8% / 8.8% / 9.9% / 10.2% for
+    contiguous windows of 3/4/5/8 regions) — it is a claim about PLAUSIBLE bands, and the hedge the
+    commit message carried was dropped in both prose copies.
+
+- **Two test guards measured something other than what they said.**
+  `tests/test_parsers_pdf.py`'s single-column guard asserted `len(raw) > 20` under the message "the
+  fixture must produce several regions" — `raw` is a normalised WORD list, and that page has FOUR
+  regions, so the guard read literally was false while passing. It now asserts the GEOMETRY that
+  actually decides (the page must be declined BY the spanning guard, not by the two-region
+  short-circuit above it), computed with plain arithmetic so the fixture stays validated
+  independently of the code under test. And `test_web_assets.py`'s regenerate test imported
+  `rlm_notebook.api`, so without the `api` extra it FAILED rather than being absent — sharper than
+  the trap the Verify section records, and it misreported a missing dependency as a broken feature.
+  It reads `api.py` as text now, like every other assertion in that file.
+
 - **OCR reading order: a two-column scan no longer comes back with its columns interleaved
   (invariant 73).** `parsers/_ocr.py` joined RapidOCR's regions with
   `" ".join(text for _, text, _ in result)`, throwing away the bounding quad reported alongside

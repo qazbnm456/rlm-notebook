@@ -782,25 +782,49 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     **Two things a language NAME does not settle, each with its own rule.**
 
-    - **SCRIPT** (`_SCRIPT_RULES`, composed by `_script_rule`): a language with more than one script
-      is under-specified by its name, and a model treats the scripts as interchangeable. The sibling
+    - **SCRIPT** (`instructions.SCRIPT_PINNED`): a language with more than one script is
+      under-specified by its name, and a model treats the scripts as interchangeable. The sibling
       a sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
       every page TITLE came back Simplified, so the nav and the page disagreed on screen — the rule
       names the characters (`概览` must be `概覽`) because that cannot be read as a loose synonym.
-      **Borrowed, and the local measurement behind it was corrected once**: a first pass reported
-      zero Simplified characters using a ~90-character hand table, which its own author documents as
-      a script identifier rather than a converter. A full `zhconv` mapping over the same fields finds
-      five genuine ones — `么 没 干 帮 们` — and ALL five are in podcast utterances, with titles,
-      overviews, answers and follow-ups clean. **That is the inverse of the sibling's case**, whose
-      failure was in page TITLES, and it is why no validator was added: every condition justifying
-      one (short, navigational, repeated, demonstrably drifting) is absent, and the one field that
-      would qualify here does not drift. Empty for a language whose name already pins one script.
 
-      **A PROPER NOUN outranks it, and the rule says so** — the two collide whenever the sources
-      spell a name in the other script, and nothing stated a precedence until a live run made them
-      collide: a Traditional podcast carried `霍尔木兹海峡` nine times, verbatim from a Simplified
-      source. The model chose the name over the script, which is right (converting it costs the
-      reader the string they would search for), but it chose without being told.
+      **It is worded CONDITIONALLY and shipped UNCONDITIONALLY, and that is forced rather than
+      chosen.** The first version was a table keyed on the language NAME (`_SCRIPT_RULES`, matched
+      by `_script_rule`) — but the language arrives as a SIGNATURE FIELD, so all three call sites
+      compose their rule at import time with the literal placeholder
+      `"the language named by the \`output_language\` variable"`, which matches nothing. It returned
+      the empty string for every task, in production, from the day it shipped, and three documents
+      described it as working. The sentence beside it (`Write your prose in {language}`) had been a
+      conditional the model evaluates all along; only the script half was written as an import-time
+      branch. **A test that calls `artifact_language_rule("Traditional Chinese")` cannot see this** —
+      that call shape occurs nowhere in the product — so `tests/test_instructions.py` asserts on the
+      six SHIPPED task classes instead, and a mutation to `_script_rule` was killed by the old test
+      while the feature was entirely dead. Passing for a reason unrelated to its name, at FEATURE
+      level rather than assertion level.
+
+      **The local measurement was corrected twice**: a first pass reported zero Simplified
+      characters using a ~90-character hand table, which its own author documents as a script
+      identifier rather than a converter; a full `zhconv` mapping then reported five, of which the
+      published list was wrong on four. A `zhconv` diff counts characters that are correct
+      Traditional in their own right (`干` in 干預/干擾, `台` in 一台, `群`, `里` in 里程碑), counts
+      proper nouns (`霍尔木兹海峡`, 12 hits, four occurrences of a Simplified place name copied from
+      a Simplified source), and counts Japanese entirely (391 hits — one notebook holds Japanese
+      sources, and shinjitai maps to Traditional). Excluding all three, two real notebooks carry
+      **`么 对 点 问 题` — five characters, five sites, ALL in podcast utterances**, with titles,
+      overviews, answers and follow-ups clean. `没 帮 们` appear zero times. **That is the inverse of
+      the sibling's case**, whose failure was in page TITLES, and it is why no validator was added:
+      every condition justifying one (short, navigational, repeated, demonstrably drifting) is
+      absent, and the one field that would qualify here does not drift. Whether the prompt rule
+      prevents the podcast drift is still UNMEASURED — the one live run spent on it predates this
+      fix, so it tested a prompt the rule never reached.
+
+      **A PROPER NOUN outranks it, and the rule says so ONCE, covering both directions** — the two
+      collide whenever the sources spell a name in the other script, and nothing stated a precedence
+      until a live run made them collide: a Traditional podcast carried `霍尔木兹海峡` verbatim from
+      a Simplified source. The model chose the name over the script, which is right (converting it
+      costs the reader the string they would search for), but it chose without being told. The
+      superseded table carved the exception out of the Traditional rule only and left the Simplified
+      rule with the mirror-image exposure.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so
@@ -1981,9 +2005,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     case", never to locate a column — that stays `centre`'s job.
 
     **Counted over the whole PAGE, never one band.** A sparse band — a few short fragments between two
-    spanning elements — reads its own intra-column whitespace as a gutter: on the real fixture a
-    three-region band counted 3 and was declined, returning the interleaved order this exists to remove.
-    Per-band counting turned the guard into the defect on 6-15% of that page's plausible bands.
+    spanning elements — reads its own intra-column whitespace as a gutter, counts 3 and declines,
+    returning the interleaved order this exists to remove. **The real fixture does not demonstrate this
+    and cannot**: it carries one spanning region, so that page is a single band of 104 and both schemes
+    agree on it. The hazard is measured over contiguous windows of its own geometry — 7.8-10.2% of
+    3-to-8-region slices count more than two — a claim about PLAUSIBLE bands, and the hedge the commit
+    message carried was dropped in the docstring and here.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See

@@ -99,10 +99,14 @@ def _column_count(band: list[_Region]) -> int:
 
     **Counted over the whole PAGE, never one band.** A column count is a property of the layout;
     a band is a slice of it, and a SPARSE band — a few short fragments between two spanning
-    elements — reads ordinary intra-column whitespace as a gutter. Measured on this project's own
-    real-detector fixture: a three-region band counted 3 and was declined, which returns the
-    interleaved detection order this module exists to remove. Per-band counting turned the guard
-    into the defect on 6-15% of that page's plausible bands.
+    elements — reads ordinary intra-column whitespace as a gutter, counts 3, and declines, which
+    returns the interleaved detection order this module exists to remove.
+
+    **The real-detector fixture does not demonstrate that and cannot**: it carries ONE spanning
+    region, so the page is a single band of 104 and the two schemes agree on it exactly. The hazard
+    was measured over contiguous windows of that page's own geometry instead — 7.8-10.2% of its
+    3-to-8-region slices count more than two — which is a claim about PLAUSIBLE bands. An earlier
+    wording here reported it as a band the fixture actually holds.
     """
     spans = sorted((region[0], region[1]) for region in band)
     if not spans:

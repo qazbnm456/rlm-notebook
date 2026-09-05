@@ -1456,12 +1456,18 @@ def test_regenerating_a_turn_goes_through_the_same_flow_as_asking():
 def test_regenerate_replaces_only_a_matching_last_turn():
     """Server-side half. Checked inside the lock against the notebook as it is THEN, because the
     snapshot the handler read may be minutes old — and a request that arrives after someone else
-    asked something new must append rather than overwrite a turn it did not mean to."""
-    import inspect
+    asked something new must append rather than overwrite a turn it did not mean to.
 
-    from rlm_notebook import api
-
-    src = inspect.getsource(api.ask)
+    Read as TEXT rather than through `inspect.getsource(api.ask)`, because importing `api` needs
+    the `api` extra: this file is source-tree assertions and every other test in it runs on a bare
+    `uv sync`. Importing made this one FAIL rather than be absent without the extra, which is
+    sharper than the trap CLAUDE.md's Verify section records and misreports a missing dependency as
+    a broken feature.
+    """
+    api_src = (Path(__file__).resolve().parent.parent / "rlm_notebook" / "api.py").read_text(
+        encoding="utf-8"
+    )
+    src = api_src[api_src.index("async def ask(") :]
     persist = src[src.index("def _persist(") : src.index("await _mutate_or_http(notebook_id, _persist")]
     assert "body.regenerate" in persist and "nb.turns[-1].question == body.question" in persist, persist
     assert "nb.turns[-1] = turn" in persist and "nb.turns.append(turn)" in persist, persist
@@ -1628,3 +1634,68 @@ def test_a_steps_pill_on_a_traceless_run_does_not_open_an_empty_drawer():
     closed = catch[catch.index("if (trajEl.drawer.hidden)") : catch.index("trajEl.stat.textContent")]
     assert "alert(" in closed and "return;" in closed, "a closed drawer must report and not open"
     assert "trajShowDrawer" not in closed
+
+
+def test_a_reported_cap_with_no_usage_is_its_own_state():
+    """Four states, not three. A provider that returns no `usage` block leaves `cap` set and
+    `peak_completion` null — collapsing that into the no-cap branch made the drawer say no cap was
+    reported for a run that had one, which is the same "an absent field is not a zero" error the
+    test above exists to prevent, one branch over.
+
+    Pinned by ORDER and by SUBJECT, not by token presence (invariant 60): the two-field branch has
+    to come before the cap-only branch, or a run with both would take the weaker one.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    body = js[js.index("function renderTrajBudget(") : js.index("function renderTrajectory(")]
+
+    both = body.index("budget.cap != null && budget.peak_completion != null")
+    cap_only = body.index("} else if (budget.cap != null) {")
+    assert both < cap_only, "the both-fields branch must be tested before the cap-only one"
+    assert "traj.budgetNoUsage" in body[cap_only:], "the cap-only state needs its own string"
+    assert "traj.budgetPartial" in body[body.index("} else {", cap_only) :], (
+        "the no-cap fallback must keep the partial string rather than inheriting the new one"
+    )
+
+
+def test_a_dropped_step_budget_never_overwrites_the_truncation_colour():
+    """A run can BOTH hit the generation cap and have its step budgets rejected. The `dropped`
+    notice is appended, and its tone assignment must preserve `is-cut` — the colours exist to keep
+    "a turn was cut off" separable from "the caps did not apply", and an unconditional
+    `tone = "is-info"` erased the first the moment the second was also true.
+
+    The DIRECTION of the conditional is the assertion, since a mutation to a constant leaves every
+    token in place.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    body = js[js.index("function renderTrajBudget(") : js.index("function renderTrajectory(")]
+
+    dropped = body.index("iterations.dropped")
+    tail = body[dropped:]
+    assert 'tone === "is-cut" ? "is-cut"' in tail, (
+        "the dropped notice must preserve a truncation tone rather than overwriting it"
+    )
+    # And it appends: replacing the note would drop the sentence explaining what was truncated.
+    assert tail.index("appendChild") < tail.index("tone ="), (
+        "the notice is appended before the tone is adjusted, never in place of the first note"
+    )
+
+
+def test_no_stylesheet_fallback_hardcodes_a_colour():
+    """`var(--x, <hex>)` is how a typo'd token ships looking healthy: the fallback renders, so
+    nothing is visibly broken, and the value silently ignores all three theme blocks. A live
+    example was `var(--danger, #d9534f)` where the defined token is `--bad` — `--danger` is
+    assigned nowhere in the tree, so every theme got one hardcoded red.
+
+    Stated as a property of the FALLBACK rather than as a list of known-good token names, because
+    the failure is "a colour that cannot follow the theme", not "this particular typo".
+    A non-colour fallback (a font stack, a width) is fine and several are deliberate.
+    """
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+    hardcoded = re.findall(r"var\(\s*(--[\w-]+)\s*,\s*(#[0-9a-fA-F]{3,8}|rgba?\([^)]*\))", css)
+    assert not hardcoded, f"hardcoded colour fallbacks bypass the theme blocks: {hardcoded}"
+
+    # The guard is only worth having if the tokens it protects are really defined per theme.
+    for token in ("--bad", "--warn", "--accent"):
+        assert len(re.findall(rf"^\s*{token}\s*:", css, re.MULTILINE)) >= 3, (
+            f"{token} must be defined in every theme block, or a reference to it is theme-blind"
+        )
