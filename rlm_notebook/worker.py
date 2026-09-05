@@ -21,7 +21,7 @@ import sys
 
 # rlm-harness's own head+tail elider. Private, and deliberately borrowed rather than re-spelled:
 # it already encodes WHERE an AdapterParseError keeps its diagnostics, which a slice gets wrong.
-from rlm_harness._retry import _short_error
+from rlm_harness import short_error
 
 from .config import NotebookConfig, setup
 
@@ -64,12 +64,12 @@ def _describe(exc: BaseException) -> str:
     `reasoning`/`code` fields the adapter asked for. The wrapper names the symptom; the chain names
     the cause, and it was being discarded at exactly the boundary where a person starts reading.
 
-    **Elision is rlm-harness's own `_short_error`, not a `[:600]` slice.** dspy orders
+    **Elision is rlm-harness's own `short_error`, not a `[:600]` slice.** dspy orders
     `AdapterParseError.__str__` as adapter-name, then the WHOLE LM completion, then the
     expected/actual field summary — so a head truncation deletes precisely the two lines worth
     having. An independent review measured the cutoff: past a ~534-character completion, a head
     slice ends in a wall of raw model output with `Actual: []` gone, i.e. it failed on the exact bug
-    this function was added for. `_short_error` keeps both ends and says how much it dropped; using
+    this function was added for. `short_error` keeps both ends and says how much it dropped; using
     it rather than re-implementing it is also why the numbers cannot drift apart.
     """
     root = exc
@@ -105,7 +105,7 @@ def _render(exc: BaseException) -> str:
     parent will ever see — the worker would die silently and `runner` would report "failed with no
     error message", losing even the wrapper."""
     try:
-        return " ".join(_short_error(exc, _ERROR_CHARS).split())
+        return " ".join(short_error(exc, _ERROR_CHARS).split())
     except Exception:  # noqa: BLE001 — a broken __str__ must not cost us the whole report
         return f"{type(exc).__name__}: <unprintable>"
 

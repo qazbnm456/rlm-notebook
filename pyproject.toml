@@ -26,7 +26,7 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 dependencies = [
-    "rlm-harness==1.0.0",
+    "rlm-harness==1.10.0",
     "pydantic>=2.9",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",

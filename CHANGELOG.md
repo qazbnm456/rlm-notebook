@@ -52,6 +52,35 @@ questions with verifiable citations, and get a distilled research artifact out.
   is set from a two-document sample and deliberately errs low, since too low only declines to
   improve a page while too high reorders one that was already correct.
 
+- **`rlm-harness` 1.0.0 -> 1.10.0, and `worker.py` stopped reaching into a private module.** Ten
+  minor versions with no code change beyond one import: the only edit the upgrade itself forced was
+  swapping `from rlm_harness._retry import _short_error` for the public `from rlm_harness import
+  short_error`, verified to be the SAME object with the same signature before the swap. Note the
+  fix went one step further than proposed — dropping the underscore off the NAME still left the
+  import reaching through `_retry`, a `_`-prefixed MODULE; `short_error` is in the kit's `__all__`,
+  so the top-level path is the one with a compatibility promise behind it.
+
+  `dspy` moves 3.2.1 -> 3.3.1 with it (the kit's floor since 1.5.0), which renamed `max_iterations`
+  to `max_iters` upstream. The kit absorbs that internally: `RLMConfig` still accepts
+  `max_iterations` and invariant 59's budgets (25 / 16384 / 40000 / 1) still arrive intact —
+  checked, not assumed. Resolution touches three packages in total.
+
+  **The upgrade makes something measurable that was structurally unmeasurable here.** This project
+  passes a plain `dspy.LM` and never wrapped it in `intercept_sub_lm`, and before kit 1.7.0 only
+  that wrapper emitted `sub_call`. So every `sub_call` count in any trace this project has written
+  is a property of its own WIRING, not of the model — while three features read those events:
+  the ticker's event translation, the citation-turn lookup (invariant 29, which searches a
+  `sub_call`'s whole payload precisely because its keys differ from a `main_step`'s) and the
+  Trajectory timeline (invariant 70). The kit records it at the task seam now. Stated as a
+  structural claim from the code path, NOT as a measurement: `traces/` is empty here, so nothing
+  was counted to confirm it.
+
+  **Any later comparison across this boundary must split on `run_start.rlm_harness`** and treat an
+  absent field as UNMEASURED rather than zero. Traces written before kit 1.6.0 carry no such field
+  and none of `sub_call`, `tool_call.duration_s`, `run_end.error_chain` or `run_end.budgets`/`usage`
+  — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
+  older as 0%, which is corpus composition rather than a property of this code.
+
 - **A third review round, this time over the restorations themselves; six defects fixed.** Restored
   prose is the dangerous kind, because it reads as authoritative while nobody has re-checked it
   against the code. Of 26 claims put back by the two restoration commits, four were wrong.
