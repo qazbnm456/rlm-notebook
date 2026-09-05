@@ -4537,6 +4537,25 @@ function renderTrajDetail() {
   if (entry.output) trajField(host, t("traj.output", "Output"), entry.output);
   if (entry.error) trajField(host, t("traj.error", "Error"), entry.error);
   Object.entries(entry.fields || {}).forEach(([key, value]) => trajField(host, key, String(value)));
+  // A way BACK to the turn whose code made this call. The head already names it, and naming a turn
+  // a reader then has to find in the nav by eye is the two-lists-to-correlate problem the strip's
+  // own turn marks exist to remove. On EVERY attributed segment, not only a failed one: "why was
+  // this called" is the same question whether or not it worked. Absent when the trace has no live
+  // per-turn timing, since nothing is attributed then and a button reading "open turn null" is
+  // worse than no button.
+  if (entry.turn_index != null) {
+    const jump = document.createElement("button");
+    jump.type = "button";
+    jump.className = "btn det-jump";
+    jump.textContent = t("traj.openTurn", `\u2191 Open turn ${entry.turn_index + 1}`, {
+      n: entry.turn_index + 1,
+    });
+    jump.addEventListener("click", () => {
+      trajStopPlay();
+      trajSelect("turn", entry.turn_index);
+    });
+    host.appendChild(jump);
+  }
 }
 
 function trajDetailHead(host, title, sub) {

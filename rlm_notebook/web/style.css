@@ -3947,3 +3947,10 @@ body.is-resizing .studio-grip {
   right: 0;
   left: auto;
 }
+
+/* The way back from a tool segment to the turn that made the call. Its own top margin because it
+   is the last thing in the pane and must not sit flush against the field above it. */
+.det-jump {
+  margin-top: 0.9rem;
+  font-size: 0.82rem;
+}

@@ -153,6 +153,7 @@ const STRINGS = {
     "traj.code": "程式碼",
     "traj.output": "輸出",
     "traj.tool": "工具",
+    "traj.openTurn": "\u2191 開啟回合 {n}",
     "traj.verdict": "驗證結果",
     "traj.result": "結果",
     "traj.input": "輸入",

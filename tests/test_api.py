@@ -2851,8 +2851,11 @@ def test_the_trajectory_separates_the_two_clocks_a_run_actually_has():
     assert [e["label"] for e in line] == ["skill", "validate"]
     # A call is attributed to the turn whose code produced it, never to the next one.
     assert {e["turn_index"] for e in line} == {0}
-    # `duration_s` is the gap since the PREVIOUS live event, so three equal values would hide a bug.
-    assert [e["duration_s"] for e in line] == [3.0, 2.0]
+    # `duration_s` is the gap since the PREVIOUS live event — EXCEPT for a turn's first call, whose
+    # gap reaches back through the model generating that whole code cell and is dropped rather than
+    # shown as the tool's (see `test_a_turns_first_call_keeps_no_gap_derived_duration`). Three equal
+    # values would hide a bug, which is why the surviving one is asserted exactly.
+    assert [e["duration_s"] for e in line] == [None, 2.0]
     assert [e["rel_s"] for e in line] == [3.0, 5.0]
 
 
@@ -3353,3 +3356,39 @@ def test_the_worker_turns_off_dspys_cache_only_when_asked():
     assert "enable_memory_cache=False" in branch, branch
     # BEFORE setup, or the LMs are already built against the cached client.
     assert src.index("if fresh:") < src.index("setup(config)")
+
+
+def test_a_turns_first_call_keeps_no_gap_derived_duration():
+    """The gap reaches back to the previous timeline event, and for a turn's FIRST call that is on
+    the far side of the model generating the whole code cell — so the number is mostly model time
+    wearing a tool's name. a sibling project measured 287 of 972 calls first-in-turn: a third of every
+    duration it displayed.
+
+    A call that measured ITSELF is unaffected. This only ever discards a fallback that was never
+    the tool's.
+    """
+    import json
+
+    from rlm_notebook.trajectory import build_trajectory
+
+    def ev(kind, step, ts, payload):
+        return json.dumps({"type": kind, "step_id": step, "ts": ts, "payload": payload})
+
+    lines = [
+        ev("run_start", 0, 0.0, {"meta": {"task": "m:T"}}),
+        ev("main_step", 1, 1.0, {"reasoning": "r", "code": "c"}),
+        # First call of turn 1: no self-reported duration, so the 9-second gap must be dropped.
+        ev("tool_call", 1, 10.0, {"tool": "read_skill", "ok": True}),
+        # Second call of the SAME turn: the gap since the previous call is really the tool's.
+        ev("tool_call", 1, 10.5, {"tool": "read_skill", "ok": True}),
+        # First call of turn 2, but it measured itself — the measurement survives.
+        ev("main_step", 2, 20.0, {"reasoning": "r", "code": "c"}),
+        ev("tool_call", 2, 30.0, {"tool": "validate_x", "ok": True, "duration_s": 0.002}),
+        ev("run_end", 3, 31.0, {"ok": True}),
+    ]
+    traj = build_trajectory([json.loads(x) for x in lines])
+    strip = traj["timeline"]
+    assert [e.get("turn_index") for e in strip] == [0, 0, 1], strip
+    assert strip[0]["duration_s"] is None, "a turn's first gap is mostly model time"
+    assert strip[1]["duration_s"] == 0.5, strip[1]
+    assert strip[2]["duration_s"] == 0.002, "a self-measured call keeps its own number"

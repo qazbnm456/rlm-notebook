@@ -11,6 +11,35 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A turn's FIRST tool call no longer shows a gap-derived duration.** The gap reaches back to the
+  previous timeline event, which for a turn's first call is on the far side of the model generating
+  that whole code cell — so the number displayed was mostly model time wearing a tool's name.
+  a sibling project measured **287 of 972 calls first-in-turn**, a third of every duration its drawer
+  showed. A call that measured ITSELF is unaffected (`duration_measured`); this only discards a
+  fallback that was never the tool's.
+
+  An existing test pinned the old value (`[3.0, 2.0]`), and its own comment said `duration_s` is
+  "the gap since the PREVIOUS live event" — it was pinning the implementation, not defending it.
+  Now `[None, 2.0]` with the reason attached.
+
+- **A tool segment offers a way back to the turn that called it.** On every ATTRIBUTED segment
+  rather than only a failed one, and absent where nothing is attributed. The detail head already
+  named the turn, and naming one a reader then has to find in the nav by eye is exactly the
+  two-lists-to-correlate problem the strip's turn marks remove.
+
+  From a four-screenshot comparison with a sibling project's drawer. Of the five gaps it showed, three
+  turned out to be already present here (turn marks, the flex-grow floor, the basis floor) and one
+  is better here (`2ms` rather than a `<10ms` display floor). The two real ones were this and the
+  first-in-turn rule.
+
+  **Not adopted: a run-wide picker and a `成功` header badge.** The picker needs a server-wide run
+  index this project does not have — a trace is reachable only from the artifact that produced it
+  (invariant 29's persisted run ids). The badge would come from `run_end.ok`, which says a SUBMIT
+  parsed and nothing about whether the artifact is any good: citations are verified host-side and
+  afterwards, so a run whose every citation was refused still reads `ok`. That is a status line
+  claiming something the page is not doing (invariant 60). The sibling reached the same conclusion
+  about its own and is renaming it to say what it measures.
+
 - **Regenerate now actually regenerates (`RunOptions.fresh`).** `dspy.LM` defaults to
   `cache=True`, so pressing Regenerate on an unchanged notebook returned a run with 0 model calls
   in 3.4 seconds that replayed the previous one byte-identically — same seven turns, same

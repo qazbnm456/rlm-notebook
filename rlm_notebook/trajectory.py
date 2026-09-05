@@ -91,11 +91,15 @@ def _tool_entry(payload: dict, gap: float | None) -> dict:
     tool = payload.get("tool") or ""
     args = payload.get("args") or {}
     own = payload.get("duration_s")
+    measured = isinstance(own, (int, float))
     entry: dict = {
         "kind": "tool",
         "tool": tool,
         "ok": payload.get("ok"),
-        "duration_s": own if isinstance(own, (int, float)) else gap,
+        "duration_s": own if measured else gap,
+        # Whether that number came from the TOOL or from the strip's gap. The difference decides
+        # whether it survives the first-in-turn rule below.
+        "duration_measured": measured,
     }
     if tool == "read_skill":
         entry.update(
@@ -318,6 +322,22 @@ def build_trajectory(events: list[dict]) -> dict:
                 else:
                     break
             entry["turn_index"] = assigned
+
+        # **A turn's FIRST call keeps no gap-derived duration.** The gap reaches back to the
+        # previous timeline event, which for the first call of a turn is on the far side of the
+        # model generating that whole code cell — so the number shown is mostly model time wearing
+        # a tool's name. a sibling project measured 287 of 972 calls first-in-turn, a third of every
+        # duration it displayed. A call that measured ITSELF is unaffected; this only ever discards
+        # a fallback that was never the tool's.
+        seen_turns: set[int] = set()
+        for entry in timeline:
+            turn = entry.get("turn_index")
+            if turn is None:
+                continue
+            if turn not in seen_turns:
+                seen_turns.add(turn)
+                if not entry.get("duration_measured"):
+                    entry["duration_s"] = None
 
     note = (
         "Per-turn timing is live — captured as each turn was parsed."

@@ -2065,12 +2065,17 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     is not — invariant 52's rule for the ticker applied to the drawer. The verdict is bounded and
     is the model's own rejection message: paths, coordinates and character names, never source text.
 
-    **A duration the TOOL measured beats the strip's GAP.** `_tool_entry` sized every segment by
-    the distance from the previous timeline event, which is the best available answer for a call
-    that reports nothing and the wrong one for a call that does — it charges the tool with
-    everything since, including the planner turn that decided to call it. The first run after the
-    validator started recording drew a 3.3-second segment for a call it had measured at 1.9ms. The
-    gap remains the fallback, and a non-numeric report does not become one.
+    **A duration the TOOL measured beats the strip's GAP, and a turn's FIRST call keeps no gap at
+    all.** `_tool_entry` sized every segment by the distance from the previous timeline event —
+    the best available answer for a call that reports nothing, the wrong one for a call that does,
+    since it charges the tool with everything since. The first run after the validator started
+    recording drew a 3.3-second segment for a call it had measured at 1.9ms.
+
+    The gap remains the fallback, and a non-numeric report does not become one — but for the FIRST
+    call of a turn even the fallback is dropped to `None`, because that gap reaches back through
+    the model generating the whole code cell and the number would be mostly model time wearing a
+    tool's name. a sibling project measured 287 of 972 calls first-in-turn: a THIRD of every duration
+    it displayed. `duration_measured` is what keeps a self-timed call out of that rule.
 
     **A run can legitimately have NO model calls, and the drawer says so correctly.** `dspy.LM`
     defaults to `cache=True`, so a run with an unchanged corpus, language and tier replays the
@@ -2103,6 +2108,13 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     `.ticker-detail` was one of invariant 36's tripwire sentinels and is replaced by `.traj-drawer` rather
     than dropped, with the extraction gaining a route for a BARE `hidden` attribute in the markup, which all
     four existing routes were blind to.
+
+    **A tool segment offers a way BACK to the turn that called it**, on every ATTRIBUTED segment
+    rather than only a failed one — "why was this called" is the same question whether or not it
+    worked — and absent where nothing is attributed, since a button reading "open turn null" is
+    worse than none (the sibling shipped that and said so). The head already names the turn; naming
+    one a reader then has to find in the nav by eye is the two-lists-to-correlate problem the
+    strip's own turn marks exist to remove.
 
     **A timeline segment is sized `flex: <duration> 0 <floor>px`, and BOTH halves fix the other's failure**:
     `flex-grow` against the strip's TOTAL divides it into unreadable slivers, while a fixed `width` leaves a

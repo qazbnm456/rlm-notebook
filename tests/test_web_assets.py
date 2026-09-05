@@ -1726,3 +1726,25 @@ def test_a_regenerate_asks_for_a_fresh_run_and_a_first_generate_does_not():
         )
         # Keyed on the artifact, never hardcoded — either constant is a different bug.
         assert "fresh: true" not in body and "fresh: false" not in body, body[:300]
+
+
+def test_a_tool_segment_offers_a_way_back_to_the_turn_that_called_it():
+    """The detail head already NAMES the owning turn, and naming a turn a reader then has to find
+    in the nav by eye is the two-lists-to-correlate problem the strip's turn marks exist to remove.
+
+    On EVERY attributed segment, not only a failed one — "why was this called" is the same question
+    whether or not it worked — and absent when nothing is attributed, since a button reading "open
+    turn null" is worse than no button (a sibling project shipped that and said so).
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    at = js.index("traj.openTurn")
+    around = js[at - 700 : at + 500]
+
+    # Guarded on ATTRIBUTION, not on failure.
+    assert "entry.turn_index != null" in around, around
+    assert "entry.ok" not in around, "the jump must not be limited to failures"
+    # It selects the TURN, not the tool it was opened from.
+    assert 'trajSelect("turn", entry.turn_index)' in around, around
+    # Translated, or a Chinese drawer grows an English button (invariant 48's tripwire covers the
+    # key; this asserts the literal is not left bare at the call site).
+    assert 'Open turn ${entry.turn_index + 1}' in around, around
