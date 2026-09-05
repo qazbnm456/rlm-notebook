@@ -103,10 +103,14 @@ questions with verifiable citations, and get a distilled research artifact out.
   no middle.
 
   Arithmetic checked here rather than accepted: the bins transpose exactly as claimed and 49 + 15 =
-  64. **One number does not reconcile** — the fraction was given as 64/379, while the same source's
-  earlier figures were 385 total, 363 below 0.6 and 21 at the cap, which sum to 384 and leave 379
-  matching neither. Every plausible denominator lands at 16.6-17.6%, so "about one run in six" is
-  the claim that survives; the exact percentage does not.
+  64. A denominator that did not reconcile — 64/379 against earlier figures summing to 384 — turned
+  out to be **two populations reported without saying so**, and the split is worth keeping because
+  it changes which number to quote: 385 runs reached `run_end`, of which 379 SUCCEEDED and 6 FAILED.
+  The binned distribution is the successes only (363 / 0 / 16 at the cap); the failures add
+  1 / 0 / 5; across all 385 it is 364 / 0 / 21, which closes. So **64/379 = 16.9% of successful runs
+  and 64/385 = 16.6% of everything reaching `run_end`** — both defensible, neither interchangeable.
+  It cross-checks independently against the same source's "21 hit the cap, 16 finished anyway":
+  16 successes plus 5 failures at the cap is exactly 21.
 
   **What keeps this an indication rather than a measurement**: transposing assumes a run's token
   count is unchanged by the cap it ran under. `max_tokens` is a hard stop rather than a hint, so
@@ -127,6 +131,13 @@ questions with verifiable citations, and get a distilled research artifact out.
   claim by how far it travels — mechanism versus measured shape — caught both before either was
   known to be wrong, which is why the provenance line is recorded next to every borrowed number
   here rather than dropped once it looks settled.
+
+  **And one working rule, earned by getting it wrong in this very entry: after correcting a claim,
+  re-read what INTRODUCES it, not only the claim.** The correction above replaced the guidance and
+  left the entry still opening with "it rules out the obvious design" — the one thing the correction
+  had just removed, sitting in the first line a reader meets. Same shape as fixing the underscore in
+  `_short_error` and leaving the import reaching through `_retry`. The challenged sentence is easy to
+  find because somebody quoted it back; the sentence that set it up is not, because nobody did.
 
 - **A third review round, this time over the restorations themselves; six defects fixed.** Restored
   prose is the dangerous kind, because it reads as authoritative while nobody has re-checked it
