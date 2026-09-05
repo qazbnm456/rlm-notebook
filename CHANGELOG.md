@@ -81,6 +81,36 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **Took two rules from the sibling's `prose-craft` skill, and left most of it, because the rest is
+  answering a problem this project does not have.** Measured first on the two real notebooks here,
+  20 model-authored fields:
+
+  | `prose-craft` rule | violations measured here |
+  |---|---|
+  | space between Chinese and Latin | 1 (one podcast utterance) |
+  | full-width Chinese punctuation | 0 |
+  | avoid stacking three or more `的` | 8, of which 6 are podcast |
+
+  So the two typography rules are answering a failure this project's model is not making, and adding
+  them would be writing a rule against something never observed. The `的` stacking is real and it
+  CONCENTRATES in the podcast, which fits: it is the only artifact meant to be heard, where a
+  listener has no punctuation to lean on. That one went into `podcast-craft` with its measurement,
+  not into a prompt — skipping it makes an episode duller to listen to, not wrong (invariant 65).
+
+  **What did go in the PROMPT is an honesty rule**, and it is the half of `prose-craft`'s
+  answer section that is not taste. `AnswerQuestion` already said to admit when the sources cannot
+  answer a question AT ALL; the commoner case is a question mostly answered with one part left open,
+  where an answer that reads confident throughout while quietly skipping the unsupported half is
+  worse than a short one that names the gap — the reader cannot see it, and every citation on the
+  rest still verifies (invariant 5). Answer-first and stop-when-done went in beside it: a closing
+  summary paragraph is a second, worse copy of `follow_ups` (invariant 56).
+
+  **Not taken, and why**: the nine AI-taste patterns (summary sentence, false contrast, bold as
+  pseudo-heading) are taste judgements — nothing here can measure whether this project has them or
+  whether a rule improved them, and a prompt rule whose effect cannot be observed is one more thing
+  to maintain on faith. The em-dash prohibition is the sibling's house style. The `read_file` /
+  `grep_repo` grounding advice has no analogue in a corpus this project hands over whole.
+
 - **A language name buys neither its script nor its idiom; both now have a rule (invariant 39).**
   Two findings, one observed here and one borrowed from a sibling project after reading how
   it had solved the same class of problem.

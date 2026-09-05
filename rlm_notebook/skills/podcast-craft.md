@@ -75,3 +75,16 @@ the LLM in the transcript, but they are built into the audio model" and attribut
 That sentence is the HOSTS' editorial show note, not a guest's words, and the guest contradicts it
 when asked. It reached this file from a fetched summary that nobody opened the transcript to check.
 Check which layer a technique lives in before adopting it — and check who actually said so.
+
+## Chinese: keep the sentence walkable
+
+Measured on this project's own episodes: `的` stacked three or more times in one sentence appeared
+six times across two podcasts, against two in every chat answer and overview combined. It is a
+spoken-word problem before it is a written one — a listener has no punctuation to lean on, and three
+`的` in a row is where a sentence stops being followable by ear.
+
+Put the actor and the action first, then hang the conditions off the end. `這個框架把任務拆成多個
+階段` beats `這個框架的任務的拆解的方式`.
+
+Prefer the plain word over the formal one: `很` over `非常`, `比如` over `例如`, `用` over `使用`.
+An episode is two people talking, and the formal register is the one that reads as assembled.
