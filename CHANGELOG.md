@@ -11,6 +11,47 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The script rule was measured live, and the run bought a REGRESSION rather than a
+  confirmation.** A/B on one notebook (`nb-d22c2a9a`): same four sources, same
+  `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long` tier, 258s — only
+  the prompt differed. Run through the CLI `audio` path, which persists nothing (invariant 42), so
+  the stored episode the baseline came from was never overwritten and the comparison is against
+  the real recorded artifact rather than a re-derivation.
+
+  | | baseline (`scripttest2`, rule inert) | new (`SCRIPT_PINNED` shipping) |
+  |---|---|---|
+  | utterances / chars | 80 / 5699 | 77 / 4013 |
+  | Simplified drift sites | 4 (1 per 1424 chars) | 1 (1 per 4013) |
+  | the place name, ×n | `霍尔木兹海峡` ×3 | **`霍爾木茲海峡` ×6** |
+
+  **The drift half is NOT significant and must not be reported as a win.** The null expectation
+  for a 4013-character episode at the baseline rate is 2.82 hits; one was observed, Poisson
+  `P(X<=1) = 0.23`. The previous run's "no measurable effect at this sample size" was wrong for a
+  different reason — the prompt had not changed at all — and replacing one wrong conclusion with
+  an over-read of the next one would be the same mistake wearing better numbers.
+
+  **What the run DID establish is that the rule reaches the model, and it established it through a
+  new defect.** With the rule inert the model copied `霍尔木兹海峡` verbatim from its Simplified
+  source. With the rule shipping it produced `霍爾木茲海峡` — `尔`→`爾` and `兹`→`茲` converted,
+  `峡`→`峽` not — six times, consistently. That string is neither the Simplified the sources use
+  nor the correct Traditional `霍爾木茲海峽`, so a reader can search for it in NEITHER script,
+  which is exactly the harm the proper-noun carve-out exists to prevent. Behaviour changed on
+  precisely the collision the rule addresses, which is direct evidence rather than inference —
+  and the change was for the worse on that name.
+
+  **The failure mode had not been considered**: "keep the name" and "convert the name" were taken
+  to be the only outcomes, and a PARTIAL conversion is worse than either. Caveats kept: one name,
+  one run, one model, and `峡`/`峽` may simply be a character this model does not write.
+
+  Also measured, one sample, not attributed: the new episode ran 27% shorter per utterance (71.2
+  to 52.1 characters) at a near-identical turn count.
+
+  **Method note.** The drift scan classifies only the four characters verified in context
+  (`干 台 群 里`) as already-Traditional and prints everything else for a human to judge — a
+  blanket exclusion list would forgive the context-dependent pairs (`面/麵`, `系/係`, `松/鬆`)
+  and fail in the direction of UNDER-counting, which is the same error as the ~90-character hand
+  table, run backwards.
+
 - **The script rule never reached a prompt: it shipped inert, and three documents described it as
   working.** `instructions._script_rule` matched on the language NAME, but invariant 39 carries the
   language as a SIGNATURE FIELD — so all three call sites (`task.py:37`, `guide.py:37`,
