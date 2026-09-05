@@ -27,6 +27,12 @@ classifiers = [
 ]
 dependencies = [
     "rlm-harness==1.10.0",
+    # numpy>=2 is REQUIRED, not preferred: dspy 3.3.1 installs a lazy-import proxy for numpy
+    # (`dspy/utils/lazy_import.py`), and against numpy 1.x that proxy re-executes numpy's
+    # `__init__` while it is already partially imported the moment another extension module
+    # touches it — `import dspy; import cv2` dies with a circular import of `numpy.core`, taking
+    # this project's whole OCR path (rapidocr -> cv2) with it. Verified on 3.11 with numpy 1.26.4.
+    "numpy>=2",
     "pydantic>=2.9",
     # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",
@@ -101,12 +107,19 @@ subscription = ["claude-agent-sdk>=0.1.60"]
 #     `TypeError: 'NoneType' object is not callable` several seconds into model loading.
 #     Disclosed cost: this pin constrains the whole environment of anyone installing
 #     `rlm-notebook[chatterbox]`, not just this package. It is upstream's to remove, not ours.
+# Every entry carries `python_full_version >= '3.13'`, and that marker is load-bearing rather than
+# tidy. `chatterbox-tts` pins `numpy<2.0.0` below 3.13 and allows numpy 2 at and above it — and
+# uv's lock is UNIVERSAL, so an unmarked chatterbox dragged numpy back to 1.26.4 for every 3.11 and
+# 3.12 install of this project, chatterbox requested or not. That combination is broken: see the
+# `numpy>=2` note in `dependencies` above. Marked, the extra resolves to nothing below 3.13 and
+# `ChatterboxProvider`'s own import guard reports it as a TTSError, which is the loud failure; the
+# alternative was every 3.11 user's OCR path dying on an import they never asked for.
 chatterbox = [
-    "chatterbox-tts>=0.1.7",
-    "numba>=0.61",
-    "setuptools<82",
-    "soundfile>=0.12",
-    "numpy>=1.26",
+    "chatterbox-tts>=0.1.7; python_full_version >= '3.13'",
+    "numba>=0.61; python_full_version >= '3.13'",
+    "setuptools<82; python_full_version >= '3.13'",
+    "soundfile>=0.12; python_full_version >= '3.13'",
+    "numpy>=2; python_full_version >= '3.13'",
 ]
 
 [dependency-groups]

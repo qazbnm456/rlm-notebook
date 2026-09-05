@@ -111,6 +111,36 @@ questions with verifiable citations, and get a distilled research artifact out.
   to maintain on faith. The em-dash prohibition is the sibling's house style. The `read_file` /
   `grep_repo` grounding advice has no analogue in a corpus this project hands over whole.
 
+- **CI had been red on every push since the rlm-harness upgrade, and nobody looked.** Ten
+  consecutive failures. Local `pytest` was green throughout, which is exactly why it went unnoticed:
+  the suite passes on 3.13 and fails on 3.11 and 3.12, and only the full run fails — the OCR test
+  file alone passes.
+
+  **Root cause, isolated to one line of a dependency.** dspy 3.3.1 installs a lazy-import proxy for
+  numpy (`dspy/utils/lazy_import.py`). Against numpy 1.x that proxy re-executes numpy's `__init__`
+  while it is already partially imported, the moment another extension module touches the module
+  object — so `import dspy; import cv2` dies with `ImportError: cannot import name 'array' from
+  partially initialized module 'numpy.core'`, and cv2 reports only "OpenCV bindings requires numpy",
+  which names the wrong thing. That takes the whole OCR path with it, since rapidocr imports cv2.
+
+  **Why 3.11 and 3.12 had numpy 1.x at all**: `chatterbox-tts` pins `numpy<2.0.0` below 3.13 and
+  permits numpy 2 at and above it, and uv's lock is UNIVERSAL — so the optional extra set the numpy
+  version for every install of this project on those interpreters, chatterbox requested or not. CI
+  syncs `--extra api` and never touches chatterbox, and still got numpy 1.26.4.
+
+  **So this was never only a CI problem.** Any 3.11 or 3.12 user ingesting a scanned PDF would have
+  hit it, because the API process imports dspy and ingestion reaches cv2 through rapidocr.
+
+  The fix states the constraint where it lives: `numpy>=2` is a core dependency now, with the reason
+  attached, and every entry in the `chatterbox` extra carries `python_full_version >= '3.13'`. Below
+  that the extra resolves to nothing and `ChatterboxProvider`'s existing import guard reports a
+  `TTSError` — a loud failure in the feature the user asked for, rather than a silent one in the
+  ingestion they did not. Verified on all three interpreters: 621 passed on 3.11, 3.12 and 3.13,
+  where 3.11 and 3.12 had been 17 failed / 604 passed.
+
+  **The process lesson is the one worth keeping**: "I ran the suite" meant one interpreter. The
+  matrix existed precisely because that is not the same claim, and ten pushes went out on it.
+
 - **Spent a live podcast run to test the script rule. It has no measurable effect at this sample
   size, and the run bought three other things instead.** 459 seconds, one `long` episode on the same
   notebook, same tier as the baseline it replaced.

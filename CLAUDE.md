@@ -1030,6 +1030,19 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     through the unauthenticated settings page — a brand-new arbitrary-file-read surface — cannot
     happen. Invariant 26's reasoning applied to a second input channel.
 
+    **The extra is marked `python_full_version >= '3.13'`, and that marker is not tidiness.**
+    `chatterbox-tts` pins `numpy<2.0.0` below 3.13 and permits numpy 2 at and above it, while uv's
+    lock is UNIVERSAL — so an unmarked extra dragged numpy back to 1.26.4 for every 3.11 and 3.12
+    install of this project, whether chatterbox was requested or not. **numpy 1.x is broken with the
+    dspy this project now requires**: dspy 3.3.1 installs a lazy-import proxy for numpy
+    (`dspy/utils/lazy_import.py`) which, on numpy 1.x, re-executes numpy's `__init__` while it is
+    already partially imported the moment another extension module touches it — `import dspy;
+    import cv2` dies with a circular import of `numpy.core`, taking the whole OCR path
+    (rapidocr -> cv2) with it. That is why `numpy>=2` is a CORE dependency. Below 3.13 the extra now
+    resolves to nothing and `ChatterboxProvider`'s own import guard reports a `TTSError`, which is
+    the loud failure; the alternative was every 3.11 user's ingestion dying on an import they never
+    asked for.
+
     **An EXTRA, never a core dependency**, and its two odd pins are load-bearing: `numba>=0.61`,
     without which the resolver backtracks to a `llvmlite` supporting Python <3.10 and the install
     FAILS on the 3.13 this project targets; and `setuptools<82`, because `perth` and `librosa` both
