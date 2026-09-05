@@ -3275,3 +3275,24 @@ def test_budget_summary_never_raises_on_a_malformed_usage_payload():
 
     assert summary["truncated"] is False
     assert summary["peak_completion"] is None
+
+
+def test_a_tool_that_measured_itself_is_not_charged_the_gap():
+    """`gap` — the distance from the previous timeline event — is the right answer for a call that
+    reports nothing, and the wrong one for a call that does: it charges the tool with everything
+    since, including the planner turn that decided to call it.
+
+    Measured on a real trace: the validator reported 1.9ms and the strip drew 3.3s, which is the
+    whole run-start-to-first-call window.
+    """
+    from rlm_notebook.trajectory import _tool_entry
+
+    measured = _tool_entry(
+        {"tool": "validate_answer", "ok": True, "duration_s": 0.0019, "result": "ok"}, 3.3
+    )
+    assert measured["duration_s"] == 0.0019
+
+    # A tool that reports nothing still gets the gap — that is what the fallback is for.
+    assert _tool_entry({"tool": "read_skill", "ok": True}, 3.3)["duration_s"] == 3.3
+    # And a non-numeric report does not silently become the duration.
+    assert _tool_entry({"tool": "read_skill", "duration_s": "fast"}, 3.3)["duration_s"] == 3.3

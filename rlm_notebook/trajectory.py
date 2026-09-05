@@ -79,10 +79,24 @@ def _scalar_fields(payload: dict) -> dict:
 
 
 def _tool_entry(payload: dict, gap: float | None) -> dict:
-    """One `tool_call` → a UI-ready entry: what was called, what it was given, what it returned."""
+    """One `tool_call` → a UI-ready entry: what was called, what it was given, what it returned.
+
+    **A duration the TOOL measured beats the gap, and the gap is only a fallback.** `gap` is the
+    distance from the previous timeline event, which is the best available answer for a call that
+    reports nothing — but it charges the tool with everything that happened since, including the
+    planner turn that decided to call it. Measured: the validator reported 1.9ms and the strip drew
+    3.3s, the whole run-start-to-first-call window. `record_tool_call` fills `duration_s` for a
+    wrapped tool, so a segment is now sized by what the call actually took.
+    """
     tool = payload.get("tool") or ""
     args = payload.get("args") or {}
-    entry: dict = {"kind": "tool", "tool": tool, "ok": payload.get("ok"), "duration_s": gap}
+    own = payload.get("duration_s")
+    entry: dict = {
+        "kind": "tool",
+        "tool": tool,
+        "ok": payload.get("ok"),
+        "duration_s": own if isinstance(own, (int, float)) else gap,
+    }
     if tool == "read_skill":
         entry.update(
             label="skill",

@@ -2065,6 +2065,22 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     is not — invariant 52's rule for the ticker applied to the drawer. The verdict is bounded and
     is the model's own rejection message: paths, coordinates and character names, never source text.
 
+    **A duration the TOOL measured beats the strip's GAP.** `_tool_entry` sized every segment by
+    the distance from the previous timeline event, which is the best available answer for a call
+    that reports nothing and the wrong one for a call that does — it charges the tool with
+    everything since, including the planner turn that decided to call it. The first run after the
+    validator started recording drew a 3.3-second segment for a call it had measured at 1.9ms. The
+    gap remains the fallback, and a non-numeric report does not become one.
+
+    **A run can legitimately have NO model calls, and the drawer says so correctly.** `dspy.LM`
+    defaults to `cache=True`, so pressing Regenerate with an unchanged corpus, language and tier
+    replays the previous run from cache: same turns, same reasoning text, same validator failures,
+    zero calls, 3.4s against 263.6s. `budget_summary` then reports a cap with no usage and the
+    per-turn timing is omitted because the steps are 0.09s apart — both notes true, and both easy
+    to misread as the drawer being broken. **Regenerate therefore costs nothing and returns an
+    identical episode when nothing has changed**, which invariant 42's three-state button does not
+    say.
+
     **Interface copy is built from the BOOLEAN, not from the server's sentence.** `timing_note` is English
     prose written in Python, and rendering it verbatim put an English line in the middle of a Chinese
     drawer. The server says WHICH case holds; the interface says it in the reader's language (invariant 48).

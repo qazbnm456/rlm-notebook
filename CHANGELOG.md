@@ -11,6 +11,27 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A tool that measures itself is no longer charged the strip's gap.** `_tool_entry` sized every
+  timeline segment by the distance from the previous timeline event — right for a call that reports
+  nothing, wrong for one that does, because it charges the tool with everything since, including
+  the planner turn that decided to call it. The first run after the validator started recording drew
+  a **3.3-second** segment for a call it had measured at **1.9ms**. The gap stays as the fallback,
+  and a non-numeric report does not become a duration.
+
+- **Recorded, not fixed: `dspy.LM` defaults to `cache=True`, so Regenerate can cost nothing and
+  return the identical episode.** A user pressed Regenerate on an unchanged notebook and got a run
+  with **0 LLM calls in 3.4 seconds** against the previous **7 calls in 263.6 seconds** — same
+  seven turns, byte-identical first-turn reasoning, the same two validator failures replayed.
+
+  The drawer's two notes on that run are both TRUE and both easy to misread as a broken panel: no
+  per-turn timing (the steps are 0.09s apart because nothing was generated) and a cap with no usage
+  (there were no calls). Invariant 70 now says so, since the alternative is rediscovering it from a
+  screenshot every time.
+
+  Whether Regenerate SHOULD bypass the cache is a product question and is not answered here.
+  Invariant 42 gives the button three states and none of them is "this returned what you already
+  had".
+
 - **The Trajectory drawer said "this run called no tools" on every run, and it was wrong every
   time.** `rlm_harness.record_tool_call` is OPT-IN — a tool wrapper calls it or the event does not
   exist — and `make_grounded_validator`'s `validate` never did. So this project wrote no
