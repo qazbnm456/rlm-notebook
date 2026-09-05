@@ -438,7 +438,10 @@ def history_text(notebook: Notebook) -> str:
     truth. See CLAUDE.md's history invariant."""
     if not notebook.turns:
         return "(no prior turns in this conversation)"
-    parts = [f"Q{i}: {turn.question}\nA{i}: {turn.answer.text}" for i, turn in enumerate(notebook.turns, start=1)]
+    parts = [
+        f"Q{i}: {turn.question}\nA{i}: {turn.answer.text}"
+        for i, turn in enumerate(notebook.turns, start=1)
+    ]
     return "\n\n".join(parts)
 
 

@@ -1,7 +1,8 @@
 """Notebook Guide: whole-corpus artifacts generated from a notebook's sources — a summary, an FAQ,
 a timeline, and a single key insight. Same citation-grounded `RLMTask` pattern as `AnswerQuestion`
 (`task.py`): `signature` names two input fields — `sources` (the corpus blob) and
-`output_language` (invariant 39) — and one output field, with no `question`/`history` since these describe the corpus as a whole rather than answer one
+`output_language` (invariant 39) — and one output field, with no `question`/`history` since
+these describe the corpus as a whole rather than answer one
 question. Everything else (retry, sandbox selection, budget caps, tracing) is inherited from
 `rlm_harness.RLMTask`, exactly as `AnswerQuestion` inherits it.
 """

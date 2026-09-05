@@ -97,7 +97,8 @@ def test_every_hidden_toggled_class_still_honours_the_hidden_attribute():
     #     The stored form is the dominant style in this file; an independent review found the first
     #     rewrite only handled the inline one, leaving all three `.empty-note` elements invisible.
     ids = set(re.findall(r'getElementById\("([\w-]+)"\)\.hidden', js))
-    for var, element_id in re.findall(r'(?:const|let)\s+(\w+)\s*=\s*document\.getElementById\("([\w-]+)"\)', js):
+    binding = r'(?:const|let)\s+(\w+)\s*=\s*document\.getElementById\("([\w-]+)"\)'
+    for var, element_id in re.findall(binding, js):
         if re.search(rf"\b{re.escape(var)}\.hidden\s*=", js):
             ids.add(element_id)
     for element_id in ids:

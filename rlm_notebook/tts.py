@@ -145,7 +145,8 @@ class EdgeTTSProvider:
     `asyncio.run(...)` internally. `asyncio.run()` raises `RuntimeError: cannot be called from a
     running event loop` if invoked from inside one — fine for today's synchronous CLI call site
     (`cli._cmd_audio`), but a future caller inside an async context (e.g. a FastAPI async handler,
-    the API slice that DID call this routes around it via `asyncio.to_thread` (invariant 29); should any future caller directly rather than off-loading it to a worker
+    the API slice that DID call this routes around it via `asyncio.to_thread` (invariant 29);
+    should any future caller directly rather than off-loading it to a worker
     thread/process) would need to route around this, not call `synthesize()` as-is. Flagging now
     so that future slice doesn't have to rediscover it.
     """

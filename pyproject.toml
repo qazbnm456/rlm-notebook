@@ -156,3 +156,16 @@ packages = ["rlm_notebook"]
 line-length = 110
 target-version = "py311"
 
+[tool.ruff.lint]
+# `line-length` above is a FORMATTER setting and ruff's default rule set carries no `E501`, so for
+# most of this project's life an over-long line passed `check` and the number was a convention kept
+# by hand — about 20 had accumulated, and a name scrub once left a 157-character line that only an
+# independent review caught. Selecting `E501` explicitly is what makes the number enforced rather
+# than aspirational.
+#
+# `extend-select`, never `select`: naming `select` REPLACES ruff's default set rather than adding to
+# it, and re-listing what you believe the defaults to be is a guess. Doing that here pulled in E402
+# and broke 20 lines in the test suite — the deliberate `importorskip` that has to run BEFORE the
+# imports it guards, which the Verify section above documents.
+extend-select = ["E501"]
+

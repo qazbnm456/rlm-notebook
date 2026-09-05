@@ -81,6 +81,21 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **`line-length = 110` is enforced now, not a convention.** Ruff's default rule set carries no
+  `E501`, so the number in `pyproject.toml` was a formatter setting that `check` ignored — about 20
+  over-long lines had accumulated, and a name scrub once left a 157-character line that only an
+  independent review caught. All 19 remaining offenders rewrapped (eight prose, eleven restructured
+  code) and the rule selected.
+
+  **Selected with `extend-select`, never `select`.** The first attempt named `select` and re-listed
+  what the defaults were believed to be, which is a guess: it pulled in `E402` and reddened 20 lines
+  in the test suite — the deliberate `pytest.importorskip` that has to run BEFORE the imports it
+  guards, which the Verify section documents. `extend-select` adds to the real defaults instead of
+  replacing them with a reconstruction.
+
+  Verified in both directions rather than by the tree going green: a probe file with a 120-character
+  line is now reported, and the tree is clean.
+
 - **Built the `run_end.budgets`/`usage` surfacing the entry below specified (invariant 75).**
   `trajectory.budget_summary` is a pure function over trace events — no server, no model, no run,
   the seam invariant 44 established — and the Trajectory drawer gained a budget note beside its

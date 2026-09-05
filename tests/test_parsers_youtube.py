@@ -63,7 +63,8 @@ _AUTO_VTT = "\n".join(  # noqa: FLY002 — an f-string is a worse fit than a lit
         "We're no strangers to",
         (
             "love.<00:00:22.800><c> You</c><00:00:23.039><c> know</c><00:00:23.279><c> the</c>"
-            "<00:00:23.600><c> rules</c><00:00:24.320><c> and</c><00:00:24.640><c> so</c><00:00:25.199><c> do</c>"
+            "<00:00:23.600><c> rules</c><00:00:24.320><c> and</c>"
+            "<00:00:24.640><c> so</c><00:00:25.199><c> do</c>"
         ),
         "",
         "00:00:25.950 --> 00:00:25.960 align:start position:0%",

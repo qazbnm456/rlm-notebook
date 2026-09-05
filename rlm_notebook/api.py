@@ -19,7 +19,8 @@ notebook from its sources), `POST /notebooks/{id}/overview` (the chat overview),
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
 already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
-(the web-UI blueprint's Phase 2 addendum has the full reasoning). A generated episode IS persisted — one file per
+(the web-UI blueprint's Phase 2 addendum has the full reasoning). A generated episode IS
+persisted — one file per
 notebook, served by `GET /notebooks/{id}/audio/file`. That reverses Phase 2's original
 no-audio-past-one-request decision, which cost the user their episode on every reload; see CLAUDE.md
 invariant 42. Retention stays a non-question because the file is REPLACED on regenerate.
@@ -1957,7 +1958,12 @@ async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
         # non-Latin id, which invariant 10 explicitly supports). Found by an audit of the
         # persistent-overview design, which would have made a dead link the notebook's front page.
         if not run_id.startswith(f"{slug(notebook_id)}-"):
-            yield f"data: {json.dumps({'step': None, 'kind': 'not_found', 'summary': f'run {run_id!r} does not belong to notebook {notebook_id!r}'})}\n\n"
+            frame = {
+                "step": None,
+                "kind": "not_found",
+                "summary": f"run {run_id!r} does not belong to notebook {notebook_id!r}",
+            }
+            yield f"data: {json.dumps(frame)}\n\n"
             return
         async for event in _tail_trace_events(run_id):
             yield f"data: {json.dumps(event)}\n\n"

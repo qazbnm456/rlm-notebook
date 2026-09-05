@@ -18,11 +18,15 @@ draft was wrong — lives in `CHANGELOG.md`.** Put new history there, not here.
 
 ## Verify
 
-- `uvx ruff@0.16.0 check .` — lint. **`line-length = 110` is a FORMATTER setting and is NOT
-  enforced by `check`**: ruff's default rule set has no `E501`, so over-long lines pass (about 20
-  are in the tree). Enabling `E501` is a real follow-up; until then it is a convention kept by
-  hand. The version is pinned because an unpinned `uvx ruff check .` resolves the latest ruff at
-  run time and can redden CI with nobody having touched a line of code.
+- `uvx ruff@0.16.0 check .` — lint. **`line-length = 110` is now ENFORCED**: ruff's default rule
+  set carries no `E501`, so for most of this project's life an over-long line passed `check` and
+  the number was a convention kept by hand (about 20 had accumulated, and a name scrub once left a
+  157-character line that only an independent review caught). `pyproject.toml` selects it
+  explicitly — via **`extend-select`, never `select`**, because naming `select` REPLACES ruff's
+  defaults and re-listing what you believe them to be is a guess: doing exactly that here pulled in
+  `E402` and broke 20 lines in the suite, the deliberate `importorskip` that must run BEFORE the
+  imports it guards. The version is pinned because an unpinned `uvx ruff check .` resolves the
+  latest ruff at run time and can redden CI with nobody having touched a line of code.
 - `uv run python -m pytest -q` — the whole suite, fully offline. `test_task.py` drives a REAL
   `dspy.RLM.aforward` through `rlm_harness.testing.ScriptedInterpreter` + `scripted_lm`.
   `test_api.py`/`tests/test_runner.py` need the `api` extra to be COLLECTED AT ALL — without it

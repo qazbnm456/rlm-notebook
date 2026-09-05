@@ -48,7 +48,8 @@ def test_ingest_one_dispatches_a_youtube_url_to_parse_youtube_not_parse_web(monk
 
     def fake_parse_youtube(url, source_id, **kwargs):
         calls.append(url)
-        return Source(id=source_id, kind="youtube", origin=url, blocks=[SourceBlock(locator="ts:0:00", text="hi")])
+        block = SourceBlock(locator="ts:0:00", text="hi")
+        return Source(id=source_id, kind="youtube", origin=url, blocks=[block])
 
     def fake_parse_web(url, source_id, **kwargs):
         raise AssertionError("a YouTube URL must never reach parse_web")

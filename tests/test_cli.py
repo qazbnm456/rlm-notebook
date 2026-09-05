@@ -193,7 +193,9 @@ def test_cmd_guide_reports_an_empty_faq_explicitly_instead_of_printing_nothing(m
     assert "no FAQ items" in out
 
 
-def test_cmd_guide_reports_an_empty_timeline_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+def test_cmd_guide_reports_an_empty_timeline_explicitly_instead_of_printing_nothing(
+    monkeypatch, tmp_path, capsys
+):
     _live_env(monkeypatch)
     monkeypatch.setitem(cli._GUIDE_TASKS, "timeline", _fake_task(Timeline(events=[])))
     a = tmp_path / "a.txt"
@@ -240,7 +242,9 @@ def test_cmd_audio_refuses_with_no_sources_and_no_notebook(capsys):
     assert "no sources" in capsys.readouterr().err
 
 
-def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothing(monkeypatch, tmp_path, capsys):
+def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothing(
+    monkeypatch, tmp_path, capsys
+):
     _live_env(monkeypatch)
     monkeypatch.setattr(cli, "GeneratePodcastScript", _fake_task(PodcastScript(utterances=[])))
     a = tmp_path / "a.txt"

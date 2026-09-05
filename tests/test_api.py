@@ -324,9 +324,11 @@ def test_an_id_outside_the_latin_whitelist_is_a_usable_notebook_not_a_400(
 def test_an_empty_notebook_id_is_still_a_400_on_every_id_taking_endpoint(client, monkeypatch):
     """"You gave me nothing" stays a real client error — only "you gave me a name in your own
     language" stopped being one. Invariant 27's mapping (`ValueError` -> 400, never an unhandled
-    500) is what this pins, and it sweeps every id-taking endpoint that existed when this was written — NOT `/audio`, `/title`,
+    500) is what this pins, and it sweeps every id-taking endpoint that existed when this was
+    written — NOT `/audio`, `/title`,
     `/overview`, `/sources/upload` or `/audio/file`, which an independent audit probed live and
-    found correctly returning 400 too. The invariant holds; this list is the stale part rather than a sample: an
+    found correctly returning 400 too. The invariant holds; this list is the stale part rather
+    than a sample: an
     independent review pointed out that rewriting the old test for the new rule had quietly dropped
     `ask`/`guide`/`sources/{id}`/`promote` from the sweep, which is the coverage invariant 27 was
     created by (a review finding four endpoints that had each independently forgotten the arm)."""
@@ -1175,11 +1177,14 @@ def test_translate_trace_event_carries_a_headline_a_specific_and_a_fact():
 
     tool = api._translate_trace_event({"type": "tool_call", "step_id": 1, "payload": {"tool": "read"}})
     assert (tool["kind"], tool["detail"]) == ("tool", "read")
-    assert api._translate_trace_event({"type": "sub_call", "step_id": 2, "payload": {}})["kind"] == "escalation"
+    sub = api._translate_trace_event({"type": "sub_call", "step_id": 2, "payload": {}})
+    assert sub["kind"] == "escalation"
 
     # A failed run is its own kind, so the UI can end the stream AND say which way it ended.
-    assert api._translate_trace_event({"type": "run_end", "step_id": 3, "payload": {"ok": True}})["kind"] == "done"
-    assert api._translate_trace_event({"type": "run_end", "step_id": 4, "payload": {"ok": False}})["kind"] == "failed"
+    ended = api._translate_trace_event({"type": "run_end", "step_id": 3, "payload": {"ok": True}})
+    assert ended["kind"] == "done"
+    failed = api._translate_trace_event({"type": "run_end", "step_id": 4, "payload": {"ok": False}})
+    assert failed["kind"] == "failed"
 
     # `summary` survives for any consumer written against the older one-line shape.
     assert step["summary"].startswith("Step 1 ")
@@ -1925,7 +1930,13 @@ def test_settings_refuses_an_unknown_key_and_a_crafted_voice(client, monkeypatch
 
     resp = client.put(
         "/settings",
-        json={"tts_voice_host_a": "en-US-x'/><audio src=" + chr(34) + "http://e/x" + chr(34) + "/><a b='Neural"},
+        json={
+            "tts_voice_host_a": "en-US-x'/><audio src="
+            + chr(34)
+            + "http://e/x"
+            + chr(34)
+            + "/><a b='Neural"
+        },
     )
     assert resp.status_code == 422, resp.text
 
