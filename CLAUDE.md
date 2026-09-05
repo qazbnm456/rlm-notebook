@@ -1780,6 +1780,21 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     39's placeholder), every character of the model's own prose is tested against the other
     script's inventory.
 
+    - **The SUGGESTION is the REGION's standard, not merely a Traditional form.** `zh-hant` maps
+      `为` to `爲` where Taiwan writes `為`, and the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
+      `伪`/`偽` — 22 of the flagged characters. Each is post-mapped through `zh-tw`, from the SOURCE
+      character rather than from `zh-hant`'s answer (`账` reaches `賬`, which `zh-tw` leaves alone,
+      while `账` itself maps to `帳`), and SINGLE-CHARACTER only, because `zh-tw` carries a
+      VOCABULARY layer that rewrites `鼠标` to `滑鼠` and would misalign a positional zip. Found by
+      a sibling project, which hit it first.
+    - **Eight characters are flagged DESPITE the gate, each measured** (`_MEASURED_OTHER_SCRIPT`:
+      `体 适 荐 离 据` from the sibling's 89,160-character deployment, `构 与 么` from this
+      project's own output). Not the "~90-character hand table" this project condemned — that was
+      a hand list used as the WHOLE detector; this is a short sourced addition on top of a derived
+      one, in the SAFE direction only. `据` in `拮据` is correct Traditional, so it CAN produce a
+      false positive: affordable here because the check reports and fires once, and NOT affordable
+      for the sibling, whose converter persists a rewritten title. Zero of the eight occur in
+      40,521 characters of this project's real Traditional output, apart from `么`'s three drifts.
     - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
       tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
       project's real notebooks use correctly (`干預`, `一台`, `里程碑`) — so it would condemn good
@@ -1807,17 +1822,18 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       | | chars | characters this check would flag |
       |---|---|---|
       | rule inert | 5699 | 13 |
-      | rule shipping, no check | 4013 | 6 |
+      | rule shipping, no check | 4013 | 7 |
       | rule + check | 4617 | **0** |
 
-      Against the middle run — whose ONLY difference is the check — the null expectation is 6.9 and
-      zero were observed, Poisson `P(X=0) = 0.001`; against the first, 10.5 expected, `P = 0.00003`.
+      Against the middle run — whose ONLY difference is the check — the null expectation is 8.1 and
+      zero were observed, Poisson `P(X=0) = 0.0003`; against the first, 10.5 expected, `P = 0.00003`.
       **The honest limitation is that the CLI writes no trace, so whether the validator actually
       FIRED is unobservable**: the draft may simply have been clean. The measurement is of the
       configuration, not of the tool being exercised, and it is still one episode per arm.
-      **The accepted 3% recall loss also showed up, once**: `厘清` survived (it should be `釐清`),
-      because `厘` is valid Big5 for `公厘`. The other survivor, `制` in `問責制`, is `zhconv`
-      being wrong rather than the gate — `制度` is correct Traditional.
+      **The accepted recall loss still showed up, once**: `厘清` survived (it should be `釐清`),
+      because `厘` is valid Big5 for `公厘` and is not one of the eight measured additions. The
+      other survivor, `制` in `問責制`, is `zhconv` being wrong rather than the gate — `制度` is
+      correct Traditional, and flagging it would have been the false positive the gate prevents.
 
     **The sibling a sibling project solves the same problem in a DIFFERENT PLACE, and that is why its
     output was stable while ours was not.** It runs HOST-SIDE and POST-HOC in its pipeline, not

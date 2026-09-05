@@ -11,6 +11,42 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **Two fixes from a sibling project, both measured before adopting, and one of them was a live defect
+  on this side.** That project confirmed its own prompt script rule was inert in all four
+  production prompts exactly as read here, and that its stability came from host-side title
+  conversion rather than the prompt.
+
+  **The suggestion was not the Taiwan standard.** `zhconv`'s `zh-hant` target answers "a
+  Traditional form", not "the form Taiwan writes": `为` -> `爲` where Taiwan writes `為`, and the
+  same for `众`/`眾`, `启`/`啟`, `账`/`帳`, `伪`/`偽` — **22 of the 3774 characters this check
+  flags**, several of them common. The validator was telling a model to write characters no
+  Taiwanese reader uses. Each suggestion is now post-mapped through `zh-tw`, **from the SOURCE
+  character rather than from `zh-hant`'s answer** (`账` reaches `賬`, which `zh-tw` leaves alone,
+  while `账` maps straight to `帳`; the two agree on 29 of the 33 characters where anything
+  differs and via-source is right on all four of the rest), and **single-character only**, because
+  `zh-tw` carries a vocabulary layer that rewrites `鼠标` to `滑鼠` and would misalign a positional
+  zip.
+
+  **Eight characters are now flagged despite the Big5 gate** (`_MEASURED_OTHER_SCRIPT`). `体 适 荐
+  离 据` are five of the sibling's 29 real Simplified sites across 8 document sets and 89,160 Han
+  characters — `适` being the exact title, `執行環境與作業系統适配`, that started its conversion
+  work and that the bare gate would have left unfixed. `构 与 么` are this project's own gaps.
+
+  This is where the two projects' tolerances legitimately differ and the difference is recorded
+  rather than split: `据` in `拮据` is correct Traditional, so the list CAN produce a false
+  positive. That costs the sibling a silently corrupted TITLE (its converter persists); it costs
+  this check ONE rejection the model may override. A looser gate is affordable here and is not
+  there. Measured on this side: all eight occur ZERO times in 40,521 characters of real Traditional
+  output, apart from `么`'s three genuine drifts.
+
+  The widened gate also re-scores the live measurement — the middle run had 7 flaggable characters
+  rather than 6, so `P(X=0)` for the checked run moves to 0.0003.
+
+  **What the sibling reproduced of this project's finding**, for the record: its bare
+  zhconv-table detector flagged 34 characters over 99 sites, of which **70 were the false-positive
+  class** — `群`(35), `游`(10), `表`(7), `干`(6), `峰`(4), `占`(2) in `群組`, `上游`, `表格`,
+  `干預`, `高峰`, `占用`. It has adopted the Big5 gate and deleted its `_KEEP_AS_WRITTEN`.
+
 - **The script check measured live: zero flaggable characters, `P(X=0) = 0.001` against the run it
   is the only difference from.** A third episode off `nb-d22c2a9a`, same models, same `long` tier,
   same Traditional Chinese, 346s.

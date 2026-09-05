@@ -17,6 +17,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import zhconv.zhconv as _zh
 from rlm_harness import RLMTask, load_skills_as_tools, render_skills_manifest
 from rlm_harness.tools.validation import make_schema_validator
 
@@ -130,6 +131,30 @@ def script_family(language: str | None) -> str | None:
     return None
 
 
+#: Characters the Big5/GB gate lets through that are REAL other-script forms, each measured on real
+#: output rather than reasoned about. NOT the "~90-character hand table" this project condemned:
+#: that was a hand list used as the WHOLE detector, and this is a short, sourced addition on top of
+#: a derived one, in the SAFE direction only (things flagged despite the gate, never exemptions
+#: from it).
+#:
+#: `体 适 荐 离 据` come from a sibling project's 89,160-Han-character deployment, where they
+#: are five of its 29 real Simplified sites — `适` being the exact title (`執行環境與作業系統适配`)
+#: that started its conversion work, which the bare gate would have left unfixed. `构 与 么` are
+#: this project's own measured gaps; `么` is `怎么`, three times.
+#:
+#: **This is where the two projects' tolerances legitimately differ.** `据` in `拮据` and `离` in a
+#: trigram name are correct Traditional, so this list can produce a false positive. That costs
+#: a sibling project a silently corrupted TITLE, because its `to_script` rewrites and persists; it
+#: costs this check ONE rejection the model may override, because it reports and fires once. So a
+#: looser gate is affordable here and would not be there. Measured risk on this side: all eight
+#: appear ZERO times in 40,521 characters of real Traditional output, apart from `么`'s three
+#: genuine drifts.
+_MEASURED_OTHER_SCRIPT: dict[str, frozenset[str]] = {
+    "hant": frozenset("体适荐离据构与么"),
+    "hans": frozenset(),
+}
+
+
 @lru_cache(maxsize=2)
 def _wrong_script_chars(family: str) -> dict[str, str]:
     """Characters that are unambiguously the WRONG script for `family`, mapped to the right one.
@@ -148,19 +173,44 @@ def _wrong_script_chars(family: str) -> dict[str, str]:
     screen; a false one costs a paid-for run (see `make_grounded_validator`), so the whole
     uncertainty is spent on the safe side.
     """
-    import zhconv.zhconv as _zh
-
     locale, codec = ("zh-hant", "big5") if family == "hant" else ("zh-hans", "gbk")
     mapping = _zh.getdict(locale)
+    forced = _MEASURED_OTHER_SCRIPT[family]
     out: dict[str, str] = {}
     for src, dst in mapping.items():
         if len(src) != 1 or len(dst) != 1 or src == dst:
             continue
-        try:
-            src.encode(codec)
-        except (UnicodeEncodeError, UnicodeError):
-            out[src] = dst
+        if src not in forced:
+            try:
+                src.encode(codec)
+                continue
+            except (UnicodeEncodeError, UnicodeError):
+                pass
+        out[src] = _regional(src, dst, family)
     return out
+
+
+def _regional(src: str, dst: str, family: str) -> str:
+    """`src`'s Traditional form in the region's OWN standard, which `zh-hant` does not always give.
+
+    zhconv's `zh-hant` target answers "a Traditional form", not "the form Taiwan writes": it maps
+    `为` to `爲` where Taiwan writes `為`, and does the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
+    `伪`/`偽` — 22 of the 3774 characters this gate flags. Telling a model to write `爲` is telling
+    it to write a character no Taiwanese reader uses.
+
+    **SINGLE-CHARACTER only, and that is not an optimisation.** `zh-tw` carries a VOCABULARY layer
+    on top of the script one — it rewrites `鼠标` to `滑鼠`, two characters for two but not the
+    same two — so running it over a whole string and zipping positionally would misalign. Fed one
+    character it can only answer about the script. (Credit: a sibling project, which hit this first.)
+    """
+    if family != "hant":
+        return dst
+    # Mapped from the SOURCE, not from `zh-hant`'s answer: `账` reaches `賬` under `zh-hant` and
+    # `zh-tw` leaves that alone, while `账` itself maps straight to `帳`. Measured — the two agree
+    # on 29 of the 33 characters where anything differs, and `via src` is right on all four of the
+    # rest (`账`->`帳`, `钚`->`鈽`, `钫`->`鍅`, `锎`->`鉲`).
+    regional = _zh.convert(src, "zh-tw")
+    return regional if len(regional) == 1 and regional != src else dst
 
 
 def _script_offenders(value: Any, wrong: dict[str, str], path: str = "") -> list[tuple[str, str, str]]:

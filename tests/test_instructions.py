@@ -194,7 +194,45 @@ def test_the_wrong_script_table_names_the_fix_for_every_measured_drift_character
     wrong = _wrong_script_chars("hant")
     for bad, good in MEASURED_DRIFT.items():
         assert wrong.get(bad) == good, f"{bad} should be reported as {good}"
-    assert "么" not in wrong, "the accepted false negative; see the docstring before 'fixing' it"
+
+
+def test_measured_other_script_characters_are_flagged_despite_the_gate():
+    """Eight characters the Big5 gate lets through that are REAL Simplified forms, each measured.
+
+    `体 适 荐 离 据` are five of a sibling project's 29 real Simplified sites across 89,160 Han
+    characters; `适` is the exact title (`執行環境與作業系統适配`) the bare gate would have left
+    unfixed. `构 与 么` are this project's own gaps, `么` being `怎么` three times.
+
+    A short SOURCED addition on top of a derived gate, in the safe direction only — not the
+    "~90-character hand table" this project condemned, which was a hand list used as the WHOLE
+    detector. `据` in `拮据` is correct Traditional, so this list CAN produce a false positive;
+    affordable here because the check reports and fires once, and not affordable for a sibling
+    whose converter persists a rewritten title.
+    """
+    from rlm_notebook.instructions import _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+    for bad, good in {"体": "體", "适": "適", "荐": "薦", "离": "離",
+                      "据": "據", "构": "構", "与": "與", "么": "麼"}.items():
+        assert wrong.get(bad) == good, f"{bad} must be flagged despite being Big5-encodable"
+
+
+def test_the_suggestion_is_the_regional_standard_not_just_a_traditional_form():
+    """`zh-hant` answers "a Traditional form", not "the form Taiwan writes": it maps `为` to `爲`
+    where Taiwan writes `為`, and the same for `众`/`眾`, `启`/`啟`, `账`/`帳`, `伪`/`偽` — 22 of
+    the characters this gate flags. Telling a model to write `爲` is telling it to write a
+    character no Taiwanese reader uses.
+
+    Mapped from the SOURCE character, never from `zh-hant`'s answer: `账` reaches `賬` under
+    `zh-hant` and `zh-tw` leaves that alone, while `账` maps straight to `帳`. The two agree on 29
+    of the 33 characters where anything differs and `via src` is right on all four of the rest.
+    """
+    from rlm_notebook.instructions import _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+    for bad, good in {"为": "為", "众": "眾", "启": "啟", "账": "帳",
+                      "伪": "偽", "腭": "顎", "钚": "鈽"}.items():
+        assert wrong.get(bad) == good, f"{bad} must be reported as {good}, the Taiwan standard"
 
 
 def test_the_script_check_blocks_once_and_never_holds_a_run_hostage():
