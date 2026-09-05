@@ -3970,7 +3970,7 @@ const trajEl = {};
 
 function trajInit() {
   [
-    "backdrop", "drawer", "name", "stat", "run", "note", "timeline", "axis-end", "search",
+    "backdrop", "drawer", "name", "stat", "run", "note", "budget", "timeline", "axis-end", "search",
     "search-count", "prev", "play", "next", "speed", "steps", "detail", "expand", "close",
   ].forEach((name) => {
     trajEl[name.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(`traj-${name}`);
@@ -4082,6 +4082,71 @@ function trajFamily(entry) {
   return TRAJ_FAMILIES[entry.label] || { color: "var(--text-dim)", glyph: "\u25c6" };
 }
 
+// The generation caps the run actually ran under, and what it used against them. Built with
+// createElement/textContent like every other model-adjacent string here (invariants 29 and 55).
+//
+// THREE states, and the third is the one that matters: `budget === null` means the trace predates
+// rlm-harness 1.10.0 and simply does not carry the fields. That must read "not recorded" and never
+// "no truncation" — reading an absent field as a zero is how a corpus boundary gets mistaken for a
+// property of the code (CHANGELOG.md forbids averaging any rate across that upgrade).
+function renderTrajBudget(budget) {
+  if (!trajEl.budget) return;
+  trajEl.budget.textContent = "";
+  const tag = document.createElement("span");
+  tag.className = "note-tag";
+  const body = document.createElement("span");
+  body.className = "note-body";
+
+  if (!budget) {
+    tag.textContent = t("traj.budgetTagNone", "\u24d8 budget");
+    body.textContent = t(
+      "traj.budgetNone",
+      "Token budgets aren't recorded for this trace \u2014 it predates the field. Not the same as \"nothing was truncated\".",
+    );
+    trajEl.budget.className = "traj-note is-info";
+  } else if (budget.truncated) {
+    tag.textContent = t("traj.budgetTagCut", "\u26a0 truncated");
+    body.textContent = t(
+      "traj.budgetCut",
+      "A turn hit the generation cap: {used} tokens against a cap of {cap}. A truncated code cell is usually repaired by the planner's next turn; a truncated final answer ends the run.",
+      { used: budget.peak_completion, cap: budget.cap },
+    );
+    trajEl.budget.className = "traj-note is-cut";
+  } else {
+    tag.textContent = t("traj.budgetTag", "\u25cf budget");
+    const pct = budget.ratio != null ? Math.round(budget.ratio * 100) : null;
+    body.textContent =
+      budget.cap != null && budget.peak_completion != null
+        ? t(
+            "traj.budgetOk",
+            "Busiest turn used {used} of {cap} tokens ({pct}%).",
+            { used: budget.peak_completion, cap: budget.cap, pct },
+          )
+        : t("traj.budgetPartial", "No generation cap was reported for this run.");
+    trajEl.budget.className = "traj-note is-live";
+  }
+
+  // `dropped` means dspy rejected the budget kwargs outright and every cap reverted to its own
+  // default — so the numbers beside it were NOT the ones applied, and saying so is the whole point.
+  if (budget && budget.iterations && budget.iterations.dropped) {
+    const warn = document.createElement("span");
+    warn.className = "note-body";
+    warn.textContent = t(
+      "traj.budgetDropped",
+      " The step budgets were rejected and reverted to the library's defaults, so the configured caps did not apply.",
+    );
+    trajEl.budget.appendChild(tag);
+    trajEl.budget.appendChild(body);
+    trajEl.budget.appendChild(warn);
+    trajEl.budget.className = "traj-note is-info";
+    trajEl.budget.hidden = false;
+    return;
+  }
+  trajEl.budget.appendChild(tag);
+  trajEl.budget.appendChild(body);
+  trajEl.budget.hidden = false;
+}
+
 function renderTrajectory(runId) {
   const turns = trajData.iterations || [];
   const line = trajData.timeline || [];
@@ -4131,6 +4196,7 @@ function renderTrajectory(runId) {
   trajEl.note.appendChild(tag);
   trajEl.note.appendChild(noteBody);
   trajEl.note.className = `traj-note ${trajData.per_turn_timing ? "is-live" : "is-info"}`;
+  renderTrajBudget(trajData.budget);
   trajEl.axisEnd.textContent = trajData.total_s != null ? formatTimecode(trajData.total_s) : "";
 
   // A LIVE run re-renders every few seconds, so the rebuild must not throw away where the reader

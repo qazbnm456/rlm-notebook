@@ -1553,3 +1553,26 @@ def test_no_translated_string_carries_an_english_dash():
     assert not offenders, (
         f"{len(offenders)} translated string(s) still carry an English dash: {offenders[:3]}"
     )
+
+
+def test_an_unrecorded_token_budget_never_renders_as_no_truncation():
+    """`budget === null` means the trace predates rlm-harness 1.10.0 and carries no budget fields
+    at all. It must render as NOT RECORDED, never as a zero or a clean bill of health — reading an
+    absent field as "nothing was truncated" is how a corpus boundary gets mistaken for a property
+    of the code, which is the one thing CHANGELOG.md forbids about this upgrade.
+
+    A source-tree assertion because there is no JS test runner (invariant 36): the falsy branch has
+    to come FIRST, before anything reads `.truncated` off a null.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    body = js[js.index("function renderTrajBudget(") : js.index("function renderTrajectory(")]
+
+    none_at = body.index("if (!budget)")
+    assert none_at < body.index(".truncated"), "the null check must precede any field read"
+    assert "traj.budgetNone" in body[none_at : body.index("else if")], (
+        "the not-recorded branch must use its own string, not the healthy one"
+    )
+    # The string itself has to deny the wrong reading, in both tables.
+    assert "Not the same as" in body
+    zh = (WEB / "i18n.js").read_text(encoding="utf-8")
+    assert "這不等於" in zh[zh.index('"traj.budgetNone"') : zh.index('"traj.budgetNone"') + 200]

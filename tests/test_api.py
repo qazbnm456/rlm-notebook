@@ -3137,3 +3137,116 @@ def test_clearing_a_conversation_on_a_missing_notebook_is_a_404(tmp_path, monkey
     with TestClient(api.app) as client:
         assert client.delete("/notebooks/ghost/turns").status_code == 404
     assert not list((tmp_path / "notebooks").glob("*.json")), "a 404 left a notebook file behind"
+
+
+# --- run_end budgets/usage (rlm-harness 1.10.0) -----------------------------------------------
+# `trajectory.budget_summary` is a pure function over trace events, so these need no server, no
+# model and no run — the same seam `tts.sequence_offsets` uses (invariant 44).
+
+
+def _budget_events(usage, *, budgets=None):
+    """A minimal two-event trace carrying whatever `run_end` payload a case needs."""
+    payload = {"ok": True}
+    if budgets is not None:
+        payload["budgets"] = budgets
+    if usage is not None:
+        payload["usage"] = usage
+    return [
+        {"type": "run_start", "ts": 0.0, "payload": {"meta": {"task": "AnswerQuestion"}}},
+        {"type": "run_end", "ts": 9.0, "payload": payload},
+    ]
+
+
+_CAPS = {
+    "main": {"cap": 16384, "key": "max_tokens"},
+    "sub": {"cap": 16384, "key": "max_tokens"},
+    "iterations": {
+        "max_iterations": 25,
+        "max_llm_calls": None,
+        "max_output_chars": 40000,
+        "dropped": False,
+    },
+}
+
+
+def test_budget_summary_is_none_for_a_trace_written_before_the_fields_existed():
+    """The cross-boundary rule, as code: `run_end.budgets`/`usage` arrived with rlm-harness 1.10.0,
+    so an older trace must read UNMEASURED. Returning a zeroed summary would let a reader average a
+    truncation rate across the upgrade and see corpus composition as a property of the code."""
+    from rlm_notebook.trajectory import budget_summary
+
+    assert budget_summary(_budget_events(None)) is None
+    assert budget_summary([]) is None
+
+
+def test_budget_summary_flags_a_turn_truncated_at_the_cap():
+    from rlm_notebook.trajectory import budget_summary
+
+    usage = [{"attempt": 0, "calls": {"anthropic/x": [{"completion_tokens": 16384}]}}]
+    summary = budget_summary(_budget_events(usage, budgets=_CAPS))
+
+    assert summary["truncated"] is True
+    assert (summary["peak_completion"], summary["cap"], summary["ratio"]) == (16384, 16384, 1.0)
+
+
+def test_budget_summary_reports_a_ratio_for_a_run_that_stayed_under():
+    """The proximity reading. Kept as a NUMBER rather than ruled out: the measured "the ratio is
+    never an early warning" came from a corpus running at twice the cap its model needed."""
+    from rlm_notebook.trajectory import budget_summary
+
+    usage = [{"attempt": 0, "calls": {"m": [{"completion_tokens": 3200}, {"completion_tokens": 90}]}}]
+    summary = budget_summary(_budget_events(usage, budgets=_CAPS))
+
+    assert summary["truncated"] is False
+    assert summary["peak_completion"] == 3200
+    assert summary["ratio"] == 0.195
+
+
+def test_budget_summary_takes_the_peak_across_retry_attempts():
+    """`usage` is per ATTEMPT, and a retry is exactly the run whose fatal call matters most."""
+    from rlm_notebook.trajectory import budget_summary
+
+    usage = [
+        {"attempt": 0, "calls": {"m": [{"completion_tokens": 900}]}},
+        {"attempt": 1, "calls": {"m": [{"completion_tokens": 16384}]}},
+    ]
+    summary = budget_summary(_budget_events(usage, budgets=_CAPS))
+
+    assert summary["peak_completion"] == 16384
+    assert summary["truncated"] is True
+    assert [a["truncated"] for a in summary["attempts"]] == [False, True]
+
+
+def test_budget_summary_does_not_guess_truncation_without_a_cap():
+    """With no cap reported there is nothing to be at, so a large number is just a large number."""
+    from rlm_notebook.trajectory import budget_summary
+
+    usage = [{"attempt": 0, "calls": {"m": [{"completion_tokens": 99999}]}}]
+    summary = budget_summary(_budget_events(usage, budgets={"iterations": _CAPS["iterations"]}))
+
+    assert summary["cap"] is None
+    assert summary["truncated"] is False
+    assert summary["ratio"] is None
+
+
+def test_budget_summary_surfaces_the_dropped_iteration_caps():
+    """`dropped` means dspy rejected the budget kwargs and every cap reverted to its own default —
+    without it the three numbers beside it read as applied when they were not."""
+    from rlm_notebook.trajectory import budget_summary
+
+    caps = {**_CAPS, "iterations": {**_CAPS["iterations"], "dropped": True}}
+    summary = budget_summary(_budget_events([], budgets=caps))
+
+    assert summary["iterations"]["dropped"] is True
+
+
+def test_budget_summary_never_raises_on_a_malformed_usage_payload():
+    """Same promise the rest of this module makes: a partial or malformed trace is exactly the run
+    someone most wants to look at."""
+    from rlm_notebook.trajectory import budget_summary
+
+    usage = [{"attempt": 0, "calls": {"m": ["not-a-dict", {"completion_tokens": "many"}]}}, "junk"]
+    summary = budget_summary(_budget_events(usage, budgets=_CAPS))
+
+    assert summary["truncated"] is False
+    assert summary["peak_completion"] is None

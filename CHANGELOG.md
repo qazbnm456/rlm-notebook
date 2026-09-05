@@ -81,6 +81,33 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **Built the `run_end.budgets`/`usage` surfacing the entry below specified (invariant 75).**
+  `trajectory.budget_summary` is a pure function over trace events — no server, no model, no run,
+  the seam invariant 44 established — and the Trajectory drawer gained a budget note beside its
+  timing note.
+
+  **Three states, and the third is why this needed a rule.** A run that stayed under its cap shows
+  the busiest turn against the cap and the percentage; a run that hit it shows the truncation with
+  both numbers and what it costs (a truncated code cell is usually repaired by the planner's next
+  turn, a truncated final answer ends the run); and a trace from before rlm-harness 1.10.0 shows
+  **NOT RECORDED**, in its own colour, with the string itself denying the wrong reading. The three
+  are distinguishable by colour before the sentence is read, which was the point.
+
+  **The proximity reading shipped as a number**, per the correction recorded below — the "no
+  gradient" measurement came from a corpus at twice its model's needed cap and does not transpose to
+  16384. It is labelled as a shape to expect rather than a local figure.
+
+  **Two of this project's own tripwires caught the work**, which is the system behaving as designed:
+  invariant 48's translation-key check refused the new `t()` keys until the zh-Hant table had them,
+  and the Chinese-punctuation check rejected an em dash carried over from the English copy. A third
+  was added — a source-tree assertion that the not-recorded branch comes first and uses its own
+  string, since there is no JS test runner (invariant 36).
+
+  Verified by mutation rather than by passing: six mutations of `budget_summary` (returning `{}`
+  instead of `None` for an unmeasured trace, `>=` to `>` at the cap, dropping the no-cap guard,
+  taking the first attempt instead of the peak, always computing the ratio) each fail at least one
+  test, and disabling the null branch fails the new tripwire.
+
 - **Design constraint recorded for the `run_end.budgets`/`usage` follow-up, BEFORE building it.**
   The kit upgrade made those fields available; `trajectory.py` reads `run_end` and surfaces neither,
   which is a real gap for a drawer whose whole purpose is "why did it produce that"

@@ -3500,6 +3500,17 @@ body.is-resizing .studio-grip {
   border-left-color: var(--warn);
 }
 
+/* A run that actually hit the cap. Its own colour rather than reusing `.is-info`: "the caps were
+   rejected" and "a turn was cut off" are different facts and a reader must not have to read the
+   sentence to tell which happened. */
+.traj-note.is-cut {
+  border-left-color: var(--danger, #d9534f);
+}
+
+.traj-note.is-cut .note-tag {
+  color: var(--danger, #d9534f);
+}
+
 .traj-note.is-info .note-tag {
   color: var(--warn);
 }

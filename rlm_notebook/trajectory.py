@@ -124,6 +124,88 @@ def _sub_entry(payload: dict, gap: float | None) -> dict:
     }
 
 
+def budget_summary(events: list[dict]) -> dict | None:
+    """What the run was ALLOWED to generate and what it actually used, or `None` when the trace does
+    not say — which is a third answer, not a zero.
+
+    `None` means UNMEASURED: `run_end.budgets`/`usage` arrived with rlm-harness 1.10.0, so every
+    trace written before the upgrade lacks them entirely. Reporting those as "0 tokens, never
+    truncated" would read a corpus boundary as a property of the code — the reason CHANGELOG.md
+    records that no rate may be averaged across that upgrade.
+
+    **Truncation is `completion_tokens` reaching the applied cap**, which is how dspy's own
+    `_check_truncation` decides it. The cap is read off the LM the run actually used (the kit
+    reports it that way), never off `NotebookConfig`, because an injected `main_lm` is used verbatim
+    and the configured cap can be one no call ever saw.
+
+    **The three caps are three DIFFERENT exhaustions and all are reported**: the token cap here,
+    `max_iterations`/`max_llm_calls` (the run ran out of turns), and `max_output_chars` (dspy
+    head+tail-caps each REPL output). A reader diagnosing "it stopped early" has to be able to tell
+    them apart, and `dropped` says the whole iteration block was rejected by dspy and reverted to
+    its defaults — without which those three numbers read as applied when they were not.
+    """
+    payload: dict = {}
+    for event in sorted(events, key=_step_key, reverse=True):
+        if event.get("type") == "run_end":
+            payload = event.get("payload") or {}
+            break
+    budgets = payload.get("budgets")
+    usage = payload.get("usage")
+    if not isinstance(budgets, dict) and not isinstance(usage, list):
+        return None
+
+    budgets = budgets if isinstance(budgets, dict) else {}
+    main = budgets.get("main") if isinstance(budgets.get("main"), dict) else {}
+    cap = main.get("cap") if isinstance(main.get("cap"), int) else None
+
+    attempts: list[dict] = []
+    for entry in usage if isinstance(usage, list) else []:
+        if not isinstance(entry, dict):
+            continue
+        peak = 0
+        calls = 0
+        for records in (entry.get("calls") or {}).values():
+            for record in records if isinstance(records, list) else []:
+                if not isinstance(record, dict):
+                    continue
+                calls += 1
+                tokens = record.get("completion_tokens")
+                if isinstance(tokens, int):
+                    peak = max(peak, tokens)
+        attempts.append(
+            {
+                "attempt": entry.get("attempt"),
+                "calls": calls,
+                "peak_completion": peak or None,
+                # A call is only truncated against a cap that exists; with no cap reported this
+                # stays False rather than guessing from the magnitude of the number.
+                "truncated": bool(cap and peak >= cap),
+            }
+        )
+
+    peaks = [a["peak_completion"] for a in attempts if a["peak_completion"]]
+    peak_completion = max(peaks) if peaks else None
+    return {
+        "cap": cap,
+        "cap_key": main.get("key") if isinstance(main.get("key"), str) else None,
+        "sub_cap": (budgets.get("sub") or {}).get("cap")
+        if isinstance(budgets.get("sub"), dict)
+        else None,
+        "iterations": budgets.get("iterations")
+        if isinstance(budgets.get("iterations"), dict)
+        else None,
+        "attempts": attempts,
+        "peak_completion": peak_completion,
+        "truncated": any(a["truncated"] for a in attempts),
+        # peak/cap. Recorded because a proximity reading IS meaningful at this project's cap — the
+        # measured "no gradient, the ratio is never an early warning" came from a corpus running at
+        # twice the cap its model needed, and transposing it to 16384 fills the band that was empty
+        # (CHANGELOG.md). Left as a NUMBER for the caller to render; it is a shape to expect, not a
+        # figure confirmed on this project's own runs.
+        "ratio": round(peak_completion / cap, 3) if (cap and peak_completion) else None,
+    }
+
+
 def build_trajectory(events: list[dict]) -> dict:
     """`{started_at, total_s, ok, error, timing_note, per_turn_timing, initial, iterations,
     timeline}` for one run's trace events.
@@ -242,4 +324,7 @@ def build_trajectory(events: list[dict]) -> dict:
         },
         "iterations": iterations,
         "timeline": timeline,
+        # `None` when the trace predates rlm-harness 1.10.0 — the drawer must say "not recorded",
+        # never "no truncation".
+        "budget": budget_summary(events),
     }
