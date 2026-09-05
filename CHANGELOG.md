@@ -87,22 +87,45 @@ questions with verifiable citations, and get a distilled research artifact out.
   (`accepted-not-done`). The constraint arrived from the kit maintainer as a measurement, and it
   rules out the obvious design:
 
-  **Do not build a "this run was approaching the cap" indicator — there is no gradient to show.**
-  On the first production corpus running 1.10.0, the used/cap ratio distribution has a HOLE: 363
-  runs below 0.6, **zero between 0.6 and 1.0**, and 21 at exactly 1.0. A proximity meter would be a
-  needle that sits near zero and then teleports.
+  **First guidance, since CORRECTED — recorded because the correction is the lesson.** The initial
+  advice was "do not build a proximity indicator, there is no gradient": on the measured corpus the
+  used/cap ratio had a HOLE, 363 runs below 0.6, zero between 0.6 and 1.0, 21 at exactly 1.0.
 
-  What the field does buy is after the fact: of the 21 that hit the cap, **16 finished anyway**,
-  because a truncated CODE cell is a `SyntaxError` that dspy's own in-loop feedback repairs, while a
-  truncated FINAL answer kills the run. So the surfacing worth building is per-run and retrospective
-  — "a turn in this run was truncated at N tokens against a cap of M", on the runs where it
-  happened — not a meter on every run.
+  **That hole is an artifact of the CAP, not a property of the model, and it does not survive
+  transposition to this project's cap.** The measured corpus ran at 32768; this project's
+  `max_tokens` is 16384 (invariant 59). Converting each bin back to absolute tokens and re-dividing
+  by 16384 moves the two bins spanning 9,830-16,384 tokens — 64 runs — straight into the band that
+  was empty, and the two runs sitting in 16,384-19,661 would TRUNCATE outright rather than fit
+  comfortably. Median max-turn 0.209 -> 0.418, p90 0.378 -> 0.756; both are the mechanical doubling.
+  **So at 16384 there IS a gradient, and a proximity reading may be exactly the right thing to
+  build.** The hole said the cap was roughly twice what that model needed, never that the model has
+  no middle.
 
-  **Provenance, because it decides how far this transfers**: 385 runs, ONE model, ONE cap, and a
-  DIFFERENT consumer — not this project, whose `max_tokens` is 16384 (invariant 59). The mechanism
-  (truncated code recoverable, truncated answer terminal) is a property of dspy's loop and carries
-  over; the SHAPE of the distribution is one corpus on one configuration and may not. Do not quote
-  the 363/0/21 as if it had been measured here.
+  Arithmetic checked here rather than accepted: the bins transpose exactly as claimed and 49 + 15 =
+  64. **One number does not reconcile** — the fraction was given as 64/379, while the same source's
+  earlier figures were 385 total, 363 below 0.6 and 21 at the cap, which sum to 384 and leave 379
+  matching neither. Every plausible denominator lands at 16.6-17.6%, so "about one run in six" is
+  the claim that survives; the exact percentage does not.
+
+  **What keeps this an indication rather than a measurement**: transposing assumes a run's token
+  count is unchanged by the cap it ran under. `max_tokens` is a hard stop rather than a hint, so
+  that is plausible, but a model given less room may genuinely write shorter and nothing here
+  settles it. Confirm against this project's own runs before treating 17% as a local figure.
+
+  **What survived the correction unchanged is the MECHANISM**, and it is the half worth relying on:
+  of the runs that hit the cap, most finished anyway — a truncated CODE cell is a `SyntaxError` that
+  dspy's own in-loop feedback repairs, while a truncated FINAL answer kills the run. That is a
+  property of dspy's loop and carries to any cap and any model. So the surfacing to build is
+  per-run and retrospective — "a turn in this run was truncated at N tokens against a cap of M" —
+  with a proximity reading now a live option rather than a ruled-out one.
+
+  **The pattern is the lesson, and it repeated twice in two exchanges**: a fact true in one
+  configuration, stated without the configuration. The same source's import advice dropped an
+  underscore from a NAME and left the import reaching through a private MODULE; this one reported a
+  hole and left out that a hole at 2x the needed cap says nothing about 1x. Splitting an incoming
+  claim by how far it travels — mechanism versus measured shape — caught both before either was
+  known to be wrong, which is why the provenance line is recorded next to every borrowed number
+  here rather than dropped once it looks settled.
 
 - **A third review round, this time over the restorations themselves; six defects fixed.** Restored
   prose is the dangerous kind, because it reads as authoritative while nobody has re-checked it
