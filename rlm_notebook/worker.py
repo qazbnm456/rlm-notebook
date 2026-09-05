@@ -124,6 +124,7 @@ def main(argv: list[str] | None = None) -> int:
         raw_stdin = sys.stdin.read()
         payload = json.loads(raw_stdin) if raw_stdin.strip() else {}
         kwargs = payload.get("kwargs", {})
+        fresh = bool(payload.get("fresh"))
     except json.JSONDecodeError as exc:
         _emit({"ok": False, "error": f"stdin was not valid JSON: {exc}"})
         return 2
@@ -135,6 +136,19 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     config = NotebookConfig.from_env()
+    if fresh:
+        # A REGENERATE must actually re-run. `dspy.LM` defaults to `cache=True`, so pressing
+        # Regenerate on an unchanged corpus replayed the previous run byte-identically: same turns,
+        # same reasoning text, same validator failures, ZERO model calls, 3.4s against 263.6s. The
+        # drawer then correctly reported no usage and no per-turn timing, which reads as a broken
+        # panel. A button labelled Regenerate that returns what you already had is a UI that lies.
+        #
+        # Switched GLOBALLY here rather than by rebuilding the LMs, because `runtime.configure`
+        # owns `lm_kwargs` and a second construction of it here would drift from upstream's. This
+        # worker handles exactly one run, so process-global IS run-scoped.
+        import dspy
+
+        dspy.configure_cache(enable_disk_cache=False, enable_memory_cache=False)
     setup(config)
 
     from rlm_harness.trace import TraceRecorder

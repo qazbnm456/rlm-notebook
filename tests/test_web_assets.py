@@ -1699,3 +1699,30 @@ def test_no_stylesheet_fallback_hardcodes_a_colour():
         assert len(re.findall(rf"^\s*{token}\s*:", css, re.MULTILINE)) >= 3, (
             f"{token} must be defined in every theme block, or a reference to it is theme-blind"
         )
+
+
+def test_a_regenerate_asks_for_a_fresh_run_and_a_first_generate_does_not():
+    """`dspy.LM` defaults to `cache=True`. A user pressed Regenerate on an unchanged notebook and
+    got a run with ZERO model calls in 3.4 seconds that replayed the previous one byte-identically
+    — same turns, same reasoning text, the same two validator failures — while the drawer honestly
+    reported no usage and no per-turn timing, which reads as a broken panel.
+
+    A button labelled Regenerate that returns what you already had is a UI that lies. A FIRST
+    generate keeps the cache, where a hit is a free correct answer, so the flag is the EXISTENCE of
+    the artifact rather than a constant.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+
+    # Anchored on the REQUEST, not on the path: `/overview` appears in three comments first, and a
+    # first version of this test read one of those and failed against correct source.
+    for surface, artifact in (
+        ("}/overview`, {", "state.overview"),
+        ("}/audio`, {", "state.podcast"),
+    ):
+        at = js.index(surface)
+        body = js[at : at + 900]
+        assert f"fresh: Boolean({artifact})" in body, (
+            f"the {surface} request must send fresh keyed on {artifact}, not a constant: {body[:300]}"
+        )
+        # Keyed on the artifact, never hardcoded — either constant is a different bug.
+        assert "fresh: true" not in body and "fresh: false" not in body, body[:300]

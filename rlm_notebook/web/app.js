@@ -2427,7 +2427,11 @@ async function generateOverview() {
     const notebook = await api(`/notebooks/${encodeURIComponent(notebookId)}/overview`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ run_id: runToken }),
+      // `fresh` when an overview already exists — i.e. the button said Regenerate. dspy's LM cache
+      // is on by default, so without this a Regenerate on an unchanged corpus replays the previous
+      // run byte-identically for zero model calls, and a button that returns what you already had
+      // is a UI that lies. A FIRST generate keeps the cache, where a hit is a free correct answer.
+      body: JSON.stringify({ run_id: runToken, fresh: Boolean(state.overview) }),
     });
     status.finish();
     overviewRunning = false;
@@ -3290,7 +3294,12 @@ function initPodcastPlayer() {
       const data = await api(`/notebooks/${encodeURIComponent(state.notebookId)}/audio`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ run_id: token, length: podcastLength() }),
+        // See generateOverview: `fresh` exactly when this press is a REGENERATE.
+        body: JSON.stringify({
+          run_id: token,
+          length: podcastLength(),
+          fresh: Boolean(state.podcast),
+        }),
       });
       status.finish();
       if (cancelled) return;

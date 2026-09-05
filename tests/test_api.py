@@ -119,7 +119,7 @@ def _mock_runner(monkeypatch, result: dict, *, dotted_tasks: list[str] | None = 
     subprocess is ever spawned. `dotted_tasks`, if given, records every `dotted_task` string
     `start_run` was called with, so a test can assert the right task class was requested."""
 
-    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         if dotted_tasks is not None:
             dotted_tasks.append(dotted_task)
         return _FakeRun(run_id)
@@ -560,7 +560,7 @@ def test_ask_translates_a_run_error_into_502(client, monkeypatch):
     _live_env(monkeypatch)
     _add_a_source(client)
 
-    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         return _FakeRun(run_id)
 
     async def _fake_wait_result(run, *, timeout=None):
@@ -1122,7 +1122,7 @@ def test_run_isolated_cleans_up_the_reserved_trace_file_when_start_run_fails(mon
     of the exact same notebook+token pair gets a false 409 forever instead of the real error."""
     monkeypatch.chdir(tmp_path)
 
-    async def _boom(run_id, trace_dir, dotted_task, kwargs):
+    async def _boom(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         raise OSError("simulated spawn failure")
 
     monkeypatch.setattr(api.runner, "start_run", _boom)
@@ -1497,7 +1497,7 @@ def test_a_source_and_a_note_added_during_an_ask_both_survive_it(monkeypatch, cl
 
     gate = asyncio.Event()
 
-    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         return _FakeRun(run_id)
 
     async def _gated_wait_result(run, *, timeout=None):
@@ -1785,7 +1785,7 @@ def _mock_runner_by_run(monkeypatch, dotted, *, lang, other):
     """Like `_mock_runner`, but answers the LANGUAGE run differently from the artifact run — they
     return different shapes, so one canned result cannot serve both."""
 
-    async def _start(run_id, trace_dir, dotted_task, kwargs):
+    async def _start(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         dotted.append(dotted_task)
         return _FakeRun(run_id)
 
@@ -1884,7 +1884,7 @@ def test_a_failed_resolution_never_costs_the_caller_their_artifact(client, monke
             return await _fail_language(run, timeout=timeout)
         return {"text": "an answer", "citations": []}
 
-    async def _start(run_id, trace_dir, dotted_task, kwargs):
+    async def _start(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         return _FakeRun(run_id)
 
     monkeypatch.setattr(api.runner, "start_run", _start)
@@ -2070,7 +2070,7 @@ def test_run_id_is_reserved_in_run_processes_before_the_subprocess_is_spawned(cl
     _add_a_source(client)
     seen: list = []
 
-    async def _start(run_id, trace_dir, dotted_task, kwargs):
+    async def _start(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         # By the time a spawn is even attempted, the id must already be claimed with the "starting"
         # placeholder — that is what stops the ticker concluding the run is over.
         seen.append((run_id in api._RUN_PROCESSES, api._RUN_PROCESSES.get(run_id)))
@@ -2104,7 +2104,7 @@ def test_a_finishing_run_never_clears_a_LATER_runs_active_entry(client, monkeypa
     runs: dict = {}
     observed: list = []
 
-    async def _start(run_id, trace_dir, dotted_task, kwargs):
+    async def _start(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         run = _FakeRun(run_id)
         runs[run_id] = run
         return run
@@ -2516,7 +2516,7 @@ def test_the_podcast_length_reaches_the_task(client, monkeypatch):
     _add_a_source(client)
     seen: list[dict] = []
 
-    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs):
+    async def _fake_start_run(run_id, trace_dir, dotted_task, kwargs, *, fresh=False):
         seen.append(kwargs)
         return _FakeRun(run_id)
 
@@ -3296,3 +3296,60 @@ def test_a_tool_that_measured_itself_is_not_charged_the_gap():
     assert _tool_entry({"tool": "read_skill", "ok": True}, 3.3)["duration_s"] == 3.3
     # And a non-numeric report does not silently become the duration.
     assert _tool_entry({"tool": "read_skill", "duration_s": "fast"}, 3.3)["duration_s"] == 3.3
+
+
+def test_a_regenerate_reaches_the_worker_as_a_cache_bypass(monkeypatch, tmp_path):
+    """`fresh` rides ALONGSIDE `kwargs` down to the worker, never inside them: `kwargs` are the
+    task's `arun()` arguments and anything added there reaches the MODEL as a signature field.
+
+    It exists because `dspy.LM` defaults to `cache=True` — a Regenerate on an unchanged corpus
+    replayed the previous run byte-identically for zero model calls.
+    """
+    import json as _json
+
+    from rlm_notebook import runner
+
+    seen: dict = {}
+
+    class _Proc:
+        def __init__(self):
+            self.stdin = self
+            self.pid = 1
+
+        def write(self, raw):
+            seen["payload"] = _json.loads(raw.decode())
+
+        def close(self):
+            pass
+
+    async def _fake_exec(*a, **kw):
+        return _Proc()
+
+    monkeypatch.setattr(runner.asyncio, "create_subprocess_exec", _fake_exec)
+
+    import asyncio as _asyncio
+
+    _asyncio.run(runner.start_run("r1", tmp_path, "m:T", {"sources": "s"}, fresh=True))
+    assert seen["payload"] == {"kwargs": {"sources": "s"}, "fresh": True}
+    # And the task's own arguments are untouched — `fresh` must never become a signature field.
+    assert "fresh" not in seen["payload"]["kwargs"]
+
+    _asyncio.run(runner.start_run("r2", tmp_path, "m:T", {"sources": "s"}))
+    assert seen["payload"]["fresh"] is False, "a plain generate must keep the cache"
+
+
+def test_the_worker_turns_off_dspys_cache_only_when_asked():
+    """The switch is GLOBAL and that is correct here: a worker handles exactly one run, so
+    process-global IS run-scoped. Rebuilding the LMs instead would mean a second construction of
+    `runtime.configure`'s `lm_kwargs`, which would drift from upstream's."""
+    import inspect
+
+    from rlm_notebook import worker
+
+    src = inspect.getsource(worker.main)
+    at = src.index("if fresh:")
+    branch = src[at : src.index("setup(config)", at)]
+    assert "configure_cache" in branch and "enable_disk_cache=False" in branch, branch
+    assert "enable_memory_cache=False" in branch, branch
+    # BEFORE setup, or the LMs are already built against the cached client.
+    assert src.index("if fresh:") < src.index("setup(config)")

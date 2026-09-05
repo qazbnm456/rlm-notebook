@@ -11,6 +11,28 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **Regenerate now actually regenerates (`RunOptions.fresh`).** `dspy.LM` defaults to
+  `cache=True`, so pressing Regenerate on an unchanged notebook returned a run with 0 model calls
+  in 3.4 seconds that replayed the previous one byte-identically — same seven turns, same
+  first-turn reasoning, the same two validator failures. A button labelled Regenerate that returns
+  what you already had is a UI that lies, and the drawer's honest "no usage, no per-turn timing"
+  then reads as a broken panel.
+
+  **A FIRST generate keeps the cache**, where a hit is a free correct answer, so the flag is the
+  EXISTENCE of the artifact — `Boolean(state.overview)`, `Boolean(state.podcast)`, and
+  `AskRequest.regenerate` for chat — never a constant. A test rejects a hardcoded `fresh: true` or
+  `fresh: false` at either call site.
+
+  It rides ALONGSIDE `kwargs` down to the worker, never inside them: `kwargs` are the task's
+  `arun()` arguments and anything added there reaches the model as a signature field. The worker
+  switches it globally with `dspy.configure_cache(enable_disk_cache=False,
+  enable_memory_cache=False)` BEFORE `setup` — correct because a worker handles exactly one run, so
+  process-global is run-scoped, and because rebuilding the LMs would mean a second construction of
+  `runtime.configure`'s `lm_kwargs` that drifts from upstream's.
+
+  Four mutations killed: never bypassing, smuggling `fresh` into the task kwargs, and hardcoding
+  either constant on the client.
+
 - **A tool that measures itself is no longer charged the strip's gap.** `_tool_entry` sized every
   timeline segment by the distance from the previous timeline event — right for a call that reports
   nothing, wrong for one that does, because it charges the tool with everything since, including

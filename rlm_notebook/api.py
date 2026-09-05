@@ -979,6 +979,11 @@ class RunOptions(BaseModel):
     server-generated id, invisible to the caller until the response arrives."""
 
     run_id: str | None = None
+    #: Ask the worker to run with dspy's LM cache OFF. Set by a REGENERATE, never by a first
+    #: generate: pressing Regenerate on an unchanged corpus otherwise replays the previous run
+    #: byte-identically for zero model calls, and a button that returns what you already had is a
+    #: UI that lies. A first generate keeps the cache, where a hit is a free correct answer.
+    fresh: bool = False
 
 
 #: A single shared default instance, rather than `= RunOptions()` inline at each call site —
@@ -1151,6 +1156,7 @@ async def _run_isolated(
     config: NotebookConfig,
     run_id: str,
     timeout: float | None = None,
+    fresh: bool = False,
 ) -> dict:
     """Start an isolated subprocess run for `notebook_id` under the given `run_id`, track it in
     `_ACTIVE_RUNS`/`_RUN_PROCESSES` so `POST .../cancel` and `GET .../stream` can each reach it, and
@@ -1190,7 +1196,7 @@ async def _run_isolated(
     _RUN_PROCESSES[run_id] = None
 
     try:
-        run = await runner.start_run(run_id, _TRACE_DIR, dotted_task, kwargs)
+        run = await runner.start_run(run_id, _TRACE_DIR, dotted_task, kwargs, fresh=fresh)
     except Exception:
         _RUN_PROCESSES.pop(run_id, None)
         trace_path.unlink(missing_ok=True)
@@ -1277,6 +1283,9 @@ async def ask(notebook_id: str, body: AskRequest, request: Request) -> AskRespon
         },
         config,
         run_id,
+        # A regenerate IS the ask path's fresh signal — `body.fresh` would be a second way to say
+        # the same thing, and the server already re-checks `regenerate` inside the lock.
+        fresh=body.regenerate or body.fresh,
     )
     answer = Answer.model_validate(result)
 
@@ -1462,8 +1471,10 @@ async def generate_overview(
     kwargs = {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE}
 
     summary, faq = await asyncio.gather(
-        _run_isolated(notebook_id, _dotted(GenerateSummary), kwargs, config, summary_run),
-        _run_isolated(notebook_id, _dotted(GenerateFAQ), kwargs, config, faq_run),
+        _run_isolated(
+            notebook_id, _dotted(GenerateSummary), kwargs, config, summary_run, fresh=body.fresh
+        ),
+        _run_isolated(notebook_id, _dotted(GenerateFAQ), kwargs, config, faq_run, fresh=body.fresh),
         return_exceptions=True,
     )
     if isinstance(summary, BaseException):
@@ -1513,6 +1524,7 @@ async def guide(
         {"sources": blob, "output_language": language or _DEFAULT_ARTIFACT_LANGUAGE},
         config,
         run_id,
+        fresh=body.fresh,
     )
     parsed = output_model.model_validate(result)
 
@@ -1629,6 +1641,7 @@ async def audio(
         },
         config,
         run_id,
+        fresh=body.fresh,
         # A `long` episode cannot finish inside the backstop a chat turn needs — measured, see
         # `PODCAST_TIMEOUT_FACTOR`. Scaling here rather than raising the global default keeps a
         # runaway CHAT turn bounded at the value it always had.

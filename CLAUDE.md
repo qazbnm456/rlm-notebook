@@ -2073,13 +2073,25 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     gap remains the fallback, and a non-numeric report does not become one.
 
     **A run can legitimately have NO model calls, and the drawer says so correctly.** `dspy.LM`
-    defaults to `cache=True`, so pressing Regenerate with an unchanged corpus, language and tier
-    replays the previous run from cache: same turns, same reasoning text, same validator failures,
-    zero calls, 3.4s against 263.6s. `budget_summary` then reports a cap with no usage and the
-    per-turn timing is omitted because the steps are 0.09s apart — both notes true, and both easy
-    to misread as the drawer being broken. **Regenerate therefore costs nothing and returns an
-    identical episode when nothing has changed**, which invariant 42's three-state button does not
-    say.
+    defaults to `cache=True`, so a run with an unchanged corpus, language and tier replays the
+    previous one from cache: same turns, same reasoning text, same validator failures, zero calls,
+    3.4s against 263.6s. `budget_summary` then reports a cap with no usage and the per-turn timing
+    is omitted because the steps are 0.09s apart — both notes true, and both easy to misread as the
+    drawer being broken.
+
+    **A REGENERATE bypasses that cache (`RunOptions.fresh`); a first generate does not.** A button
+    labelled Regenerate that returns what you already had is a UI that lies, and the drawer then
+    reports the honest emptiness above as if the panel were broken. A FIRST generate keeps the
+    cache, where a hit is a free correct answer — so the flag is the EXISTENCE of the artifact
+    (`Boolean(state.overview)`, `Boolean(state.podcast)`, and `AskRequest.regenerate` for chat),
+    never a constant.
+
+    It rides **alongside** `kwargs` down to the worker, never inside them: `kwargs` are the task's
+    `arun()` arguments and anything added there reaches the MODEL as a signature field (invariant
+    39). The worker switches it GLOBALLY with `dspy.configure_cache(...)` before `setup`, which is
+    correct because a worker handles exactly one run — process-global IS run-scoped — and because
+    rebuilding the LMs instead would mean a second construction of `runtime.configure`'s
+    `lm_kwargs` that would drift from upstream's.
 
     **Interface copy is built from the BOOLEAN, not from the server's sentence.** `timing_note` is English
     prose written in Python, and rendering it verbatim put an English line in the middle of a Chinese

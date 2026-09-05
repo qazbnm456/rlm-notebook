@@ -39,10 +39,17 @@ class Run:
             pass
 
 
-async def start_run(run_id: str, trace_dir: Path, dotted_task: str, kwargs: dict) -> Run:
+async def start_run(
+    run_id: str, trace_dir: Path, dotted_task: str, kwargs: dict, *, fresh: bool = False
+) -> Run:
     """Spawn `python -m rlm_notebook.worker` as an isolated subprocess and hand it `kwargs` (the
     RLMTask's `arun()` keyword arguments) as JSON on stdin. Does not wait for it to finish — see
-    `wait_result`."""
+    `wait_result`.
+
+    `fresh` asks the worker to run with dspy's LM cache OFF. It rides ALONGSIDE `kwargs` rather
+    than inside them: `kwargs` are the task's `arun()` arguments and anything added there reaches
+    the model as a signature field, which this is not.
+    """
     trace_dir.mkdir(parents=True, exist_ok=True)
     trace_path = trace_dir / f"{run_id}.jsonl"
     process = await asyncio.create_subprocess_exec(
@@ -53,7 +60,7 @@ async def start_run(run_id: str, trace_dir: Path, dotted_task: str, kwargs: dict
         start_new_session=True,
     )
     assert process.stdin is not None  # PIPE was requested above
-    process.stdin.write(json.dumps({"kwargs": kwargs}).encode("utf-8"))
+    process.stdin.write(json.dumps({"kwargs": kwargs, "fresh": fresh}).encode("utf-8"))
     process.stdin.close()
     return Run(process, run_id)
 
