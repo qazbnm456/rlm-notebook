@@ -81,6 +81,29 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **Design constraint recorded for the `run_end.budgets`/`usage` follow-up, BEFORE building it.**
+  The kit upgrade made those fields available; `trajectory.py` reads `run_end` and surfaces neither,
+  which is a real gap for a drawer whose whole purpose is "why did it produce that"
+  (`accepted-not-done`). The constraint arrived from the kit maintainer as a measurement, and it
+  rules out the obvious design:
+
+  **Do not build a "this run was approaching the cap" indicator — there is no gradient to show.**
+  On the first production corpus running 1.10.0, the used/cap ratio distribution has a HOLE: 363
+  runs below 0.6, **zero between 0.6 and 1.0**, and 21 at exactly 1.0. A proximity meter would be a
+  needle that sits near zero and then teleports.
+
+  What the field does buy is after the fact: of the 21 that hit the cap, **16 finished anyway**,
+  because a truncated CODE cell is a `SyntaxError` that dspy's own in-loop feedback repairs, while a
+  truncated FINAL answer kills the run. So the surfacing worth building is per-run and retrospective
+  — "a turn in this run was truncated at N tokens against a cap of M", on the runs where it
+  happened — not a meter on every run.
+
+  **Provenance, because it decides how far this transfers**: 385 runs, ONE model, ONE cap, and a
+  DIFFERENT consumer — not this project, whose `max_tokens` is 16384 (invariant 59). The mechanism
+  (truncated code recoverable, truncated answer terminal) is a property of dspy's loop and carries
+  over; the SHAPE of the distribution is one corpus on one configuration and may not. Do not quote
+  the 363/0/21 as if it had been measured here.
+
 - **A third review round, this time over the restorations themselves; six defects fixed.** Restored
   prose is the dangerous kind, because it reads as authoritative while nobody has re-checked it
   against the code. Of 26 claims put back by the two restoration commits, four were wrong.
