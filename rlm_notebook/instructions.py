@@ -150,13 +150,13 @@ def script_family(language: str | None) -> str | None:
 #: that started its conversion work, which the bare gate would have left unfixed. `构 与 么` are
 #: this project's own measured gaps; `么` is `怎么`, three times.
 #:
-#: **This is where the two projects' tolerances legitimately differ.** `据` in `拮据` and `离` in a
-#: trigram name are correct Traditional, so this list can produce a false positive. That costs
-#: a sibling project a silently corrupted TITLE, because its `to_script` rewrites and persists; it
-#: costs this check ONE rejection the model may override, because it reports and fires once. So a
-#: looser gate is affordable here and would not be there. Measured risk on this side: all eight
-#: appear ZERO times in 40,521 characters of real Traditional output, apart from `么`'s three
-#: genuine drifts.
+#: **A false positive is NOT cheap just because this check only REPORTS.** `据` in `拮据` and `离`
+#: in a trigram name are correct Traditional, so this list can produce one — and an earlier version
+#: of this note called that affordable HERE and not for a sibling project, whose converter persists a
+#: rewritten title. Retracted: told `干 -> 幹`, an obedient model writes `幹預` and the corruption
+#: lands in the artifact anyway, by a longer route. The once-per-run bound limits how OFTEN, not
+#: whether. Prefer the miss when unsure, on both sides. Measured risk here: all eight appear ZERO
+#: times in this project's real Traditional output apart from `么`'s three genuine drifts.
 _MEASURED_OTHER_SCRIPT: dict[str, frozenset[str]] = {
     "hant": frozenset("体适荐离据构与么"),
     "hans": frozenset(),

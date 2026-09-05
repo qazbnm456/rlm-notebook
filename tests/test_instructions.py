@@ -232,9 +232,10 @@ def test_measured_other_script_characters_are_flagged_despite_the_gate():
 
     A short SOURCED addition on top of a derived gate, in the safe direction only — not the
     "~90-character hand table" this project condemned, which was a hand list used as the WHOLE
-    detector. `据` in `拮据` is correct Traditional, so this list CAN produce a false positive;
-    affordable here because the check reports and fires once, and not affordable for a sibling
-    whose converter persists a rewritten title.
+    detector. `据` in `拮据` is correct Traditional, so this list CAN produce a false positive —
+    and a false positive is NOT cheap just because this check only reports: told `干 -> 幹`, an
+    obedient model writes `幹預` and the corruption lands anyway, by a longer route. Prefer the
+    miss when unsure.
     """
     from rlm_notebook.instructions import _wrong_script_chars
 

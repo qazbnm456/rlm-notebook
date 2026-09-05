@@ -11,6 +11,33 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **Retracted: "a looser gate is affordable here because this check only reports".** It was used to
+  justify diverging from a sibling project's direction-when-unsure, and it is wrong. A reporting
+  check whose advice is wrong is advice a model may FOLLOW — told `干 -> 幹`, an obedient model
+  writes `幹預` and the corruption lands in the artifact anyway, by a longer route than the
+  sibling's persisted title but landing all the same. The once-per-run bound limits how OFTEN that
+  can happen, not whether. The direction when unsure is to prefer the miss, on both sides, and the
+  two projects' tolerances are not legitimately different in this respect.
+
+- **`_actionable` does not substitute for a shared/simplified classification, measured.** It drops
+  an offender whose phrase-aware suggestion equals the character it already has, which looked like
+  it might make the Big5 recall hole closable without hand-classifying anything. Over 27 ordinary
+  Traditional words it rescues **four** — `皇后`, `几案`, `拮据`, `恒生`, the ones zhconv's phrase
+  table happens to know — and leaves 23:
+
+  ```
+  干預→幹  台灣→臺  一群→羣  里程碑→裏  余先生→餘  丑時→醜  高峰→峯  准許→準
+  占卜→佔  北斗→鬥  托盤→託  栗子→慄  上游→遊  痴心→癡  秘密→祕  岳父→嶽
+  神采→採  征服→徵  朴素→樸  涂鴉→塗  伙伴→夥  咸豐→鹹  公厘→釐
+  ```
+
+  So whatever closes the hole has to carry those 23 itself, and the sibling's 52-character SHARED
+  list is doing real work rather than belt-and-braces. Still not adopted: the borderline entries
+  (`秘` 秘密/祕密, `峰` 高峰/高峯, `采` 神采/採用, `准` 准許/準許, `游` 上游/遊戲, `征` 征服/徵收)
+  are not "shared versus simplified" at all — they are two Traditional characters a Simplified
+  merge collapsed, where the right answer depends on the WORD and no per-character set can express
+  it in either direction. That is the open question with the sibling.
+
 - **An independent review of the previous ten commits found two defects the model could not have
   worked around, and re-derived every headline number. Two were wrong; one of them was a
   "correction" this batch had already made once.**
