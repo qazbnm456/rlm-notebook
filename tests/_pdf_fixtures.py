@@ -58,3 +58,40 @@ def make_blank_pdf(path: str | Path) -> None:
     c = canvas.Canvas(str(path), pagesize=letter)
     c.showPage()
     c.save()
+
+#: A two-column page's columns, as the fixture builder draws them. Kept as data rather than inline
+#: so a test can assert the ORDER the columns should come back in without restating the strings.
+TWO_COLUMN_LEFT = [
+    "The encoder is composed of a stack of",
+    "identical layers and each layer has two",
+    "sub layers which are applied in turn to",
+    "every position of the input sequence in",
+    "the usual way described by the authors",
+    "of the original paper on this subject",
+]
+TWO_COLUMN_RIGHT = [
+    "Experimental results on the benchmark",
+    "show that the proposed method improves",
+    "accuracy while reducing the number of",
+    "parameters required to reach the same",
+    "level of performance as the strongest",
+    "baseline reported in the literature",
+]
+
+
+def make_two_column_pdf(path: str | Path) -> None:
+    """One page laid out in TWO COLUMNS, with a real text layer and a clean gutter.
+
+    Prose this project owns, so the page an OCR claim is measured on can live in the repo — the
+    accuracy figures recorded for invariant 73 came from real papers that cannot be redistributed,
+    which left the headline claim unreproducible in CI. Drawn at coordinates rather than flowed, so
+    the gutter is a property of the fixture and not of a layout engine's decisions.
+    """
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setFont("Helvetica", 11)
+    for i, line in enumerate(TWO_COLUMN_LEFT):
+        c.drawString(60, 700 - i * 20, line)
+    for i, line in enumerate(TWO_COLUMN_RIGHT):
+        c.drawString(330, 700 - i * 20, line)
+    c.showPage()
+    c.save()

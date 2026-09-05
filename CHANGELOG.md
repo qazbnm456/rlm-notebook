@@ -81,6 +81,30 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **Made invariant 73's headline claim reproducible in CI.** Every accuracy figure recorded for the
+  reading-order work was measured on real papers that cannot go in the repo, so CI could reproduce
+  none of them — the numbers were evidence a reader had to take on trust. Two tests now run the REAL
+  OCR stack over a two-column page built from prose this project owns
+  (`_pdf_fixtures.make_two_column_pdf`, drawn at coordinates so the gutter belongs to the fixture
+  rather than to a layout engine).
+
+  **They assert STRUCTURE and DIRECTION, not a figure.** "Every left-column line precedes every
+  right-column line" does not depend on how well the OCR read the characters; an exact ratio would
+  move with an OCR version and would have to be re-measured rather than trusted. The similarity check
+  only pins that the gain is real and clear (measured +0.222 on this page, asserted > +0.10).
+
+  Confirmed the effect reproduces on synthetic content BEFORE building the test: 0.459 detector order
+  against 0.681 reordered. The gap between 0.681 and a perfect 1.000 is OCR dropping spaces
+  (`eachlayerhas`), which hits both readings equally — the ordering itself is exactly right, which is
+  why the structural assertion is the load-bearing one. Verified by neutering `reading_order` to
+  return detection order, which fails the two-column test.
+
+  **What is still NOT reproducible, stated rather than left implied**: the corpus-level measurements —
+  the 0.425 -> 0.756 across twelve real pages, the scanned-corpus validation, the CJK figures, the
+  good/garbled score overlap behind invariant 74. Those are properties of documents, not behaviours,
+  and pinning them would mean shipping the documents. They stay recorded as single-run measurements
+  with their provenance.
+
 - **A four-column page is declined instead of being cut in half (invariant 73).** Recorded as a
   limitation when a review found it; now fixed. Three columns already declined themselves — the
   middle column crosses the centre, so the page-level guard fires — but an even count has its centre

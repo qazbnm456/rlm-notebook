@@ -3,7 +3,12 @@ from __future__ import annotations
 import logging
 
 import pytest
-from _pdf_fixtures import make_blank_pdf, make_image_only_pdf, make_text_pdf
+from _pdf_fixtures import (
+    make_blank_pdf,
+    make_image_only_pdf,
+    make_text_pdf,
+    make_two_column_pdf,
+)
 
 from rlm_notebook.parsers import _ocr
 from rlm_notebook.parsers import pdf as pdf_module
@@ -248,3 +253,76 @@ def test_parse_pdf_raises_when_every_page_is_empty(tmp_path):
 
     with pytest.raises(ValueError):
         parse_pdf(str(pdf_path), "s1")
+
+
+# --- the reading-order claim, end to end (invariant 73) ---------------------------------------
+# The accuracy figures recorded for invariant 73 were measured on real papers that cannot go in the
+# repo, so CI could reproduce none of them. These two run the REAL OCR stack over a page this
+# project owns: slower than the pure-function tests, and the only reproducible evidence that the
+# ordering does on a rendered two-column page what the changelog says it does.
+
+
+def _ocr_orderings(pdf_path):
+    """`(detector_order, reading_order)` for a rendered page, as normalised word lists."""
+    import re
+
+    import numpy as np
+    import pypdfium2 as pdfium
+    from rapidocr_onnxruntime import RapidOCR
+
+    from rlm_notebook.parsers._ocr import reading_order
+
+    page = pdfium.PdfDocument(str(pdf_path))[0]
+    result, _ = RapidOCR()(np.array(page.render(scale=2.0).to_pil().convert("RGB")))
+    def words(text):
+        return re.findall(r"[a-z]+", text.lower())
+
+    raw = words(" ".join(t for _, t, _ in result if t.strip()))
+    return raw, words(reading_order([(box, t) for box, t, _ in result]))
+
+
+def test_reading_order_beats_detection_order_on_a_real_two_column_render(tmp_path):
+    """The claim itself, measured rather than asserted from a fixture: RapidOCR reports a
+    two-column page roughly line-by-line ACROSS both columns, and the ordering has to recover the
+    columns from the coordinates.
+
+    The STRUCTURAL assertion is the load-bearing one — every left-column line precedes every
+    right-column line — because it does not depend on how well the OCR read the characters. The
+    similarity check pins the DIRECTION of the recorded improvement without pinning a figure that
+    would move with an OCR version.
+    """
+    import difflib
+
+    from _pdf_fixtures import TWO_COLUMN_LEFT, TWO_COLUMN_RIGHT
+
+    pdf_path = tmp_path / "two-column.pdf"
+    make_two_column_pdf(pdf_path)
+    raw, ordered = _ocr_orderings(pdf_path)
+
+    joined = " ".join(ordered)
+    last_left = joined.rfind(TWO_COLUMN_LEFT[-1].split()[-1].lower())
+    first_right = joined.find(TWO_COLUMN_RIGHT[0].split()[0].lower())
+    assert 0 <= last_left < first_right, "the left column must finish before the right one starts"
+
+    truth = " ".join(TWO_COLUMN_LEFT + TWO_COLUMN_RIGHT).lower().split()
+    before = difflib.SequenceMatcher(None, truth, raw).ratio()
+    after = difflib.SequenceMatcher(None, truth, ordered).ratio()
+    assert after > before + 0.10, f"expected a clear gain, got {before:.3f} -> {after:.3f}"
+
+
+def test_reading_order_does_not_damage_a_real_single_column_render(tmp_path):
+    """The other half of the claim. A single-column page crosses the centre on nearly every line,
+    so the page-level guard should leave it exactly as the detector reported it."""
+    pdf_path = tmp_path / "one-column.pdf"
+    make_text_pdf(
+        pdf_path,
+        [
+            (
+                "The encoder is composed of a stack of identical layers and each layer has two "
+                "sub layers which are applied in turn to every position of the input sequence."
+            )
+        ],
+    )
+    raw, ordered = _ocr_orderings(pdf_path)
+
+    assert ordered == raw

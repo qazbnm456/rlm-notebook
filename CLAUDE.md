@@ -1880,12 +1880,19 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **Tesseract is deliberately NOT given the same treatment**: it does its own page segmentation, columns
     included, and reports text already in reading order.
 
-    **One test drives REAL detector geometry** (`tests/fixtures/ocr_two_column_page.json`: 105 boxes
-    measured off a rendered two-column page, TEXT EXCLUDED so the fixture carries a layout and not
-    someone's prose). It asserts the STRUCTURE — the whole left column, then the whole right, then the
-    centred footer — rather than freezing an output list, and its gutter bounds come from the
-    measurement rather than from the code under test. It does not subsume the synthetic fixtures: that
-    page is a single band, so the band key and the vertical-centre choice are invisible in it.
+    **The claim is reproducible in CI, on two levels.** `tests/fixtures/ocr_two_column_page.json`
+    carries 105 boxes measured off a rendered two-column page, TEXT EXCLUDED so the fixture is a
+    layout and not someone's prose; it asserts the STRUCTURE — whole left column, whole right, then
+    the centred footer — rather than freezing an output list, with gutter bounds from the measurement
+    rather than from the code under test. Above that, two tests run the REAL OCR stack end to end over
+    a two-column page built by `_pdf_fixtures.make_two_column_pdf` from prose this project owns, since
+    the recorded accuracy figures were measured on papers that cannot be redistributed and were
+    therefore unreproducible. **They assert the STRUCTURE and the DIRECTION, never a figure**: an exact
+    ratio would move with an OCR version, while "every left-column line precedes every right-column
+    line" does not depend on how well the characters were read at all.
+
+    Neither subsumes the synthetic fixtures: the frozen page is a single band, so the band key and the
+    vertical-centre choice are invisible in it.
 
     **The known cost, inspected rather than inferred**: a wide TABLE on a single-column page can be split
     down the middle, and two attention-visualisation figure pages measured -0.08/-0.06. Both were read
