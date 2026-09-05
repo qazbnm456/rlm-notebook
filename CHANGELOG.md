@@ -11,6 +11,28 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **"The model cannot write `峽`" was falsified for about 600 tokens.** The live episode left one
+  character of `霍爾木茲海峡` unconverted, and the obvious reading was a vocabulary limit no prompt
+  could reach. Asked directly, the same configured LM returns `霍爾木茲海峽` — all six characters
+  — and `峽` alone on request.
+
+  So the residual Simplified drift is a COMPLIANCE problem rather than a knowledge one: the model
+  holds the right answer and does not apply it across 4000 characters of dialogue. `CLAUDE.md`'s
+  sentence excusing it as a capability limit is removed.
+
+  **This reopens the validator question with one of its conditions now met.** Invariant 39 declined
+  a validator because "every condition justifying one is absent, and the one field that would
+  qualify does not drift". Two of those have moved: the drift is real and larger than published
+  (19 sites, all in podcast fields), and the correct output is demonstrably knowable BY THE MODEL,
+  which is what makes a reject-and-retry check different from a converter. A `zhconv` CONVERTER
+  remains wrong for the reason already recorded — it rewrites `干`, `台`, `群`, `里`, which are
+  correct Traditional — so any such check would have to report offenders and let the model judge
+  context, not rewrite prose. Not built; recorded as a live option rather than a closed one.
+
+  Method note for the next person: the first attempt at this check hand-rolled a `dspy.LM(...)`
+  from `RN_MAIN_MODEL` and died on a missing provider prefix, because `config.setup` is the ONE
+  place either entry point configures a model (invariant 35). Use it.
+
 - **The Hormuz proper-noun story was false, and it had been used to justify two changes and to
   discount twelve drift hits.** `霍尔木兹海峡` in a Traditional podcast was recorded as the model
   faithfully keeping a Simplified source's own spelling. **Neither notebook's corpus contains a

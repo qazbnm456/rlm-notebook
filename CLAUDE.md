@@ -837,9 +837,17 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       What the run DID establish is that the rule REACHES the model: the place name went from
       `霍尔木兹海峡` (three of six characters in the wrong script, three occurrences) to
       `霍爾木茲海峡` (ONE of six, six occurrences). Behaviour changed on exactly what the rule
-      asks for. It is still not right — `峡` should be `峽`, and that may simply be a character
-      this model does not write, which no wording reaches. (The new episode also ran 27% shorter
+      asks for. It is still not right — `峡` should be `峽`. (The new episode also ran 27% shorter
       per utterance, 71.2 to 52.1 characters. One sample; not attributed.)
+
+      **"The model cannot write that character" was the obvious excuse and it is FALSE**, settled
+      for about 600 tokens against the same configured LM: asked directly, it returns
+      `霍爾木茲海峽`, all six characters correct, and `峽` alone on request. So the residual drift
+      is a COMPLIANCE problem, not a knowledge one — the model holds the right answer and does not
+      apply it while composing 4000 characters of dialogue. That is the finding that most changes
+      what to do next, and it cost less than a thousandth of the episode that raised the question:
+      **when a measurement leaves a capability question open, ASK THE MODEL before designing
+      around the answer.**
 
       **A first reading of that run called the half-converted name a REGRESSION caused by the
       rule**, on the premise the corpus paragraph above records as false — that the sources spelled
