@@ -795,6 +795,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       failure was in page TITLES, and it is why no validator was added: every condition justifying
       one (short, navigational, repeated, demonstrably drifting) is absent, and the one field that
       would qualify here does not drift. Empty for a language whose name already pins one script.
+
+      **A PROPER NOUN outranks it, and the rule says so** — the two collide whenever the sources
+      spell a name in the other script, and nothing stated a precedence until a live run made them
+      collide: a Traditional podcast carried `霍尔木兹海峡` nine times, verbatim from a Simplified
+      source. The model chose the name over the script, which is right (converting it costs the
+      reader the string they would search for), but it chose without being told.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so

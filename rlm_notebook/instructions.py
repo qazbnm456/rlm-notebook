@@ -369,7 +369,9 @@ _SCRIPT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
             "Write Chinese in TRADITIONAL characters (繁體字) throughout — every sentence, and "
             "short fields like a title or a follow-up question exactly as much as body prose. "
             "Simplified characters (简体字) are not acceptable: `概览` must be `概覽`, `模块` "
-            "must be `模組`."
+            "must be `模組`. A PROPER NOUN is the exception and outranks this: a name the sources "
+            "spell in Simplified stays exactly as they spell it, because a reader who wants to "
+            "look it up needs the string the sources used."
         ),
     ),
     (

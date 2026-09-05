@@ -111,6 +111,41 @@ questions with verifiable citations, and get a distilled research artifact out.
   to maintain on faith. The em-dash prohibition is the sibling's house style. The `read_file` /
   `grep_repo` grounding advice has no analogue in a corpus this project hands over whole.
 
+- **Spent a live podcast run to test the script rule. It has no measurable effect at this sample
+  size, and the run bought three other things instead.** 459 seconds, one `long` episode on the same
+  notebook, same tier as the baseline it replaced.
+
+  | | before the rule | after |
+  |---|---|---|
+  | Han characters | 3,069 | 4,643 |
+  | Simplified in the model's OWN prose | 3 | 4 |
+  | rate | 9.78 / 10k | 8.62 / 10k |
+
+  **Three against four is not evidence of anything.** One run, one notebook: the honest reading is
+  "no measurable effect", not "it works" and not "it doesn't".
+
+  **The first reading of this run was wrong, and by a lot** — 13.03 against 34.46 per 10k, a
+  doubling, reported before the offenders were read. Two errors, both in the MEASUREMENT:
+
+  - **`干` is not a Simplified character here.** The hits were `不干預` and `干擾`, both correct
+    Traditional; zhconv rewrites them to `幹`, which is wrong. Three of the sixteen were the tool
+    misreading, counted as the model's failure.
+  - **Nine of the sixteen were one proper noun, three times.** `霍尔木兹海峡` came verbatim from a
+    Simplified source, which is `PROPER_NOUNS` working rather than the script rule failing.
+
+  **That second one is a rule conflict this project created and had not written down.**
+  `PROPER_NOUNS` says never translate a name; the script rule says write Traditional throughout; a
+  Simplified-spelled name in the sources puts them in direct opposition. The model picked the name,
+  which is correct — converting it costs the reader the exact string they would search for
+  (invariant 69) — but nothing had told it which wins. The precedence is now stated inside the
+  script rule itself, so a reader of that paragraph meets the exception there rather than having to
+  hold a later paragraph in mind.
+
+  **The measurement tooling needs both exclusions to be worth anything**, and that is the durable
+  part: a zhconv diff counts characters that are correct Traditional in their own right, and it
+  counts proper nouns the rules deliberately preserve. Either alone turns a null result into an
+  alarming one.
+
 - **Re-measured the Simplified-character claim with a full conversion table, and the earlier zero
   was an artifact of the tool.** The check that produced it used a sibling's ~90-character hand
   table — deliberately small, and documented by its author as a script IDENTIFIER rather than a
