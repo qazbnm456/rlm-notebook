@@ -95,3 +95,29 @@ def make_two_column_pdf(path: str | Path) -> None:
         c.drawString(330, 700 - i * 20, line)
     c.showPage()
     c.save()
+
+#: One column's worth of lines, wide enough that each crosses the page's horizontal centre — which
+#: is what makes a single-column page recognisable to `_ocr.reading_order`'s page-level guard.
+SINGLE_COLUMN_LINES = [
+    "The encoder is composed of a stack of identical layers and each layer",
+    "has two sub layers which are applied in turn to every position of the",
+    "input sequence in the usual way described by the original authors of",
+    "the paper that first introduced this particular arrangement of parts",
+    "together with the experiments they ran to justify each of its pieces",
+]
+
+
+def make_single_column_pdf(path: str | Path) -> None:
+    """One page of ordinary single-column prose, as SEVERAL drawn lines.
+
+    `make_text_pdf` draws one unwrapped string per page, so OCR returns a single region and
+    `reading_order` short-circuits before any layout rule runs — a test written against that fixture
+    passes without reaching the guard it names.
+    """
+    c = canvas.Canvas(str(path), pagesize=letter)
+    c.setFont("Helvetica", 11)
+    for i, line in enumerate(SINGLE_COLUMN_LINES):
+        c.drawString(60, 700 - i * 20, line)
+    c.showPage()
+    c.save()
+

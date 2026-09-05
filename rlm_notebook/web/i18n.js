@@ -139,6 +139,7 @@ const STRINGS = {
     "traj.budgetCut": "有一輪撞到生成上限：{used} tokens，上限 {cap}。被截斷的如果是程式碼格，通常下一輪就會修好；被截斷的如果是最終答案，這次執行就結束了。",
     "traj.budgetNone": "這份軌跡沒有記錄 token 用量：它早於這個欄位存在。這不等於「沒有發生截斷」。",
     "traj.budgetPartial": "這次執行沒有回報生成上限。",
+    "traj.budgetNoUsage": "生成上限是 {cap} tokens；這次執行沒有記錄可供比對的 token 用量。",
     "traj.budgetDropped": "步數預算被拒絕並退回函式庫的預設值，所以設定的上限並未生效。",
     "traj.noTools": "這次執行沒有呼叫任何工具。",
     "traj.noMeta": "這次執行沒有留下設定紀錄。",

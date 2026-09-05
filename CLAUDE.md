@@ -1908,10 +1908,19 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     at half scale. `_column_count` closes it by projecting a band onto the x-axis and counting the runs a
     real gutter separates; above two, the band is returned in detection order.
 
-    **`_MIN_GUTTER_SHARE` (0.02) has about 2x of margin and is not a knob to tune on taste**: the real
-    two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, i.e. 0.038. Raise the
-    threshold past that and that page reads as ONE column and stops being reordered at all. The count is
-    used only to ask "is this the two-column case", never to locate a column — that stays `centre`'s job.
+    **`_MIN_GUTTER_SHARE` (0.02) has about 2x of margin, and the hazard of raising it runs UPWARD**:
+    the real two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, i.e. 0.038.
+    A higher value merges runs and LOWERS the count — and since the only test is `> 2`, a count of 1
+    falls through to the split exactly as 2 does, so a two-column page keeps being reordered at any value
+    (byte-identical output measured at 0.02, 0.05 and 0.30). What breaks is the DECLINE: a four-column
+    page merges to two or fewer and is halved again. An earlier draft of this paragraph asserted the
+    opposite consequence in three places at once. The count is used only to ask "is this the two-column
+    case", never to locate a column — that stays `centre`'s job.
+
+    **Counted over the whole PAGE, never one band.** A sparse band — a few short fragments between two
+    spanning elements — reads its own intra-column whitespace as a gutter: on the real fixture a
+    three-region band counted 3 and was declined, returning the interleaved order this exists to remove.
+    Per-band counting turned the guard into the defect on 6-15% of that page's plausible bands.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See
@@ -2014,8 +2023,10 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     boundary into a property of the code, and the same rule governs any later analysis: split on
     `run_start.rlm_harness` and treat absent as UNMEASURED.
 
-    **Truncation is `completion_tokens` reaching the APPLIED cap**, which is how dspy's own
-    `_check_truncation` decides it, and the cap is read off the LM the run actually used rather than
+    **Truncation is `completion_tokens` reaching the APPLIED cap** — the kit's own recommended
+    reading, and NOT what dspy's `_check_truncation` does (it branches on `finish_reason ==
+    "length"` and never compares token counts, so it is not the authority for this rule even though
+    an earlier draft cited it as one). The cap is read off the LM the run actually used rather than
     off `NotebookConfig` — an injected `main_lm` is used verbatim, so the configured cap can be one
     no call ever saw. With no cap reported, `truncated` stays False rather than guessing from the
     magnitude of the number. `usage` is per ATTEMPT, so the peak is taken ACROSS retries: a retry is

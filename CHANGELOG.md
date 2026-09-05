@@ -81,6 +81,48 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **A fourth review round over the eight unreviewed commits: one shipped regression, one false
+  claim in three places, one more hollow test, three UI defects.** All verified locally before being
+  acted on.
+
+  **The regression is the serious one, and it was mine.** `_column_count` was called per BAND, and a
+  column count is a property of the PAGE. A sparse band — a few short fragments between two spanning
+  elements — reads its own intra-column whitespace as a gutter: on this project's own real-detector
+  fixture a three-region band counted 3 columns and was DECLINED, returning the interleaved
+  detection order the module exists to remove. Estimated at 6-15% of that page's plausible bands.
+  The count now runs once over the page's non-spanning regions, beside the existing page-level
+  guard, so a band cannot be seen at all.
+
+  **The test written for it was hollow, which makes four in this session.** It asserted on the real
+  fixture, whose page is a SINGLE band — so per-band and per-page counting cannot differ there and
+  it passed against the bug. The replacement builds a page where the two readings disagree: the
+  sparse band's fragments sit inside the left column's own x-range, so the page projects to two runs
+  while the band alone projects to three. Verified by restoring the old code, which now fails it.
+
+  **A consequence stated in three places was simply false.** `_MIN_GUTTER_SHARE`'s comment, invariant
+  73 and a changelog entry all said raising the threshold past 0.038 would make the real page "read
+  as one column and stop being reordered at all". It would not: the only test is `> 2`, so a count of
+  1 falls through to the split exactly as 2 does, and the output is byte-identical at 0.02, 0.05 and
+  0.30. The hazard runs the other way — a higher value merges runs, lowers the count, and stops the
+  four-column DECLINE from firing.
+
+  **The single-column end-to-end test never reached the guard it named.** `make_text_pdf` draws one
+  unwrapped line per page, so OCR returned a single region and `reading_order` short-circuited at
+  `len(items) < 2`; mutating the page-level threshold left it green. `make_single_column_pdf` draws
+  five lines, and the test now asserts it produced enough regions for anything to be exercised.
+
+  **Three defects in the budget note.** "No generation cap was reported" was shown when a cap WAS
+  reported but the provider returned no usage — two states collapsed into the message for one, in
+  both languages; there is a fifth state now. The `dropped` warning overwrote `className`, destroying
+  the truncation colour on a run that both hit the cap and had its step budgets rejected — the one
+  thing those colours exist to keep separable. And `.traj-note.is-cut` used `var(--danger)`, which is
+  not a token in this stylesheet; the project's token is `--bad`, defined for all three themes.
+
+  Also corrected: dspy's `_check_truncation` was credited with a mechanism it does not use (it
+  branches on `finish_reason == "length"`, never on token counts — the rule is the kit's
+  recommendation, not dspy's), and `worker.py` still carried a comment calling its import private on
+  the very line `b841605` changed to the public one.
+
 - **Made invariant 73's headline claim reproducible in CI.** Every accuracy figure recorded for the
   reading-order work was measured on real papers that cannot go in the repo, so CI could reproduce
   none of them — the numbers were evidence a reader had to take on trust. Two tests now run the REAL
@@ -114,11 +156,12 @@ questions with verifiable citations, and get a distilled research artifact out.
   being fixed rather than taken from the note.
 
   `_column_count` projects a band onto the x-axis and counts the runs a real gutter separates; above
-  two, the band is returned in detection order. **The threshold has less margin than it looks**: the
-  real two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, 0.038 against
-  a 0.02 threshold, so raising it past 0.038 would make that page read as one column and stop being
-  reordered at all. Recorded next to the constant, because a threshold without its measurement is an
-  invitation to tune it.
+  two, the count declines. **The threshold's hazard runs UPWARD, and the first version of this entry
+  said the opposite**: the real two-column page has a 38px gutter across 996px of content, 0.038
+  against a 0.02 threshold — but raising the value MERGES runs and LOWERS the count, and since the
+  only test is `> 2`, a count of 1 falls through to the split exactly as 2 does. Output is
+  byte-identical at 0.02, 0.05 and 0.30. What a higher value breaks is the DECLINE: a four-column
+  page merges to two or fewer and is halved again.
 
   One probe was wrong before it was right: counting columns over ALL the page's regions returned 1,
   because the page number sits IN the gutter. `_order_band` never sees it — `reading_order` peels
@@ -2792,7 +2835,8 @@ questions with verifiable citations, and get a distilled research artifact out.
 - **`line-length = 110` was never enforced.** It is a formatter setting, ruff's default rule set has
   no `E501`, and the name scrub duly left a 157-character line that `check` passed. CLAUDE.md said
   the command enforced it; it says what is true now. Twenty over-long lines predate this and
-  rewrapping them plus enabling `E501` is a follow-up, not a silent bundled edit.
+  rewrapping them plus enabling `E501` is a follow-up, not a silent bundled edit. *(Done later in
+  this same section: the rule is selected via `extend-select` and all 19 offenders are rewrapped.)*
 
 - **The Chinese interface carried English dashes, which is a translation artifact rather than a
   translation.** A user photographed "PDF、TXT 或 Markdown——一次一個檔案。" — the dash renders as a

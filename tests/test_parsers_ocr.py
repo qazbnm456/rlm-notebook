@@ -508,3 +508,41 @@ def test_column_count_ignores_a_ragged_right_edge():
     band = [_ocr._flatten(i, _quad(0, 300 - i * 4, 10 + i * 20), f"l{i}") for i in range(5)]
 
     assert _ocr._column_count(band) == 1
+
+
+def test_a_sparse_band_does_not_make_a_two_column_page_decline():
+    """The column count is a property of the PAGE, and counting it per BAND broke real pages.
+
+    A band between two spanning elements holds only a few short fragments, and the whitespace
+    BETWEEN them reads as a gutter — on this project's own real-detector fixture a three-region
+    band counted 3 columns and was declined, which returns the interleaved detection order the
+    whole module exists to remove.
+
+    The fixture is built so the two readings DISAGREE, which the first version of this test failed
+    to do: it asserted on the real fixture, whose page is a single band, so per-band and per-page
+    counting could not differ and it passed against the bug. Here the sparse band's fragments sit
+    INSIDE the left column's own x-range, so the page still projects to two runs while the band
+    alone projects to three.
+    """
+    regions = []
+    for i in range(5):
+        y = 10 + i * 15
+        regions += [(_quad(0, 140, y), f"a-left{i}"), (_quad(360, 500, y), f"a-right{i}")]
+    regions += [(_quad(0, 500, 100), "CAPTION-1")]
+    regions += [
+        (_quad(0, 20, 120), "b-left1"),
+        (_quad(360, 500, 120), "b-right1"),
+        (_quad(110, 140, 135), "b-left2"),
+    ]
+    regions += [(_quad(0, 500, 155), "CAPTION-2")]
+    for i in range(5):
+        y = 175 + i * 15
+        regions += [(_quad(0, 140, y), f"c-left{i}"), (_quad(360, 500, y), f"c-right{i}")]
+
+    # The band in isolation counts as three columns; the page it belongs to counts as two.
+    band = [_ocr._flatten(i, box, text) for i, (box, text) in enumerate(regions[11:14])]
+    assert _ocr._column_count(band) > 2, "fixture no longer reproduces the sparse band"
+
+    ordered = _ocr.reading_order(regions).split()
+    middle = ordered[ordered.index("CAPTION-1") + 1 : ordered.index("CAPTION-2")]
+    assert middle == ["b-left1", "b-left2", "b-right1"], middle

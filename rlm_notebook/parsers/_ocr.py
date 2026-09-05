@@ -62,10 +62,14 @@ _MAX_SPANNING_FRACTION = 0.15
 #: boundary between two. Only the COUNT of resulting runs is used, never their positions.
 #:
 #: Measured against the real two-column page in `tests/fixtures/`: a 38px gutter across 996px of
-#: content, i.e. 0.038 — about twice this threshold, which is the whole margin there is. Raising it
-#: past 0.038 would make that page read as one column and stop being reordered at all, so this is
-#: NOT a knob to tighten on taste. Note the page number sitting IN the gutter does not interfere:
-#: `reading_order` peels every centre-crosser off as a band boundary before `_order_band` counts.
+#: content, i.e. 0.038 — about twice this threshold, which is the whole margin there is.
+#:
+#: **The hazard runs UPWARD, and an earlier comment here had it backwards.** Raising this merges
+#: runs and LOWERS the count; since the only test is `> 2`, a count of 1 falls through to the
+#: two-column split exactly as a count of 2 does, so a two-column page keeps being reordered at any
+#: value (verified: byte-identical output at 0.02, 0.05 and 0.30). What a higher value actually
+#: breaks is the DECLINE — a four-column page merges to two or fewer and is split down the middle
+#: again, which is the defect the count was added to stop.
 _MIN_GUTTER_SHARE = 0.02
 
 #: (left edge, right edge, vertical centre, detection index, text) — a detection flattened to the
@@ -92,6 +96,13 @@ def _column_count(band: list[_Region]) -> int:
     its centre in the middle gutter, nothing spans it, and the split cut the page in half and then
     interleaved the rows inside each half — the exact defect the module exists to prevent, at half
     scale. Counting is what makes an unsupported layout decline rather than corrupt.
+
+    **Counted over the whole PAGE, never one band.** A column count is a property of the layout;
+    a band is a slice of it, and a SPARSE band — a few short fragments between two spanning
+    elements — reads ordinary intra-column whitespace as a gutter. Measured on this project's own
+    real-detector fixture: a three-region band counted 3 and was declined, which returns the
+    interleaved detection order this module exists to remove. Per-band counting turned the guard
+    into the defect on 6-15% of that page's plausible bands.
     """
     spans = sorted((region[0], region[1]) for region in band)
     if not spans:
@@ -111,10 +122,6 @@ def _column_count(band: list[_Region]) -> int:
 def _order_band(band: list[_Region], centre: float) -> list[str]:
     """One horizontal band containing no region that crosses `centre`: read it as two columns when
     both sides are occupied, otherwise leave it alone. Each side keeps its detection order."""
-    # More than two columns is not a layout this handles, and reading it as two halves is worse
-    # than leaving it alone: each half then interleaves its own rows.
-    if _column_count(band) > 2:
-        return [region[4] for region in sorted(band, key=lambda r: r[3])]
     left: list[_Region] = []
     right: list[_Region] = []
     for region in sorted(band, key=lambda r: r[3]):
@@ -151,6 +158,11 @@ def reading_order(regions: Sequence[tuple[Sequence[Sequence[float]], str]]) -> s
     centre = (min(region[0] for region in items) + max(region[1] for region in items)) / 2
     spanning = [region for region in items if region[0] < centre < region[1]]
     if len(spanning) > len(items) * _MAX_SPANNING_FRACTION:
+        return " ".join(region[4] for region in items)
+    # More than two columns is not a layout this handles, and reading it as two halves is worse
+    # than leaving it alone: each half then interleaves its own rows. Decided ONCE over the whole
+    # page — see `_column_count` for why per-band counting mis-declines a sparse band.
+    if _column_count([region for region in items if region not in spanning]) > 2:
         return " ".join(region[4] for region in items)
 
     # Bands are delimited by vertical position — that is the one thing only the geometry knows —

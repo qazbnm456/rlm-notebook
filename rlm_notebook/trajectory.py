@@ -133,8 +133,10 @@ def budget_summary(events: list[dict]) -> dict | None:
     truncated" would read a corpus boundary as a property of the code — the reason CHANGELOG.md
     records that no rate may be averaged across that upgrade.
 
-    **Truncation is `completion_tokens` reaching the applied cap**, which is how dspy's own
-    `_check_truncation` decides it. The cap is read off the LM the run actually used (the kit
+    **Truncation is `completion_tokens` reaching the applied cap** — the kit's own recommended
+    reading. NOT what dspy's `_check_truncation` does: that branches on `finish_reason == "length"`
+    and never compares token counts, so do not cite it as the authority for this rule. The cap is
+    read off the LM the run actually used (the kit
     reports it that way), never off `NotebookConfig`, because an injected `main_lm` is used verbatim
     and the configured cap can be one no call ever saw.
 

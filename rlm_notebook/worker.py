@@ -19,8 +19,10 @@ import importlib
 import json
 import sys
 
-# rlm-harness's own head+tail elider. Private, and deliberately borrowed rather than re-spelled:
-# it already encodes WHERE an AdapterParseError keeps its diagnostics, which a slice gets wrong.
+# rlm-harness's own head+tail elider, imported from the PACKAGE rather than from `_retry`: it is in
+# the kit's `__all__`, so this is the one path with a compatibility promise behind it. Borrowed
+# rather than re-spelled because it already encodes WHERE an AdapterParseError keeps its
+# diagnostics, which a slice gets wrong.
 from rlm_harness import short_error
 
 from .config import NotebookConfig, setup

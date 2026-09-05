@@ -6,6 +6,7 @@ import pytest
 from _pdf_fixtures import (
     make_blank_pdf,
     make_image_only_pdf,
+    make_single_column_pdf,
     make_text_pdf,
     make_two_column_pdf,
 )
@@ -314,15 +315,11 @@ def test_reading_order_does_not_damage_a_real_single_column_render(tmp_path):
     """The other half of the claim. A single-column page crosses the centre on nearly every line,
     so the page-level guard should leave it exactly as the detector reported it."""
     pdf_path = tmp_path / "one-column.pdf"
-    make_text_pdf(
-        pdf_path,
-        [
-            (
-                "The encoder is composed of a stack of identical layers and each layer has two "
-                "sub layers which are applied in turn to every position of the input sequence."
-            )
-        ],
-    )
+    make_single_column_pdf(pdf_path)
     raw, ordered = _ocr_orderings(pdf_path)
 
+    # The guard has to be REACHED, not merely passed: an earlier fixture drew one unwrapped line,
+    # so OCR returned a single region and `reading_order` short-circuited before any layout rule
+    # ran. Mutating the page-level threshold left that version green.
+    assert len(raw) > 20, "the fixture must produce several regions, or nothing is exercised"
     assert ordered == raw

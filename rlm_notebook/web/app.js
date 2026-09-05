@@ -4096,6 +4096,7 @@ function renderTrajBudget(budget) {
   tag.className = "note-tag";
   const body = document.createElement("span");
   body.className = "note-body";
+  let tone;
 
   if (!budget) {
     tag.textContent = t("traj.budgetTagNone", "\u24d8 budget");
@@ -4103,7 +4104,7 @@ function renderTrajBudget(budget) {
       "traj.budgetNone",
       "Token budgets aren't recorded for this trace \u2014 it predates the field. Not the same as \"nothing was truncated\".",
     );
-    trajEl.budget.className = "traj-note is-info";
+    tone = "is-info";
   } else if (budget.truncated) {
     tag.textContent = t("traj.budgetTagCut", "\u26a0 truncated");
     body.textContent = t(
@@ -4111,39 +4112,49 @@ function renderTrajBudget(budget) {
       "A turn hit the generation cap: {used} tokens against a cap of {cap}. A truncated code cell is usually repaired by the planner's next turn; a truncated final answer ends the run.",
       { used: budget.peak_completion, cap: budget.cap },
     );
-    trajEl.budget.className = "traj-note is-cut";
-  } else {
+    tone = "is-cut";
+  } else if (budget.cap != null && budget.peak_completion != null) {
     tag.textContent = t("traj.budgetTag", "\u25cf budget");
-    const pct = budget.ratio != null ? Math.round(budget.ratio * 100) : null;
-    body.textContent =
-      budget.cap != null && budget.peak_completion != null
-        ? t(
-            "traj.budgetOk",
-            "Busiest turn used {used} of {cap} tokens ({pct}%).",
-            { used: budget.peak_completion, cap: budget.cap, pct },
-          )
-        : t("traj.budgetPartial", "No generation cap was reported for this run.");
-    trajEl.budget.className = "traj-note is-live";
+    body.textContent = t(
+      "traj.budgetOk",
+      "Busiest turn used {used} of {cap} tokens ({pct}%).",
+      { used: budget.peak_completion, cap: budget.cap, pct: Math.round(budget.ratio * 100) },
+    );
+    tone = "is-live";
+  } else if (budget.cap != null) {
+    // A cap WITH no usage is its own state, not "no cap": not every provider returns a usage
+    // block. Collapsing the two said a cap of 16384 had never been reported.
+    tag.textContent = t("traj.budgetTagNone", "\u24d8 budget");
+    body.textContent = t(
+      "traj.budgetNoUsage",
+      "The generation cap was {cap} tokens; this run recorded no token usage to compare against it.",
+      { cap: budget.cap },
+    );
+    tone = "is-info";
+  } else {
+    tag.textContent = t("traj.budgetTagNone", "\u24d8 budget");
+    body.textContent = t("traj.budgetPartial", "No generation cap was reported for this run.");
+    tone = "is-info";
   }
 
+  trajEl.budget.appendChild(tag);
+  trajEl.budget.appendChild(body);
+
   // `dropped` means dspy rejected the budget kwargs outright and every cap reverted to its own
-  // default — so the numbers beside it were NOT the ones applied, and saying so is the whole point.
+  // default — so the numbers above were NOT the ones applied. APPENDED, never a replacement: a run
+  // can both hit the cap and have its step budgets rejected, and an earlier version overwrote the
+  // truncation colour here, which is the one thing the colours exist to keep separable.
   if (budget && budget.iterations && budget.iterations.dropped) {
     const warn = document.createElement("span");
     warn.className = "note-body";
     warn.textContent = t(
       "traj.budgetDropped",
-      " The step budgets were rejected and reverted to the library's defaults, so the configured caps did not apply.",
+      "The step budgets were rejected and reverted to the library's defaults, so the configured caps did not apply.",
     );
-    trajEl.budget.appendChild(tag);
-    trajEl.budget.appendChild(body);
     trajEl.budget.appendChild(warn);
-    trajEl.budget.className = "traj-note is-info";
-    trajEl.budget.hidden = false;
-    return;
+    tone = tone === "is-cut" ? "is-cut" : "is-info";
   }
-  trajEl.budget.appendChild(tag);
-  trajEl.budget.appendChild(body);
+  trajEl.budget.className = `traj-note ${tone}`;
   trajEl.budget.hidden = false;
 }
 
