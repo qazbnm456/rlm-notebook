@@ -11,6 +11,26 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The live ticker said "Tool" and threw the payload away.** `_translate_trace_event`'s
+  `tool_call` branch emitted a fixed word with the tool name demoted to `detail`, and its `meta`
+  read a `status` key `record_tool_call` never writes — so it was always `None`. That is the exact
+  shape invariant 52 records this function being rewritten to stop doing; it survived because this
+  project emitted no `tool_call` events at all until the validator started recording, so nobody
+  read the branch.
+
+  Reported from a live run: the status line read "4 tools, 18 steps" while the validator was
+  rejecting a draft, and nothing on screen said so. Now the tool names itself in `primary`, the
+  verdict or the named argument is `detail`, and a rejection sets `meta`.
+
+  **The kind stays `tool` even for a rejection.** `failed` is TERMINAL — `app.js`'s
+  `TERMINAL_KINDS` closes the live log on it — so one rejected tool call would have ended the
+  ticker while the run carried on. Pinned; the mutation that makes it `failed` fails two tests.
+
+- **The three-look bound paid off on its first run.** The validator rejected two characters, the
+  model fixed them, and the second call returned a real `Validation successful.` — which at the old
+  limit of one it would have returned regardless. The stored episode has **zero** drift, the first
+  end-to-end clean result this check has produced.
+
 - **The script check's one-rejection bound was measured too few, in both directions, and is now
   three.** A live run rejected NINE characters with their fixes — `权`->`權` five times, `时`->`時`,
   `间`->`間`, `识`->`識`, `恶`->`惡` — the model submitted anyway, and all nine shipped in the

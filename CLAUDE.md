@@ -1408,6 +1408,16 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     orphaned run comes from `_orphaned_run_event` rather than a hand-written literal — two copies had
     already drifted back to the older form.
 
+    **A `tool_call` NAMES the tool and says what it did.** The branch emitted the fixed word
+    `Tool` with the payload discarded — the exact shape this function was rewritten to stop doing —
+    and it survived because this project emitted no `tool_call` events at all until the validator
+    started recording, so nobody read it. Its `meta` also read a `status` key `record_tool_call`
+    never writes, so it was always `None`. A user watching a real run reported the consequence: the
+    status line said "4 tools, 18 steps" while the validator was rejecting a draft, and nothing on
+    screen said so. Now: the tool name is `primary`, the verdict or the named argument is `detail`,
+    and a rejection sets `meta`. **The kind stays `tool` even for a rejection** — `failed` is
+    TERMINAL and `app.js`'s `TERMINAL_KINDS` would close the live log while the run carried on.
+
     **`detail` is the model's own prose in the main case, and not ONLY that**: a `main_step` with no
     `reasoning` falls back to the step's CODE, and a `result` event carries its output dict's KEY NAMES.
     **`detail` CAN therefore quote ingested source text** — the model's prose and the step's code both

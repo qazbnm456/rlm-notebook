@@ -1175,8 +1175,12 @@ def test_translate_trace_event_carries_a_headline_a_specific_and_a_fact():
     assert step["detail"] == "Reading s1 before answering"
     assert step["meta"] == "2.0 KB read"
 
+    # The tool NAMES itself in `primary` — it used to be the fixed word "Tool" with the name
+    # demoted to `detail` and the rest of the payload discarded, which is what
+    # `test_the_live_ticker_says_what_a_tool_did_not_just_that_one_ran` exists to keep fixed.
     tool = api._translate_trace_event({"type": "tool_call", "step_id": 1, "payload": {"tool": "read"}})
-    assert (tool["kind"], tool["detail"]) == ("tool", "read")
+    assert (tool["kind"], tool["primary"]) == ("tool", "read")
+    assert tool["detail"] is None, "a call with no result and no named argument has nothing to add"
     sub = api._translate_trace_event({"type": "sub_call", "step_id": 2, "payload": {}})
     assert sub["kind"] == "escalation"
 
@@ -3423,3 +3427,44 @@ def test_every_run_taking_endpoint_decides_its_own_cache_bypass():
     # ...and the exemption is stated rather than left as an absence somebody re-adds.
     title = inspect.getsource(api.suggest_title)
     assert "fresh=" not in title, "titling is idempotent; a cache bypass there buys nothing"
+
+
+def test_the_live_ticker_says_what_a_tool_did_not_just_that_one_ran():
+    """`_translate_trace_event` emitted the fixed word "Tool" and threw the payload away — the exact
+    shape invariant 52 records this function being rewritten to stop doing. It survived because
+    until recently this project emitted no `tool_call` events at all, so nobody read the branch.
+
+    A user watching a real run reported it: the status line said "4 tools, 18 steps" while the
+    validator was rejecting a draft, and nothing on screen said so.
+
+    `meta` also read `status`, a key `record_tool_call` never writes, so it was always None.
+    """
+    from rlm_notebook.api import _translate_trace_event
+
+    def translate(payload):
+        return _translate_trace_event({"type": "tool_call", "step_id": 1, "payload": payload})
+
+    rejected = translate(
+        {
+            "tool": "validate_podcastscript",
+            "ok": False,
+            "args": {"chars": 9000},
+            "result": "Validation failed: 2 character(s) across 2 fields belong to the wrong script",
+        }
+    )
+    assert rejected["primary"] == "validate_podcastscript", "the tool NAMES itself"
+    assert rejected["meta"] == "rejected", "a rejection has to be visible without reading the text"
+    assert "Validation failed" in rejected["detail"]
+
+    # `failed` is TERMINAL (`TERMINAL_KINDS` in app.js closes the ticker) — one rejected tool call
+    # must not end a live log while the run carries on.
+    assert rejected["kind"] == "tool", rejected
+
+    passed = translate({"tool": "validate_podcastscript", "ok": True, "result": "Validation successful."})
+    assert passed["meta"] is None and "successful" in passed["detail"], passed
+
+    # A tool that records no outcome at all (upstream's `read_skill`) is neither passed nor rejected,
+    # and its ARGUMENT is the useful thing to show.
+    skill = translate({"tool": "read_skill", "args": {"name": "podcast-craft"}, "result_len": 2413})
+    assert skill["primary"] == "read_skill" and skill["detail"] == "podcast-craft", skill
+    assert skill["meta"] is None, skill

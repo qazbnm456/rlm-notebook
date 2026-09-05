@@ -1848,7 +1848,25 @@ def _translate_trace_event(event: dict) -> dict:
             _human_size(len(output)) + " read" if output else None,
         )
     if etype == "tool_call":
-        return shape("tool", "Tool", payload.get("tool") or None, payload.get("status") or None)
+        # NOT the fixed word "Tool" with the payload thrown away — that is the exact shape
+        # invariant 52 records this function being rewritten to stop doing, and it survived here
+        # because until recently this project emitted no `tool_call` events at all, so nobody read
+        # the branch. A user watching a run reported it: the status line said "4 tools, 18 steps"
+        # while the validator was rejecting a draft, and nothing said so.
+        #
+        # `meta` read `status`, a key `record_tool_call` never writes — so it was always None.
+        # `ok` is the field, and its THREE states matter: True, False, and absent (upstream's
+        # `read_skill` records no outcome at all).
+        #
+        # The kind stays "tool" even for a rejection. `failed` is TERMINAL — `TERMINAL_KINDS` in
+        # `app.js` closes the ticker on it — so using it for one rejected tool call would end the
+        # live log while the run carried on.
+        tool = payload.get("tool") or "tool"
+        ok = payload.get("ok")
+        args = payload.get("args")
+        target = args.get("name") if isinstance(args, dict) else None
+        detail = payload.get("result") or target
+        return shape("tool", tool, detail, "rejected" if ok is False else None)
     if etype == "sub_call":
         return shape(
             "escalation",
