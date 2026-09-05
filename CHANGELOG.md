@@ -11,6 +11,24 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The replay transport now shows its progress through the stop it is dwelling on.** It waits for
+  the time a turn really took divided by the speed, and with no bar that is indistinguishable from
+  a frozen panel — the same "watched it and read it as a crash" complaint the run ticker's
+  long-wait tier exists to answer, in a panel that has no other sign of life. Reported against
+  a sibling project, which has one.
+
+  It names the stop as well as drawing the bar (a bar alone says how long is left, not what for),
+  and the transition is restarted per stop — cleared, snapped to zero, forced reflow, run — because
+  without the reflow the browser coalesces both writes into one style recalculation and the bar
+  jumps to 100% with no animation at all.
+
+  **Invariant 36's tripwire caught the change, and the catch was a false positive it documents.**
+  The new local was called `row`, and that route matches `<var>.hidden =` across the WHOLE file
+  while three other functions build `const row = document.createElement(...)` — so it failed the
+  build naming `notebook-row`, `starter-questions` and `tstep`. The test's own comment says the fix
+  for that collision is to rename the local rather than loosen the tripwire, so the local is `bar`.
+  Failing loudly in the safe direction is what it is for.
+
 - **The trajectory drawer's two notes share one row.** Stacked, they were two full-width rows of
   one short sentence each, pushing the timeline strip down for no information (reported).
 

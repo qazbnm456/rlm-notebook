@@ -3981,6 +3981,7 @@ function trajInit() {
   [
     "backdrop", "drawer", "name", "stat", "run", "note", "budget", "timeline", "axis-end", "search",
     "search-count", "prev", "play", "next", "speed", "steps", "detail", "expand", "close",
+    "progress",
   ].forEach((name) => {
     trajEl[name.replace(/-(\w)/g, (_, c) => c.toUpperCase())] = document.getElementById(`traj-${name}`);
   });
@@ -4652,6 +4653,7 @@ function trajAdvance(first) {
   if (at >= stops.length) return trajStopPlay();
   trajSelect(stops[at].kind, stops[at].index);
   const dwell = Math.max(TRAJ_DWELL_FLOOR_MS, trajRealMs(stops[at]) / Math.max(1e-9, trajSpeed));
+  trajShowProgress(stops[at], dwell);
   trajPlayTimer = setTimeout(() => trajAdvance(false), dwell);
 }
 
@@ -4659,6 +4661,39 @@ function trajStopPlay() {
   clearTimeout(trajPlayTimer);
   trajPlayTimer = null;
   if (trajEl.play) trajEl.play.textContent = "▶";
+  if (trajEl.progress) trajEl.progress.hidden = true;
+}
+
+// The replay dwells on each stop for the time it REALLY took divided by the speed, and without a
+// bar that is indistinguishable from a frozen panel — a reader watching a 7-second turn has no way
+// to tell playback from a hang, which is the same complaint the run ticker's long-wait tier exists
+// to answer. Names the stop as well as drawing the bar, because a bar alone says how long is left
+// and not what it is waiting for.
+function trajShowProgress(stop, dwell) {
+  // `bar`, not `row`: `test_every_hidden_toggled_class_still_honours_the_hidden_attribute` matches
+  // `<var>.hidden =` across the WHOLE file, and three other functions here build `const row =
+  // document.createElement(...)`. Its documented answer to that collision is to rename the local
+  // rather than loosen the tripwire, and it duly failed the build naming `notebook-row`,
+  // `starter-questions` and `tstep`.
+  const bar = trajEl.progress;
+  if (!bar) return;
+  const label = bar.querySelector(".tp-label");
+  const fill = bar.querySelector(".tp-fill");
+  if (!label || !fill) return;
+  bar.hidden = false;
+  const name =
+    stop.kind === "init"
+      ? t("traj.init", "Init")
+      : t("traj.turn", `Turn ${stop.index + 1}`, { n: stop.index + 1 });
+  label.textContent = `\u25b6 ${name} \u00b7 ${trajSecs(dwell / 1000)}`;
+  // RESTART the transition rather than letting it continue: clear it, snap to zero, force a
+  // reflow, then run it. Without the reflow the browser coalesces both writes into one style
+  // recalculation and the bar jumps straight to 100% with no animation at all.
+  fill.style.transition = "none";
+  fill.style.width = "0%";
+  void fill.offsetWidth;
+  fill.style.transition = `width ${dwell}ms linear`;
+  fill.style.width = "100%";
 }
 
 function trajRefreshTransport() {

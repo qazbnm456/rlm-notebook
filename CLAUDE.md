@@ -2098,6 +2098,14 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     rebuilding the LMs instead would mean a second construction of `runtime.configure`'s
     `lm_kwargs` that would drift from upstream's.
 
+    **The replay draws its PROGRESS through the stop it is dwelling on.** The transport waits for
+    the time a turn really took divided by the speed, and without a bar that is indistinguishable
+    from a frozen panel — the same complaint the run ticker's long-wait tier exists to answer, in a
+    panel with no other sign of life. It NAMES the stop as well as drawing the bar, because a bar
+    alone says how long is left and not what it is waiting for. The transition is RESTARTED per
+    stop — cleared, snapped to zero, forced reflow, run — since without the reflow the browser
+    coalesces both writes into one recalculation and the bar jumps to 100% with no animation.
+
     **The timing note and the budget note share ONE ROW, and stay TWO ELEMENTS.** Stacked, they
     were two full-width rows of one short sentence each pushing the strip down for no information.
     Merging the TEXT would have cost the thing the note colours exist for: the budget note turns

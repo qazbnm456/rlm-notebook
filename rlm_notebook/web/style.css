@@ -3985,3 +3985,39 @@ body.is-resizing .studio-grip {
   margin-top: 0.9rem;
   font-size: 0.82rem;
 }
+
+/* The replay's progress through the stop it is dwelling on. Without it, watching a seven-second
+   turn is indistinguishable from a frozen panel. */
+.traj-progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 9px 0 0;
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+
+/* The pairing invariant 36 requires for any author `display` on a `hidden`-toggled class. */
+.traj-progress[hidden] {
+  display: none;
+}
+
+.tp-label {
+  flex-shrink: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.tp-track {
+  flex: 1 1 auto;
+  height: 3px;
+  border-radius: 2px;
+  background: color-mix(in oklch, var(--accent) 18%, var(--surface-2));
+  overflow: hidden;
+}
+
+.tp-fill {
+  display: block;
+  height: 100%;
+  width: 0;
+  background: var(--accent);
+}

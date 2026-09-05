@@ -1823,3 +1823,39 @@ def test_the_two_trajectory_notes_share_one_row_and_stay_two_elements():
     # The two notes keep their own tones, so neither may be restyled into the other.
     for tone in (".traj-note.is-cut", ".traj-note.is-live", ".traj-note.is-info"):
         assert tone in css, f"{tone} is gone, so a truncation no longer reads differently"
+
+
+def test_the_replay_shows_its_progress_through_the_stop_it_is_dwelling_on():
+    """The transport dwells on each stop for the time it REALLY took divided by the speed, and
+    without a bar that is indistinguishable from a frozen panel — a reader watching a seven-second
+    turn cannot tell playback from a hang, the same complaint the run ticker's long-wait tier
+    exists to answer.
+
+    Three things have to hold, and the middle one is the whole animation: the bar is shown when a
+    stop starts, its transition is RESTARTED (cleared, snapped to zero, reflow, run) rather than
+    left to continue, and it is hidden when playback stops.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    css = _strip_css_comments((WEB / "style.css").read_text(encoding="utf-8"))
+
+    body = js[js.index("function trajShowProgress(") : js.index("function trajRefreshTransport(")]
+    # Restarting the transition needs the forced reflow between the two writes, or the browser
+    # coalesces them into one recalculation and the bar jumps to 100% with no animation.
+    assert 'transition = "none"' in body, body
+    assert "offsetWidth" in body, "no forced reflow, so the bar will not animate"
+    assert body.index('transition = "none"') < body.index("offsetWidth") < body.index(
+        "transition = `width ${dwell}ms linear`"
+    ), body
+    # It names the stop as well as drawing the bar: a bar alone says how long is left, not what for.
+    assert "traj.turn" in body and "traj.init" in body, body
+
+    # Started per stop, and cleared when playback ends.
+    advance = js[js.index("function trajAdvance(") : js.index("function trajStopPlay(")]
+    assert "trajShowProgress(stops[at], dwell)" in advance, advance
+    stop = js[js.index("function trajStopPlay(") : js.index("function trajShowProgress(")]
+    assert "trajEl.progress.hidden = true" in stop, stop
+
+    # An author `display` on a `hidden`-toggled class needs its `[hidden]` pairing (invariant 36).
+    rules = dict(_rules(css))
+    assert "display: flex" in rules.get(".traj-progress", "")
+    assert "display: none" in rules.get(".traj-progress[hidden]", "")
