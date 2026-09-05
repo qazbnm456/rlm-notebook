@@ -770,7 +770,7 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     re-implemented in JS, because the hash fallback would have to be duplicated too.
 
 39. **Model-authored prose follows the READER's language, not the documents'. Citation coordinates
-    never follow anything.**
+    never follow anything — and naming a language buys neither its SCRIPT nor its IDIOM.**
 
     **The carve-out is the load-bearing half, and it covers coordinates, not just quotes.**
     `citations.verify_citations` compares `locator` with an exact `==` and never inspects `quote` at
@@ -779,6 +779,21 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     citation still wearing a ✓ badge while no longer being the source's own words.
     `instructions.VERBATIM_COORDINATES` names `source_id`, `locator`, the marker syntax AND `quote`
     together, and is composed BEFORE `CITATION_RULES`.
+
+    **Two things a language NAME does not settle, each with its own rule.**
+
+    - **SCRIPT** (`_SCRIPT_RULES`, composed by `_script_rule`): a language with more than one script
+      is under-specified by its name, and a model treats the scripts as interchangeable. The sibling
+      a sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
+      every page TITLE came back Simplified, so the nav and the page disagreed on screen — the rule
+      names the characters (`概览` must be `概覽`) because that cannot be read as a loose synonym.
+      **Borrowed, not observed here**: every model-authored field in two real notebooks measured
+      zero Simplified-only characters, so this is insurance against a sibling's measured failure.
+      Empty for a language whose name already pins one script.
+    - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
+      for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
+      No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so
+      this is about WORDING and applies to a single-script language too.
 
     **`Accept-Language` is the wrong API to rank first**: it answers "what language should this app's
     UI be in", not "what language does this person read research in". Resolution is one cheap

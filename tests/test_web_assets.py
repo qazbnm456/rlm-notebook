@@ -1577,3 +1577,54 @@ def test_an_unrecorded_token_budget_never_renders_as_no_truncation():
     assert "Not the same as" in body
     zh = (WEB / "i18n.js").read_text(encoding="utf-8")
     assert "這不等於" in zh[zh.index('"traj.budgetNone"') : zh.index('"traj.budgetNone"') + 200]
+
+
+def test_a_missing_trajectory_clears_the_previous_runs_panes():
+    """`renderTrajectory` writes the task name, both notes and the axis end; the fetch-failure path
+    does not run it. Clearing only the step/detail/timeline panes left the PREVIOUS run's timing
+    note and token budget on screen beside a "no trajectory" line, reading as facts about the run
+    that has none.
+
+    A source-tree assertion because there is no JS test runner (invariant 36).
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    catch = js[js.index("    trajData = null;") : js.index("  trajShowDrawer();")]
+
+    for pane in ("steps", "detail", "timeline", "name", "axisEnd"):
+        assert f'trajEl.{pane}.textContent = ""' in catch, f"trajEl.{pane} keeps the last run's text"
+    # The two notes are BOXES, not bare text: emptying one leaves its border and padding drawn, so
+    # each has to be hidden as well as cleared.
+    for note in ("note", "budget"):
+        assert f'trajEl.{note}.textContent = ""' in catch, f"trajEl.{note} keeps its text"
+        assert f"trajEl.{note}.hidden = true" in catch, f"trajEl.{note} is emptied but still drawn"
+
+
+def test_an_unloadable_trajectory_drawer_is_sized_to_its_content():
+    """One sentence in an 80vh panel reads as a broken drawer rather than a missing trace."""
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    css = (WEB / "style.css").read_text(encoding="utf-8")
+
+    assert 'classList.toggle("is-empty", !trajData)' in js, "the class must track the DATA"
+    rule = re.search(r"\.traj-drawer\.is-empty\s*\{([^}]*)\}", css)
+    assert rule, "no .traj-drawer.is-empty rule"
+    # Both, or the fixed `max-height: 80vh` on the base rule still wins.
+    assert "height: auto" in rule.group(1) and "max-height" in rule.group(1), rule.group(1)
+
+
+def test_a_steps_pill_on_a_traceless_run_does_not_open_an_empty_drawer():
+    """A transport, a search box and an empty timeline wrapped around one sentence reads as a
+    broken drawer rather than a missing trace. The fetch already happens BEFORE the drawer is
+    shown, so the closed case can simply say so and leave the page alone — via `alert`, which is
+    how rename, save-settings and add-source already report an unfulfillable click.
+
+    Switching runs inside an ALREADY-OPEN drawer takes the other branch: it cannot close under the
+    reader, so it clears every pane instead.
+    """
+    js = (WEB / "app.js").read_text(encoding="utf-8")
+    start = js.index("  } catch (err) {\n    // A trace is only as durable")
+    catch = js[start : js.index("  if (trajData) renderTrajectory(runId);")]
+
+    assert "if (trajEl.drawer.hidden)" in catch, "the two situations must be told apart"
+    closed = catch[catch.index("if (trajEl.drawer.hidden)") : catch.index("trajEl.stat.textContent")]
+    assert "alert(" in closed and "return;" in closed, "a closed drawer must report and not open"
+    assert "trajShowDrawer" not in closed

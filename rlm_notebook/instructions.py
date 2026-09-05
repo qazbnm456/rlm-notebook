@@ -356,6 +356,55 @@ write in.\
 """
 
 
+#: A language whose NAME alone under-specifies which characters to write, mapped to the rule that
+#: pins it. Borrowed from a sibling project, which shipped it after a real run returned a
+#: document set whose body text were Traditional while every page TITLE came back Simplified — the nav and
+#: the page disagreeing on screen. **Not reproduced here**: every model-authored field in this
+#: user's two real notebooks scored zero Simplified-only characters, so this is insurance against a
+#: failure a sibling measured, not a fix for one observed in this project.
+_SCRIPT_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
+    (
+        ("traditional chinese", "zh-hant", "zh-tw", "zh-hk", "繁體", "繁体", "正體"),
+        (
+            "Write Chinese in TRADITIONAL characters (繁體字) throughout — every sentence, and "
+            "short fields like a title or a follow-up question exactly as much as body prose. "
+            "Simplified characters (简体字) are not acceptable: `概览` must be `概覽`, `模块` "
+            "must be `模組`."
+        ),
+    ),
+    (
+        ("simplified chinese", "zh-hans", "zh-cn", "简体"),
+        (
+            "Write Chinese in SIMPLIFIED characters (简体字) throughout — every sentence, and "
+            "short fields like a title or a follow-up question exactly as much as body prose."
+        ),
+    ),
+)
+
+
+def _script_rule(language: str) -> str:
+    """The script-level requirement for `language`, or `""` when its name already pins one."""
+    lowered = language.lower()
+    for needles, rule in _SCRIPT_RULES:
+        if any(needle in lowered for needle in needles):
+            return "\n\n" + rule
+    return ""
+
+
+#: Naming a language gets the language; it does not get the language's own IDIOM. A real run wrote
+#: `源文` for "the source text" in Traditional Chinese output — a word-for-word rendering of the
+#: English, where a reader expects `原文`. Nothing in the script rules above catches it: 源 and 原
+#: are both perfectly ordinary Traditional characters, so this is a REGISTER failure rather than a
+#: script one, and only a rule about wording can reach it.
+NATURAL_REGISTER = (
+    "Write the way someone writes natively in that language, not a word-for-word rendering of an"
+    " English sentence. Use the term a reader of that language would use for a thing, not a"
+    " literal compound assembled from the English words for it, and prefer the plain everyday"
+    " word over the formal one. This applies to a follow-up question and a title as much as to"
+    " a paragraph."
+)
+
+
 def chat_language_rule(language: str) -> str:
     """`AnswerQuestion`'s language rule. Separate from the artifact rule because chat has something
     no artifact has — a question, whose own language is the strongest available signal.
@@ -370,7 +419,9 @@ def chat_language_rule(language: str) -> str:
         f"answer in whatever language the question was asked in; when a follow-up is too short to\n"
         f"tell (\"and Y?\", \"why?\"), use the language of the most recent question in `history`.\n"
         f"Reading `history` for THAT is reading it as context for what the question refers to, which\n"
-        f"is what it is for — it remains never a source of facts or citations.\n\n"
+        f"is what it is for — it remains never a source of facts or citations."
+        f"{_script_rule(language)}\n\n"
+        f"{NATURAL_REGISTER}\n\n"
         f"{PROPER_NOUNS}\n\n"
         f"{VERBATIM_COORDINATES}"
     )
@@ -378,7 +429,10 @@ def chat_language_rule(language: str) -> str:
 
 def artifact_language_rule(language: str) -> str:
     """The language rule for whole-corpus artifacts, which have no question to take a cue from."""
-    return f"Write your prose in {language}.\n\n{PROPER_NOUNS}\n\n{VERBATIM_COORDINATES}"
+    return (
+        f"Write your prose in {language}.{_script_rule(language)}\n\n"
+        f"{NATURAL_REGISTER}\n\n{PROPER_NOUNS}\n\n{VERBATIM_COORDINATES}"
+    )
 
 
 def validate_before_submit_rule(tool_name: str) -> str:

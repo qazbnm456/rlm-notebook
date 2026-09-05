@@ -3320,6 +3320,16 @@ body.is-resizing .studio-grip {
   transition: transform 280ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
+/* A trajectory that could not be loaded is one sentence, and 80vh of empty panel around it reads
+   as a broken drawer rather than a missing trace. Sized to content instead — `height: auto` beats
+   the fixed height above on source order at equal specificity, and `max-height` is re-stated
+   because the rule above sets it too. NOT a `hidden` toggle, so invariant 36's tripwire does not
+   apply: the drawer is visible either way, only its height changes. */
+.traj-drawer.is-empty {
+  height: auto;
+  max-height: 40vh;
+}
+
 .traj-drawer.is-open {
   transform: translateY(0);
 }

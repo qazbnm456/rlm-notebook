@@ -81,6 +81,34 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **A language name buys neither its script nor its idiom; both now have a rule (invariant 39).**
+  Two findings, one observed here and one borrowed from a sibling project after reading how
+  it had solved the same class of problem.
+
+  **Observed: `源文`.** A Traditional Chinese answer's follow-up questions wrote `源文` for "the
+  source text", where a reader expects `原文`. That is a word-for-word rendering of the English, and
+  no script rule can reach it — 源 and 原 are both perfectly ordinary Traditional characters, so it
+  is a REGISTER failure rather than a script one. `NATURAL_REGISTER` asks for the term a reader of
+  that language would use rather than a compound assembled from the English words for it, and it
+  composes into a single-script language's rule too, because the failure is about wording.
+
+  **Borrowed: the script rule.** The sibling pins the script in the script itself (`概览` must be
+  `概覽`) after a real run returned a document set whose body text were Traditional while every page TITLE
+  came back Simplified, so the nav and the page disagreed on screen. This project had NO script rule
+  at all — just "write your prose in {language}", the exact under-specification that failure came
+  from. **Not reproduced here, and recorded as such**: every model-authored field in the two real
+  notebooks on this machine — titles, overviews, answers, follow-ups, podcast utterances — measured
+  zero Simplified-only characters against the sibling's own character table. Insurance against a
+  measured failure elsewhere, not a fix for one seen here.
+
+  **What was deliberately NOT taken.** The sibling also carries a two-threshold VALIDATOR: a
+  majority comparison for a page body (a repository may legitimately contain Simplified strings) and
+  a strict per-character check for a short field like a title, justified by a measured case
+  (`插件與鉤子系统`, where the majority check correctly reported clean because that is not the
+  question a title asks). It is a good design and this project has the matching short field in
+  `naming.SuggestTitle` — but adding a validator for a failure never observed here would be building
+  machinery ahead of evidence. The prompt rule is cheap and the seam is recorded.
+
 - **Rejected: concurrent source ingestion. It crashes, and the crash is documented in a direct
   dependency's own metadata (invariant 3).** A peer session implemented it in this working tree
   unprompted — `ingest_new` planning serially and fetching through a `ThreadPoolExecutor` — with a

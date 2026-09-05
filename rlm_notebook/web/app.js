@@ -4010,15 +4010,39 @@ async function openTrajectory(runIds, wanted) {
     );
   } catch (err) {
     // A trace is only as durable as retention keeps it (invariant 34). Losing one must degrade
-    // THIS affordance, never the page — so say so in the drawer instead of throwing.
+    // THIS affordance, never the page.
+    //
+    // TWO situations, and they want opposite things. Opening the drawer from a steps pill on a run
+    // with no trace should NOT open it at all: a transport, a search box and an empty timeline
+    // wrapped around one sentence reads as a broken drawer rather than a missing trace, and the
+    // reader asked for a trajectory that does not exist. Say so the way every other unfulfillable
+    // click here does — `alert`, as rename/save-settings/add-source already use — and leave the
+    // page alone. But SWITCHING runs inside an already-open drawer cannot close it under the
+    // reader, so that one clears every pane instead; leaving them would show the previous run's
+    // task, notes and timeline beside a "no trajectory" line, reading as facts about this one.
     trajData = null;
-    trajEl.stat.textContent = t("traj.missing", `No trajectory for this run (${err.message})`, {
+    const message = t("traj.missing", `No trajectory for this run (${err.message})`, {
       message: err.message,
     });
+    if (trajEl.drawer.hidden) {
+      alert(message);
+      return;
+    }
+    trajEl.stat.textContent = message;
     trajEl.steps.textContent = "";
     trajEl.detail.textContent = "";
     trajEl.timeline.textContent = "";
+    trajEl.name.textContent = "";
+    trajEl.axisEnd.textContent = "";
+    trajEl.note.textContent = "";
+    trajEl.note.hidden = true;
+    if (trajEl.budget) {
+      trajEl.budget.textContent = "";
+      trajEl.budget.hidden = true;
+    }
   }
+  // A drawer left open on a run with no trajectory does not need 80vh for one line.
+  trajEl.drawer.classList.toggle("is-empty", !trajData);
   trajShowDrawer();
   if (trajData) renderTrajectory(runId);
 }
