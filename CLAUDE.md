@@ -1796,7 +1796,18 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     39's placeholder), every character of the model's own prose is tested against the other
     script's inventory.
 
-    - **The SUGGESTION is the REGION's standard, not merely a Traditional form.** `zh-hant` maps
+    - **The SUGGESTION is computed IN CONTEXT, because a character-level table cannot answer it.**
+      `历` is `歷` in `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is
+      `匯` in `汇率` and `彙` in `词汇`. A table gives whichever form is commoner, so the validator
+      named the WRONG character whenever the word was the less common one — shipped, and found by
+      a sibling project hitting it in its converter. The whole string is converted instead
+      (`zh-hant` is phrase-aware and script-only) and each offender takes the character at its own
+      index, falling back to the table if the conversion changes LENGTH.
+    - **The SUGGESTION is also the REGION's standard, not merely a Traditional form** — and the two
+      rules compose in ONE direction only: the regional preference applies where the phrase-aware
+      pass made no choice of its own (it agrees with the plain single-character answer), never over
+      one. Applying it unconditionally would lose `日历`'s `曆` back to `歷`, which is the defect
+      above reintroduced from the other side.** `zh-hant` maps
       `为` to `爲` where Taiwan writes `為`, and the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
       `伪`/`偽` — 22 of the flagged characters. Each is post-mapped through `zh-tw`, from the SOURCE
       character rather than from `zh-hant`'s answer (`账` reaches `賬`, which `zh-tw` leaves alone,

@@ -11,6 +11,26 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The check's SUGGESTION was a character lookup and a character lookup cannot answer it.** `历`
+  is `歷` in `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is `匯` in
+  `汇率` and `彙` in `词汇`. The table carried whichever form is commoner, so the validator named
+  the wrong character whenever the word was the less common one — shipped that way, and reported
+  by a sibling project after hitting it in its own converter. Confirmed against this project's table
+  before adopting anything.
+
+  The whole string is converted now (`zh-hant` is phrase-aware and script-only) and each offender
+  takes the character at its own index, falling back to the table if the conversion changes length.
+
+  **The two suggestion rules compose in ONE direction.** The regional `zh-tw` preference applies
+  only where the phrase-aware pass made no choice of its own — where it agrees with the plain
+  single-character answer. Applying it unconditionally would lose `日历`'s `曆` back to `歷`, which
+  is the same defect reintroduced from the other side; `因为` still gets `為` over `zh-hant`'s
+  `爲`, and `账户` still gets `帳`.
+
+  Detection is unchanged — the same 13 / 7 / 0 flags across the three measured episodes — because
+  this only ever affected what the rejection ADVISES. Two mutations killed: reverting to the
+  character lookup, and letting context override the regional preference.
+
 - **The CLI can write a trace now (`--trace PATH`), and the reason it never could is recorded
   rather than left as an accident.** Everything about `traces/` belonged to the server: it is a
   bare relative directory resolved against the process's working directory, and `prune_traces`

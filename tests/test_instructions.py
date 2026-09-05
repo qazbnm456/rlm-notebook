@@ -183,6 +183,31 @@ def test_the_wrong_script_table_never_flags_a_correct_traditional_character():
     assert not [c for c in "简体字概览模块对点问题" if c in _wrong_script_chars("hans")]
 
 
+def test_the_suggestion_is_phrase_aware_not_a_character_lookup():
+    """A character-level table cannot answer "what should this be", and shipping one was a defect.
+
+    `历` is `歷` in `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is
+    `匯` in `汇率` and `彙` in `词汇`. The table gives whichever form is commoner, so the validator
+    named the wrong character whenever the word was the less common one. Found by a sibling project
+    in its converter and confirmed here against this project's own table.
+
+    The regional preference must survive it AND must not override it — `因为` still gets `為` over
+    `zh-hant`'s `爲`, while `日历` keeps the phrase-aware `曆` instead of losing it to `歷`.
+    """
+    from rlm_notebook.instructions import _script_offenders, _wrong_script_chars
+
+    wrong = _wrong_script_chars("hant")
+
+    def suggest(text, char):
+        return next(g for _, b, g in _script_offenders(text, wrong, "hant") if b == char)
+
+    assert suggest("日历提醒", "历") == "曆" and suggest("历史紀錄", "历") == "歷"
+    assert suggest("头发很长", "发") == "髮" and suggest("发现問題", "发") == "發"
+    assert suggest("词汇表", "汇") == "彙" and suggest("汇率", "汇") == "匯"
+    # ...and the regional preference is still applied where context made no choice.
+    assert suggest("因为众多", "为") == "為" and suggest("账户", "账") == "帳"
+
+
 def test_the_wrong_script_table_names_the_fix_for_every_measured_drift_character():
     """The rejection has to be mechanically actionable, so each offender carries its right form.
 

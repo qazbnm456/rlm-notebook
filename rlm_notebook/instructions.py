@@ -213,7 +213,57 @@ def _regional(src: str, dst: str, family: str) -> str:
     return regional if len(regional) == 1 and regional != src else dst
 
 
-def _script_offenders(value: Any, wrong: dict[str, str], path: str = "") -> list[tuple[str, str, str]]:
+@lru_cache(maxsize=2)
+def _plain_script_chars(family: str) -> dict[str, str]:
+    """The same table WITHOUT the regional preference — what `zh-hant` alone answers per character.
+
+    Used only to ask whether the phrase-aware conversion made a CHOICE at a position. It is the
+    difference between the two that carries the information; neither is the answer on its own.
+    """
+    locale = "zh-hant" if family == "hant" else "zh-hans"
+    return {
+        src: dst
+        for src, dst in _zh.getdict(locale).items()
+        if len(src) == 1 and len(dst) == 1 and src != dst
+    }
+
+
+def _suggest(text: str, family: str, wrong: dict[str, str]) -> dict[int, str]:
+    """The right form for each offending character AT ITS POSITION in `text`, by index.
+
+    **A character-level table cannot answer this and shipping one was a defect.** `历` is `歷` in
+    `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is `匯` in `汇率` and
+    `彙` in `词汇`. The table gives whichever form is commoner, so the validator was telling a model
+    to write the wrong character roughly whenever the word was the less common one. (Found by
+    a sibling project, which hit it in its converter; confirmed here against this project's own table.)
+
+    So the whole string is converted — `zh-hant` is phrase-aware and script-only — and each
+    offender takes the character at its own index. **The regional preference (invariant 66's
+    `zh-tw` post-map) applies ONLY where the phrase-aware pass made no choice of its own**, i.e.
+    where it agrees with the plain single-character answer: otherwise `日历` would lose `曆` to
+    `歷`, which is the bug this function exists to fix, reintroduced from the other side.
+
+    Falls back to the table if the conversion changes LENGTH, since the index would no longer mean
+    anything. `zh-hant` is script-only and should not, but a future table is not this code's to
+    promise.
+    """
+    locale = "zh-hant" if family == "hant" else "zh-hans"
+    converted = _zh.convert(text, locale)
+    plain = _plain_script_chars(family)
+    if len(converted) != len(text):
+        return {}
+    out: dict[int, str] = {}
+    for i, char in enumerate(text):
+        if char not in wrong:
+            continue
+        in_context = converted[i]
+        out[i] = wrong[char] if in_context == plain.get(char) else in_context
+    return out
+
+
+def _script_offenders(
+    value: Any, wrong: dict[str, str], family: str, path: str = ""
+) -> list[tuple[str, str, str]]:
     """`(path, character, correct form)` for every wrong-script character in the model's own prose.
 
     `quote` is EXEMPT for `_marker_offenders`' reason ONE step sharper: a quote is copied verbatim
@@ -224,18 +274,29 @@ def _script_offenders(value: Any, wrong: dict[str, str], path: str = "") -> list
     recorded there: that walk must never fail open.
     """
     if isinstance(value, str):
-        return [(path, c, wrong[c]) for c in dict.fromkeys(value) if c in wrong]
+        suggestions = _suggest(value, family, wrong)
+        seen: dict[tuple[str, str], None] = {}
+        for i, char in enumerate(value):
+            if char in wrong:
+                seen.setdefault((char, suggestions.get(i, wrong[char])), None)
+        return [(path, bad, good) for bad, good in seen]
     if isinstance(value, (list, tuple, set, frozenset)):
-        return [o for i, v in enumerate(value) for o in _script_offenders(v, wrong, f"{path}[{i}]")]
+        return [
+            o for i, v in enumerate(value) for o in _script_offenders(v, wrong, family, f"{path}[{i}]")
+        ]
     if isinstance(value, dict):
-        return [o for k, v in value.items() for o in _script_offenders(v, wrong, f"{path}[{k!r}]")]
+        return [
+            o for k, v in value.items() for o in _script_offenders(v, wrong, family, f"{path}[{k!r}]")
+        ]
     fields = getattr(type(value), "model_fields", None)
     if fields:
         out: list[tuple[str, str, str]] = []
         for name in fields:
             if name == "quote":
                 continue
-            out += _script_offenders(getattr(value, name), wrong, f"{path}.{name}" if path else name)
+            out += _script_offenders(
+                getattr(value, name), wrong, family, f"{path}.{name}" if path else name
+            )
         return out
     return []
 
@@ -328,7 +389,7 @@ def make_grounded_validator(
         family = script() if script else None
         if family and not script_reported:
             wrong = _wrong_script_chars(family)
-            offenders = _script_offenders(model.model_validate_json(data_json_str), wrong)
+            offenders = _script_offenders(model.model_validate_json(data_json_str), wrong, family)
             if offenders:
                 script_reported = True
                 want = "Traditional" if family == "hant" else "Simplified"
