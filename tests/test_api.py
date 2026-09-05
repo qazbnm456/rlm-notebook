@@ -3456,12 +3456,35 @@ def test_the_live_ticker_says_what_a_tool_did_not_just_that_one_ran():
     assert rejected["meta"] == "rejected", "a rejection has to be visible without reading the text"
     assert "Validation failed" in rejected["detail"]
 
+    # ...and only the FIRST SENTENCE of it. A verdict is written for the MODEL — it names the
+    # offenders, then explains what to do and which exception applies — and sending it whole filled
+    # the live status line with two sentences of advice addressed to somebody else, then truncated.
+    # Reported from a real run. The full text stays in the trace and in the drawer.
+    long_verdict = (
+        "Validation failed: 2 character(s) across 2 fields belong to the wrong script for "
+        "Traditional Chinese — utterances[5].text: 么 -> 麼; "
+        "utterances[5].citations[0].answer_span: 么 -> 麼. Rewrite each in Traditional and "
+        "validate again. A character that is verbatim from a source is the one exception."
+    )
+    cut = translate({"tool": "validate_podcastscript", "ok": False, "result": long_verdict})
+    assert cut["detail"].endswith("么 -> 麼."), cut["detail"]
+    assert "Rewrite each" not in cut["detail"], "the model's instructions are not the reader's"
+    # The offender list survives the cut: `utterances[5].text` carries a `.` with no space after
+    # it, which is why cutting at ". " is safe on these strings.
+    assert "utterances[5].text: 么 -> 麼" in cut["detail"], cut["detail"]
+
     # `failed` is TERMINAL (`TERMINAL_KINDS` in app.js closes the ticker) — one rejected tool call
     # must not end a live log while the run carries on.
     assert rejected["kind"] == "tool", rejected
 
-    passed = translate({"tool": "validate_podcastscript", "ok": True, "result": "Validation successful."})
-    assert passed["meta"] is None and "successful" in passed["detail"], passed
+    passed = translate(
+        {
+            "tool": "validate_podcastscript",
+            "ok": True,
+            "result": "Validation successful. You may now output this JSON string.",
+        }
+    )
+    assert passed["meta"] is None and passed["detail"] == "Validation successful.", passed
 
     # A tool that records no outcome at all (upstream's `read_skill`) is neither passed nor rejected,
     # and its ARGUMENT is the useful thing to show.

@@ -1792,6 +1792,26 @@ def _human_size(n: int) -> str:
 _DETAIL_CHARS = 400
 
 
+def _headline(text: str | None) -> str | None:
+    """The FIRST SENTENCE of a tool's result, which for a rejection is the whole of what a watching
+    person needs.
+
+    A validator verdict is written for the MODEL: it names the offenders and then explains what to
+    do about them and which exception applies. Sent whole, that filled the status line with two
+    sentences of advice addressed to somebody else — reported from a live run, where the useful
+    half (`2 character(s) … 么 -> 麼`) was followed by "Rewrite each in Traditional and validate
+    again. A character that is verbatim from a source …" and then a truncation ellipsis.
+
+    Cutting at `". "` is safe on these strings specifically: the offender list carries `.` inside
+    `utterances[5].text` and `citations[0].answer_span`, neither followed by a space. The FULL text
+    is still in the trace and still in the drawer's detail pane; this only bounds the live line.
+    """
+    if not text:
+        return None
+    head, sep, _ = text.partition(". ")
+    return (head + "." if sep else head).strip() or None
+
+
 def _translate_trace_event(event: dict) -> dict:
     """Raw `trace/v1` event -> a small, stable, product-facing shape for the web UI's live ticker.
     Kept in ONE function, the same discipline the sibling studios' own `mapper.to_event` already
@@ -1865,7 +1885,7 @@ def _translate_trace_event(event: dict) -> dict:
         ok = payload.get("ok")
         args = payload.get("args")
         target = args.get("name") if isinstance(args, dict) else None
-        detail = payload.get("result") or target
+        detail = _headline(payload.get("result")) or target
         return shape("tool", tool, detail, "rejected" if ok is False else None)
     if etype == "sub_call":
         return shape(

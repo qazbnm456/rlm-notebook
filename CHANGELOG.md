@@ -11,6 +11,17 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The live ticker carried the whole validator verdict, which is written for the MODEL.** A
+  rejection names the offenders, then explains what to do about them and which exception applies —
+  so the status line read `2 character(s) … 么 -> 麼` followed by "Rewrite each in Traditional and
+  validate again. A character that is verbatim from a source …" and then an ellipsis. Reported from
+  a live run, one turn after the branch started emitting anything at all.
+
+  It sends the FIRST SENTENCE now, which for a rejection is exactly the offender list. Cutting at
+  `". "` is safe on these strings specifically: the list carries `.` inside `utterances[5].text`
+  and `citations[0].answer_span`, neither followed by a space. The full text is unchanged in the
+  trace and in the drawer's detail pane.
+
 - **The live ticker said "Tool" and threw the payload away.** `_translate_trace_event`'s
   `tool_call` branch emitted a fixed word with the tool name demoted to `detail`, and its `meta`
   read a `status` key `record_tool_call` never writes — so it was always `None`. That is the exact

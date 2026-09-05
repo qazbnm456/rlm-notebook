@@ -1414,8 +1414,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     started recording, so nobody read it. Its `meta` also read a `status` key `record_tool_call`
     never writes, so it was always `None`. A user watching a real run reported the consequence: the
     status line said "4 tools, 18 steps" while the validator was rejecting a draft, and nothing on
-    screen said so. Now: the tool name is `primary`, the verdict or the named argument is `detail`,
-    and a rejection sets `meta`. **The kind stays `tool` even for a rejection** — `failed` is
+    screen said so. Now: the tool name is `primary`, the FIRST SENTENCE of the verdict (or the named
+    argument) is `detail`, and a rejection sets `meta`. **First sentence, because a verdict is
+    written for the MODEL** — it names the offenders and then explains what to do and which
+    exception applies, so sending it whole filled the live line with two sentences of advice
+    addressed to somebody else and truncated the rest. The full text stays in the trace and in the
+    drawer's detail pane. **The kind stays `tool` even for a rejection** — `failed` is
     TERMINAL and `app.js`'s `TERMINAL_KINDS` would close the live log while the run carried on.
 
     **`detail` is the model's own prose in the main case, and not ONLY that**: a `main_step` with no
