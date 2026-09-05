@@ -360,23 +360,42 @@ def test_the_suggestion_is_the_regional_standard_not_just_a_traditional_form():
         assert wrong.get(bad) == good, f"{bad} must be reported as {good}, the Taiwan standard"
 
 
-def test_the_script_check_blocks_once_and_never_holds_a_run_hostage():
-    """It fires AT MOST ONCE per run, and that bound is the design.
+def test_the_script_check_is_bounded_and_never_holds_a_run_hostage():
+    """It rejects at most `_SCRIPT_REPORT_LIMIT` times per run, and the bound is the design.
 
     Every other check here rejects something WRONG; a Simplified character is cosmetic, and the
     detector cannot tell one from a Japanese glyph being quoted inline. A check the model cannot
     satisfy loses the whole episode — the trade invariant 66 already refuses elsewhere.
+
+    **The limit was ONE and one was measured too few, in BOTH directions.** A live run rejected
+    nine characters with their fixes and the model submitted anyway, so all nine shipped. And a
+    COMPLIANT model that fixes and re-validates was told `success` on its second call whether or
+    not it had fixed anything — the bound was lying to the model that deserved the answer.
     """
-    from rlm_notebook.instructions import make_grounded_validator
+    from rlm_notebook.instructions import _SCRIPT_REPORT_LIMIT, make_grounded_validator
     from rlm_notebook.schema import PodcastScript
 
+    assert _SCRIPT_REPORT_LIMIT == 3, "fix, verify, and one more fix"
     validate = make_grounded_validator(PodcastScript, lambda: set(), lambda: "hant")
-    first = validate(_drifted("這有点像人類的合作，海峡的问题。"))
+    drifted = _drifted("這有点像人類的合作，海峡的问题。")
+
+    first = validate(drifted)
     assert first.startswith("Validation failed"), first
     # Named WITH its fix, or the model is being told only that it is wrong.
     assert "点 -> 點" in first and "峡 -> 峽" in first and "问 -> 問" in first
-    # ...and the second call passes the identical input.
-    assert not validate(_drifted("這有点像人類的合作，海峡的问题。")).startswith("Validation failed")
+
+    # It keeps rejecting the identical input up to the limit — a model that fixes and re-validates
+    # has to get a real answer — and then stops, so the run can never be held hostage.
+    # `first` already spent report 1, so LIMIT - 1 more rejections remain, then it stops.
+    more = _SCRIPT_REPORT_LIMIT - 1
+    failed = [
+        validate(drifted).startswith("Validation failed") for _ in range(more + 2)
+    ]
+    assert failed == [True] * more + [False, False], failed
+
+    # A run that FIXES its prose passes immediately and spends none of the budget.
+    clean = make_grounded_validator(PodcastScript, lambda: set(), lambda: "hant")
+    assert not clean(_drifted("這有點像人類的合作，海峽的問題。")).startswith("Validation failed")
 
 
 def test_a_quoted_character_is_exempt_from_the_script_check():

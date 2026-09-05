@@ -1888,13 +1888,20 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       have such a context, so the one documented `拮据` was not the extent of it. A missed character
       is one wrong glyph on screen; a false one is a rejection the model cannot satisfy, which is
       the failure invariant 66 exists to forbid.
-    - **It fires AT MOST ONCE per run, and that bound is the design.** Every other check here
-      rejects something WRONG; a Simplified character is COSMETIC, and the detector cannot tell one
-      from a Japanese glyph being quoted inline — `学`, `会`, `国` and `峡` are shinjitai, and this
+    - **It is BOUNDED at `_SCRIPT_REPORT_LIMIT` (3) rejections per run, and the bound is the design
+      — but ONE was measured too few, in BOTH directions.** Every other check here rejects
+      something WRONG; a Simplified character is COSMETIC, and the detector cannot tell one from a
+      Japanese glyph being quoted inline — `学`, `会`, `国` and `峡` are shinjitai, and this
       project's own corpora carry Japanese. A blocking check the model cannot satisfy spends the
       step budget looping and loses a paid-for episode over one glyph, which is the trade the "net
-      must not destroy what it was protecting" rule below already refuses. So the model is made to
-      look at the list exactly once and is never held hostage to it. `quote` is exempt for the same
+      must not destroy what it was protecting" rule below already refuses.
+
+      At ONE, a live run rejected nine characters WITH their fixes (`权`->`權`, `时`->`時`,
+      `识`->`識`), the model submitted anyway, and all nine shipped — the single look bought
+      nothing. **The other direction is worse**: a COMPLIANT model that fixes and re-validates was
+      told `success` on its second call whether or not it had fixed anything, so the bound lied to
+      the model that deserved a real answer. Three gives fix, verify, and one more fix, at a worst
+      case of three planner turns against `max_iterations=25`. `quote` is exempt for the same
       reason it is exempt from the marker walk, one step sharper.
     - **Replayed against real measured output**: 17 offenders on the episode that motivated it and
       7 on the one after, every one a genuine drift, and 2 on the notebook whose only drift is `么`.

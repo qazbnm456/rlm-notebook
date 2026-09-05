@@ -375,6 +375,11 @@ def _script_offenders(
     return []
 
 
+#: How many times one run may be rejected for script drift. See `make_grounded_validator`: ONE was
+#: measured too few in both directions — a model that ignores the list ships anyway, and a model
+#: that complies is told `success` on its second call whether or not it fixed anything.
+_SCRIPT_REPORT_LIMIT = 3
+
 #: How much of a verdict reaches the trace. A rejection is short by construction (it names paths,
 #: coordinates or characters); this only bounds a pathological one.
 _VERDICT_CHARS = 1200
@@ -402,16 +407,23 @@ def make_grounded_validator(
     A guard on the one task that made a noise is a guard on the symptom.
     """
     schema_check = make_schema_validator(model)
-    # The script check fires AT MOST ONCE per run, and that bound is the design rather than an
+    # The script check is BOUNDED, not one-shot, and the bound is the design rather than an
     # optimisation. Every other check here rejects something that would be WRONG — a leaked marker,
     # a coordinate that resolves to nothing. A Simplified character in Traditional prose is
     # COSMETIC, and the detector cannot distinguish it from a Japanese glyph the model is quoting
     # inline (`学`, `会`, `国` and `峡` are all shinjitai, and this project's own corpora carry
     # Japanese). A blocking check the model cannot satisfy spends the whole step budget looping and
     # loses a paid-for episode over one wrong glyph — the trade invariant 66 already refuses for
-    # `tts.spoken_script`. So the model is made to look at the list exactly once and is never held
-    # hostage to it.
-    script_reported = False
+    # `tts.spoken_script`.
+    #
+    # **It was ONE, and one is too few for two measured reasons.** A live run rejected nine
+    # characters with their fixes (`权`->`權`, `时`->`時`, `识`->`識`), the model submitted anyway,
+    # and all nine shipped: the single look bought nothing there. Worse in the other direction, a
+    # COMPLIANT model that fixes and re-validates gets `success` on its second call whether or not
+    # it actually fixed anything — the bound was lying to the model that deserved the answer.
+    # Three gives fix, verify, and one more fix; the budget cost is at most three planner turns
+    # against `max_iterations=25`, and the run still can never be held hostage.
+    script_reports = 0
 
     def validate(data_json_str: str) -> str:
         """Validate a JSON string against the expected output schema AND check that no
@@ -501,15 +513,15 @@ def make_grounded_validator(
                     f"like: {', '.join(repr(s) for s in sample)}. Search `sources` for the marker "
                     f"that precedes the block you are citing and copy both parts of it verbatim."
                 )
-        nonlocal script_reported
+        nonlocal script_reports
         family = script() if script else None
-        if family and not script_reported:
+        if family and script_reports < _SCRIPT_REPORT_LIMIT:
             wrong = _wrong_script_chars(family)
             offenders = _actionable(
                 _script_offenders(model.model_validate_json(data_json_str), wrong, family)
             )
             if offenders:
-                script_reported = True
+                script_reports += 1
                 want = "Traditional" if family == "hant" else "Simplified"
                 listed = "; ".join(f"{path}: {bad} -> {good}" for path, bad, good in offenders[:8])
                 more = f" (and {len(offenders) - 8} more)" if len(offenders) > 8 else ""

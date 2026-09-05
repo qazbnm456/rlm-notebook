@@ -11,6 +11,25 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The script check's one-rejection bound was measured too few, in both directions, and is now
+  three.** A live run rejected NINE characters with their fixes — `权`->`權` five times, `时`->`時`,
+  `间`->`間`, `识`->`識`, `恶`->`惡` — the model submitted anyway, and all nine shipped in the
+  stored episode. The single look bought nothing on the one run where the check finally fired.
+
+  **The other direction is the worse half and was not noticed when the bound was chosen**: a
+  COMPLIANT model that fixes its prose and re-validates was told `success` on its second call
+  whether or not it had fixed anything, because the bound had already been spent. The design was
+  lying to the model that deserved a real answer.
+
+  Three gives fix, verify, and one more fix. The worst case is three planner turns against
+  `max_iterations=25`, so the original reason for a bound — a check the model cannot satisfy must
+  never spend the whole budget — still holds.
+
+  The same run is the first time every piece of this session's work ran together and could be seen
+  doing it: `read_skill` called FOUR times (zero across the previous eight runs), real token usage
+  reported (so the cache bypass took effect), five tool calls recorded, turn marks numbered from
+  one, the strip filled, and the jump-to-turn button on a failed segment.
+
 - **A regression this batch introduced: the Simplified direction lost its gate entirely.**
   Refactoring `_wrong_script_chars` from a small forced set to an exempt set dropped the `continue`
   after `src.encode(codec)`, making the codec DEAD CODE — every path fell through to the
