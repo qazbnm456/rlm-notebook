@@ -81,6 +81,32 @@ questions with verifiable citations, and get a distilled research artifact out.
   — so averaging a rate across the upgrade reads a component added afterwards as 100% and everything
   older as 0%, which is corpus composition rather than a property of this code.
 
+- **Rejected: concurrent source ingestion. It crashes, and the crash is documented in a direct
+  dependency's own metadata (invariant 3).** A peer session implemented it in this working tree
+  unprompted — `ingest_new` planning serially and fetching through a `ThreadPoolExecutor` — with a
+  measured 7.55s to 2.85s on five HTML sources. The objection raised here was that the PDF path,
+  the one claimed to scale the saving, had not been measured. Measured: four PDFs serial 0.41s
+  `rc=0`; concurrent `rc=134`, SIGABRT (a first attempt gave `rc=139`, SIGSEGV). Cause, verified
+  locally at `pypdfium2-5.12.1.dist-info/METADATA:1066`: *"PDFium is inherently not thread-safe."*
+
+  **The upside was near zero exactly where the risk was.** Four ordinary PDFs parse in 0.41s;
+  `api.py`'s "can take minutes" describes OCR on SCANNED pages, one branch of PDF ingestion, and it
+  had been read as characterising the whole. The 2.94% saving was measured on HTML, where it is real
+  and small.
+
+  **The green suite proved nothing**, and that generalises past this patch: `tests/test_ingest.py`'s
+  multi-value cases all take local text files through `parse_text`, so nothing in 614 passing tests
+  drove two PDFs at once. A suite that is green on the path you did not change is not evidence about
+  the path you did.
+
+  Also recorded, from the same exchange: `traces/` is empty here because `cli.py` never reaches
+  `runner.start_run` — the only caller is `api.py:1193` — so the CLI cannot produce a trace at all,
+  and any future trace-reading measurement has to go through the API path. That sharpens an earlier
+  entry which said only that this checkout had no corpus.
+
+  A sound version is not ten lines: the waiting is the network fetch and the crashing is the PDF
+  parse, and `ingest_one` fuses them, so separating them is a refactor of the ingestion dispatch.
+
 - **A fourth review round over the eight unreviewed commits: one shipped regression, one false
   claim in three places, one more hollow test, three UI defects.** All verified locally before being
   acted on.
