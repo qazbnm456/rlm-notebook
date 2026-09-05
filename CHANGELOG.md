@@ -11,6 +11,56 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A regression this batch introduced: the Simplified direction lost its gate entirely.**
+  Refactoring `_wrong_script_chars` from a small forced set to an exempt set dropped the `continue`
+  after `src.encode(codec)`, making the codec DEAD CODE — every path fell through to the
+  assignment. For Traditional that is the documented intent, since `_BIG5_SHARED["hant"]` replaced
+  the codec. For Simplified `_BIG5_SHARED["hans"]` is EMPTY, so nothing gated it at all:
+
+  | | before | after the regression | now |
+  |---|---|---|---|
+  | hant | 3,782 | 3,857 | 3,857 |
+  | **hans** | **652** | **4,704** | **652** |
+
+  Measured consequence: a Simplified run over this project's own Japanese-bearing corpus flagged
+  `鎖 響 際 係 門 軍 優 換 東 報 書 動 運 業` plus curly quotes — so its single once-per-run report
+  would have been spent on quoted Japanese and could never reach real drift. Retained Simplified
+  forms went too: `瞭` in 一目瞭然, `徵` in 宫商角徵羽, `麼` in 幺麼小丑, all of which zhconv's own
+  zh-hans table emits as correct Simplified.
+
+  **No test saw it**, because the one covering that direction listed `简体字概览模块对点问题` —
+  characters that are already Simplified and therefore never SOURCES in the table, so it passed
+  against a build with no gate. It now uses characters that are sources, and a second test pins the
+  two counts, which is the cheapest witness that both branches still run.
+
+- **Acting on an independent review of the batch. Four more of its findings:**
+
+  - **"Never source text" was false.** The coordinate branch interpolates the offending `locator`
+    VERBATIM, and its own documented failure mode is a model writing the SECTION HEADING it was
+    citing into that field. The test that claimed to cover it was vacuous — its secret string
+    appeared only in the payload that VALIDATES, whose verdict is one fixed sentence. Corrected
+    rather than tightened: the model needs its real coordinate back to fix the citation, and a
+    trace already holds full source text in front of an API with no auth (invariants 25 and 29).
+    A new test records that it DOES reach the trace, so the claim and the behaviour cannot drift
+    apart again.
+  - **Six mutations survived the Big5 tests**, all of them MOVING a character between the two
+    halves — which the union pin cannot see, since it only catches one in neither. The membership
+    is pinned as the exact set now.
+  - **The chat cache bypass was unpinned.** `fresh=body.regenerate or body.fresh` is the entire
+    chat arm and mutating it away left the suite green. Pinned, along with `/title`'s exemption.
+  - **Stale numbers, each re-derived before correcting**: `.env.example` still documented and
+    offered `RN_MAX_TOKENS=16384`, so an operator uncommenting it would silently halve the cap;
+    invariant 66 carried the pre-enumeration arithmetic and listed `规 监 随` as let-through when
+    none of the three is Big5-encodable; invariant 70 said the replay's steps were "0.09s apart"
+    when 0.09s is the total SPAN (spacings are 0.010-0.023s); a code comment said the two `zh-tw`
+    keyings disagree on four characters when it is nine, which `CLAUDE.md` had already been
+    corrected on; and a test comment said 0.04/96% where the arithmetic gives 0.055/6%.
+
+  **Invariants 59 and 75 now argue opposite ways about the same cap**, and that is recorded rather
+  than resolved: 75's proximity reading was transposed to 16384, and 59 has since raised it to
+  32768 — the very cap the maintainer's own corpus found no gradient in. This project's own data at
+  32768 is two capped calls in 54, at ratios 1.0 and 0.275, with the band between intact.
+
 - **The replay transport now shows its progress through the stop it is dwelling on.** It waits for
   the time a turn really took divided by the speed, and with no bar that is indistinguishable from
   a frozen panel — the same "watched it and read it as a crash" complaint the run ticker's

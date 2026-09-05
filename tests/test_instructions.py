@@ -179,8 +179,37 @@ def test_the_wrong_script_table_never_flags_a_correct_traditional_character():
 
     wrong = _wrong_script_chars("hant")
     assert not [c for c in CORRECT_TRADITIONAL if c in wrong]
-    # The mirror table must not condemn ordinary Simplified either.
-    assert not [c for c in "简体字概览模块对点问题" if c in _wrong_script_chars("hans")]
+
+    # The mirror direction, with characters that are actually SOURCES in its table — the first
+    # version listed `简体字概览模块对点问题`, which are already Simplified and therefore never
+    # sources, so it passed against a build where the Simplified gate had been removed entirely.
+    hans = _wrong_script_chars("hans")
+    for char in "鎖響際係門軍優瞭徵麼":
+        assert char not in hans, (
+            f"{char} is Japanese shinjitai or a retained Simplified form and must not be flagged"
+        )
+
+
+def test_the_two_directions_gate_themselves_differently_and_both_gates_run():
+    """ENUMERATED where the codec's let-through was read (Traditional), the CODEC where it was not
+    (Simplified) — and the asymmetry is load-bearing rather than an accident of history.
+
+    Collapsing the two branches is what shipped: an `encode` call with no `continue` after it makes
+    the codec DEAD CODE, and since `_BIG5_SHARED["hans"]` is empty the Simplified direction then had
+    no gate at all — 652 flagged characters became 4,704, taking every Japanese shinjitai and every
+    retained Simplified form with it. A run in Simplified over this project's own Japanese-bearing
+    corpus would have spent its single once-per-run report on quoted Japanese.
+    """
+    from rlm_notebook.instructions import _BIG5_SHARED, _wrong_script_chars
+
+    assert _BIG5_SHARED["hans"] == frozenset(), (
+        "the Simplified direction has no enumeration; if one is added, the branch above changes"
+    )
+    hant, hans = _wrong_script_chars("hant"), _wrong_script_chars("hans")
+    # The COUNTS are the cheapest witness that both gates still run: a dead codec makes the second
+    # number the whole table.
+    assert len(hant) == 3857, f"the Traditional enumeration moved: {len(hant)}"
+    assert len(hans) == 652, f"the Simplified codec gate is not running: {len(hans)}"
 
 
 def test_the_suggestion_is_phrase_aware_not_a_character_lookup():
@@ -255,6 +284,19 @@ def test_the_big5_letthrough_is_fully_classified():
     assert shared <= encodable, f"SHARED names characters the gate already flags: {shared - encodable}"
     unread = encodable - shared - set(_wrong_script_chars_keys())
     assert not unread, f"unclassified Big5-encodable rewrites: {''.join(sorted(unread))}"
+
+    # The union pin above catches a character in NEITHER half — it cannot see one MOVED between
+    # them, and six such mutations survived an independent review (dropping `吁`, `咨`, `仆`,
+    # `跖 踊` from SHARED; adding `几`; adding the whole measured-additions list). So the membership
+    # itself is pinned, as the exact set that was read.
+    assert shared == frozenset(
+        "丑仆伙余凄准凶占厘台吁吃咨咸唇喂岩岳峰干床征托斗朴杰栖栗涂涌游灶痳痴皂秘"
+        "粽群肴膻苧范蒏蔂跖踊辟郁采里雇霉"
+    ), (
+        "the shared/flagged split moved. Every entry was read against a word; if this is a "
+        "deliberate change, name the word here and in the invariant"
+    )
+    assert len(shared) == 52
 
 
 def _wrong_script_chars_keys():
@@ -535,7 +577,9 @@ def test_the_validator_records_a_tool_call():
     script check could not say whether the validator had FIRED.
 
     The JSON is the whole artifact, so its LENGTH is recorded and its TEXT is not — invariant 52's
-    rule for the ticker and invariant 70's for the drawer.
+    rule for the ticker and invariant 70's for the drawer. The VERDICT is a different matter: see
+    `test_a_rejection_verdict_can_carry_the_models_own_coordinate`, which pins the honest version
+    of a claim this docstring used to overstate.
     """
     import json
     import tempfile
@@ -565,4 +609,44 @@ def test_the_validator_records_a_tool_call():
     assert all(c["duration_s"] is not None for c in calls), calls
     # The size, never the text.
     assert calls[1]["args"] == {"chars": len(good)}
+    # The artifact does not reach the trace through a PASSING validation — and asserting only that
+    # was the vacuous half of this test's first version: `secret` appeared solely in the payload
+    # that validates, whose verdict is one fixed sentence, so it could not have leaked either way.
     assert secret not in out.read_text(), "the artifact leaked into the trace"
+
+
+def test_a_rejection_verdict_can_carry_the_models_own_coordinate():
+    """The honest version of a claim this file used to overstate as "never source text".
+
+    The coordinate branch interpolates the offending `locator` VERBATIM, and its own documented
+    failure mode is a model writing the SECTION HEADING it was citing into that field — which is
+    text copied from a source. It is bounded by `_VERDICT_CHARS` and nothing else.
+
+    NOT a new hole and not tightened: the model needs its real coordinate back to fix the citation,
+    and a trace is already the one artifact here that can hold full ingested source text in front of
+    an API with no authentication (invariants 25 and 29). What was wrong was the sentence.
+    """
+    import json
+    import tempfile
+    from pathlib import Path as _Path
+
+    from rlm_harness.trace import TraceRecorder
+
+    from rlm_notebook.instructions import _VERDICT_CHARS, make_grounded_validator
+    from rlm_notebook.schema import Summary
+
+    out = _Path(tempfile.mkdtemp()) / "t.jsonl"
+    validate = make_grounded_validator(Summary, lambda: {"s1|whole"}, lambda: None)
+    composed = "第三節 蛇怪：核心地帶的最後一關"  # a heading, which is what the model actually does
+    payload = json.dumps(
+        {"text": "x", "citations": [{"source_id": "s1", "locator": composed, "quote": "q"}]}
+    )
+    with TraceRecorder(str(out), run_id="x", meta={}):
+        verdict = validate(payload)
+
+    assert composed in verdict, "the model must get its own coordinate back to fix it"
+    assert composed in out.read_text(), (
+        "this test exists to record that it DOES reach the trace; if that changes, the comments "
+        "in instructions.py and CLAUDE.md that now say so have to change with it"
+    )
+    assert _VERDICT_CHARS == 1200, "the only bound on what a verdict contributes"

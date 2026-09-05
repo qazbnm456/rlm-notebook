@@ -1148,7 +1148,7 @@ def test_the_timeline_segment_width_tracks_real_time():
 
     # GROW is the duration NORMALISED by the strip's total, and the normalisation is not cosmetic:
     # CSS distributes free space in proportion to the grow values and STOPS AT THEIR SUM, so four
-    # millisecond calls floored to 0.01 each summed to 0.04 and left 96% of the strip empty
+    # millisecond calls floored to 0.01 each summed to 0.06 and left 94% of the strip empty
     # (reported, with a screenshot). Dividing by the total makes the sum exactly 1 while leaving
     # every ratio between segments untouched.
     assert "weight(entry) / weightTotal" in flex.group(1), (

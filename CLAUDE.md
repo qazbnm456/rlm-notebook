@@ -1940,18 +1940,25 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     (`台`). Run against correct Traditional prose, its own shipped functions report `干` in `干預`,
     `里` in `里程碑` and `群` in `一群`, and `to_script` would PERSIST `幹預`, `裏程碑` and `一羣`
     into a title. Big5-encodability answers it without any hand list: over zhconv's own 3909
-    single-character rewrites (3909 of them) it flags 3782 and lets through 127. A real ambiguous
+    single-character rewrites (3909 of them) it flags 3857 and lets through 52. A real ambiguous
     core is in there (`后` 皇后/後, `台` 台灣/臺, `余` 余/餘, `几` 几/幾, `丑` 丑/醜, `干`, `里`,
     `群`) and is what makes the gate the right shape. **It is NOT "almost exactly the ambiguous
-    set", which an earlier wording claimed after reading the first forty**: the 127 also hold four
+    set", which an earlier wording claimed after reading the first forty**: the 131 also held four
     curly quotation marks (`zh-hant` maps them to corner brackets — not characters at all) and a
-    long tail nobody writes in modern Traditional (`优 听 党 网 极 确 范 触 规 监 随 异 价 种 复`).
+    long tail nobody writes in modern Traditional (`优 听 党 网 极 确 触 异 价 种 复 划 挂 洁`).
     That tail is RECALL LOST and it lands on this project's own subject matter: `基于`, `机器`,
     `后端`, `优化` and `价值` flag NOTHING, while `网络`, `标准`, `确认`, `范围` and `复杂` flag
-    only one of their two characters. **The hole is open and recorded rather than closed** —
-    a sibling project closed its own by reading all 135 once and splitting them into shared and
-    simplified with a test pinning the union. The sibling's four measured title offenders
-    (`览 门 块 统`) are all CAUGHT.
+    only one of their two characters. **That hole is CLOSED**, by the enumeration recorded above —
+    all 131 read once, 52 SHARED, 79 flagged, with a test pinning both the union and the membership.
+    The paragraph you are reading describes the state BEFORE it, because the reasoning for the gate
+    is what a later reader needs and the arithmetic without it is what makes the enumeration look
+    optional. The sibling's four measured title offenders (`览 门 块 统`) are all CAUGHT either way.
+
+    **The MIRROR direction is NOT enumerated and still uses the codec** (`_BIG5_SHARED["hans"]` is
+    empty, GBK decides, 652 flagged). Collapsing the two branches into one is what shipped once:
+    an `encode` call with no `continue` after it makes the codec dead code, and with no enumeration
+    to replace it the Simplified direction had no gate at all — 4,704 flagged, every Japanese
+    shinjitai and every retained Simplified form (`瞭` in 一目瞭然, `徵` in 宫商角徵羽) with them.
 
     **Three layers, none sufficient alone and all cheap**: this validator (before SUBMIT),
     `citations.strip_markers` at the display boundary (invariant 62), and `tts.spoken_script` before
@@ -2081,7 +2088,7 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     defaults to `cache=True`, so a run with an unchanged corpus, language and tier replays the
     previous one from cache: same turns, same reasoning text, same validator failures, zero calls,
     3.4s against 263.6s. `budget_summary` then reports a cap with no usage and the per-turn timing
-    is omitted because the steps are 0.09s apart — both notes true, and both easy to misread as the
+    is omitted because the steps span 0.09s in total — both notes true, and both easy to misread as the
     drawer being broken.
 
     **A REGENERATE bypasses that cache (`RunOptions.fresh`); a first generate does not.** A button
@@ -2097,6 +2104,14 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     correct because a worker handles exactly one run — process-global IS run-scoped — and because
     rebuilding the LMs instead would mean a second construction of `runtime.configure`'s
     `lm_kwargs` that would drift from upstream's.
+
+    **Four of the five run-taking handlers take it; `/title` is exempt and that is stated rather
+    than left as an absence.** `suggest_title` never overwrites an existing title, so it is
+    idempotent by construction and there is no "regenerate" of it to bypass anything for. `guide`
+    accepts it from the shared body although no client sends one today — the field is on
+    `RunOptions`, and a handler that silently ignored it would be invariant 46's "a rule with one
+    silent exception" in the API surface rather than in the UI. **The CLI has no way to bypass the
+    cache at all**, which is a real gap and not a decision.
 
     **The replay draws its PROGRESS through the stop it is dwelling on.** The transport waits for
     the time a turn really took divided by the speed, and without a bar that is indistinguishable
@@ -2457,7 +2472,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     **A proximity reading is offered as a NUMBER, and that is a reversal.** The kit maintainer's
     first measurement said the used/cap ratio is never an early warning because the distribution has
     no gradient; that corpus ran at twice the cap its model needed, and transposed to this project's
-    16384 it fills the band that was empty (about one run in six). So the ratio is shown, with the
+    16384 it filled the band that was empty (about one run in six). **That transposition was to the
+    cap of the time; invariant 59 has since raised it to 32768, which is the cap the maintainer's own
+    corpus ran at and found no gradient in** — so on this project's current setting the two
+    invariants argue opposite ways and neither has enough of its own data to settle it. Measured
+    here, at 32768: two capped calls in 54, at ratios 1.0 and 0.275, with the band between intact.
+    So the ratio is shown, with the
     honest status: a shape to expect, not a figure confirmed on this project's own runs. See
     `CHANGELOG.md` for the correction and what survived it — the MECHANISM (a truncated code cell is
     a `SyntaxError` the planner's next turn usually repairs, a truncated final answer ends the run)

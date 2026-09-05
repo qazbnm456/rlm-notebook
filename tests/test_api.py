@@ -3392,3 +3392,34 @@ def test_a_turns_first_call_keeps_no_gap_derived_duration():
     assert strip[0]["duration_s"] is None, "a turn's first gap is mostly model time"
     assert strip[1]["duration_s"] == 0.5, strip[1]
     assert strip[2]["duration_s"] == 0.002, "a self-measured call keeps its own number"
+
+
+def test_every_run_taking_endpoint_decides_its_own_cache_bypass():
+    """`fresh` reaches four of the five run-taking handlers, and the fifth is exempt for a reason.
+
+    The CHAT arm is `body.regenerate or body.fresh` and nothing tested it: an independent review
+    mutated it to `body.fresh` alone and the whole suite stayed green, while the client sends only
+    `{question, run_id, regenerate}` — so that one expression IS the chat half of the feature.
+
+    `/title` is deliberately absent: `suggest_title` never overwrites an existing title, so it is
+    idempotent by construction and a "regenerate" of it does not exist to bypass anything for.
+    """
+    import inspect
+
+    from rlm_notebook import api
+
+    ask = inspect.getsource(api.ask)
+    assert "fresh=body.regenerate or body.fresh" in ask, (
+        "a regenerate IS the ask path's fresh signal; the server already re-checks `regenerate` "
+        "inside the lock, so this is the one place the two meet"
+    )
+    for handler, expected in (
+        (api.generate_overview, "fresh=body.fresh"),
+        (api.guide, "fresh=body.fresh"),
+        (api.audio, "fresh=body.fresh"),
+    ):
+        assert expected in inspect.getsource(handler), f"{handler.__name__} lost its bypass"
+
+    # ...and the exemption is stated rather than left as an absence somebody re-adds.
+    title = inspect.getsource(api.suggest_title)
+    assert "fresh=" not in title, "titling is idempotent; a cache bypass there buys nothing"

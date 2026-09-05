@@ -220,12 +220,26 @@ def _wrong_script_chars(family: str) -> dict[str, str]:
     for src, dst in mapping.items():
         if len(src) != 1 or len(dst) != 1 or src == dst:
             continue
-        if src in shared:
-            continue
-        try:
-            src.encode(codec)
-        except (UnicodeEncodeError, UnicodeError):
-            pass  # not in the target's inventory at all — always the wrong script
+        if shared:
+            # ENUMERATED direction: the codec's let-through was read character by character and the
+            # ambiguous half named, so the codec has no vote left.
+            if src in shared:
+                continue
+        else:
+            # UNENUMERATED direction: the codec decides, exactly as it did for both before the
+            # Traditional half was enumerated. **The asymmetry is the point.** Collapsing the two
+            # branches — which a first version did by leaving the `encode` call with no `continue`
+            # after it — makes the codec DEAD CODE, and since `_BIG5_SHARED["hans"]` is empty the
+            # Simplified direction then had no gate at all: 652 flagged characters became 4,704,
+            # taking every Japanese shinjitai (`鎖 響 際 係 門 軍 優`) and every retained Simplified
+            # form (`瞭` in 一目瞭然, `徵` in 宫商角徵羽, `麼` in 幺麼小丑) with it. Found by an
+            # independent review; no test saw it, because the one that checks this direction lists
+            # only characters that are already Simplified and so are not sources in the table.
+            try:
+                src.encode(codec)
+                continue
+            except (UnicodeEncodeError, UnicodeError):
+                pass  # not in the target's inventory at all — always the wrong script
         out[src] = _regional(src, dst, family)
     return out
 
@@ -235,7 +249,7 @@ def _regional(src: str, dst: str, family: str) -> str:
 
     zhconv's `zh-hant` target answers "a Traditional form", not "the form Taiwan writes": it maps
     `为` to `爲` where Taiwan writes `為`, and does the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
-    `伪`/`偽` — 22 of the 3774 characters this gate flags. Telling a model to write `爲` is telling
+    `伪`/`偽` — 22 of the characters this gate flags. Telling a model to write `爲` is telling
     it to write a character no Taiwanese reader uses.
 
     **SINGLE-CHARACTER only, and that is not an optimisation.** `zh-tw` carries a VOCABULARY layer
@@ -247,8 +261,9 @@ def _regional(src: str, dst: str, family: str) -> str:
         return dst
     # Mapped from the SOURCE, not from `zh-hant`'s answer: `账` reaches `賬` under `zh-hant` and
     # `zh-tw` leaves that alone, while `账` itself maps straight to `帳`. Measured — the two agree
-    # on 29 of the 33 characters where anything differs, and `via src` is right on all four of the
-    # rest (`账`->`帳`, `钚`->`鈽`, `钫`->`鍅`, `锎`->`鉲`).
+    # on 24 of the 33 characters where anything differs, and `via src` is right on all NINE of the
+    # rest (`账`->`帳` plus the eight Taiwan element names `鈽 鍅 鉲 鎝 鉳 鑀 鋂 錼`). An earlier
+    # version of this comment said "four", which CLAUDE.md was corrected on and this was not.
     regional = _zh.convert(src, "zh-tw")
     return regional if len(regional) == 1 and regional != src else dst
 
@@ -415,8 +430,20 @@ def make_grounded_validator(
         # attached to every number in it.
         #
         # The JSON is the whole artifact, so its LENGTH goes in and its TEXT does not — invariant
-        # 52's rule for the ticker, and invariant 70's for the drawer. The verdict is the model's
-        # own rejection message: coordinates and character names, never source text.
+        # 52's rule for the ticker, and invariant 70's for the drawer.
+        #
+        # **The VERDICT is a different matter and the honest statement is narrower.** An earlier
+        # version of this comment said "coordinates and character names, never source text", which
+        # is false: the coordinate branch interpolates the offending `locator` VERBATIM, and its own
+        # documented failure mode is a model writing the SECTION HEADING it was citing into that
+        # field — text copied from a source. A failing SHAPE check also carries pydantic's
+        # `input_value=` repr, which is head-and-tail of the artifact (short inputs are truncated
+        # past recognition, long ones are not). Bounded by `_VERDICT_CHARS` and no more.
+        #
+        # Not tightened, because the model needs its real coordinate back to fix it, and a trace is
+        # already the one artifact here that can hold full ingested source text in front of an API
+        # with no authentication (invariants 25 and 29). This is inside that accepted posture; the
+        # sentence that claimed otherwise was the defect.
         record_tool_call(
             validate.__name__,
             args={"chars": len(data_json_str)},
