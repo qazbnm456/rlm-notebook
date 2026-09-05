@@ -369,11 +369,8 @@ Chinese is the case that matters. Write the variety you were asked for, througho
 Chinese (繁體字) means `概覽` and `模組`, never `概览` or `模块`; Simplified Chinese (简体字) means
 the reverse. A short field — a title, a follow-up question — follows this exactly as much as body
 prose does. A PROPER NOUN is the exception and outranks it: a name the sources spell in the other
-variety stays exactly as they spell it — EVERY character of it, or none. A HALF-converted name is
-the worst of the three outcomes available, worse than either whole one: written `霍爾木茲海峡`, a
-name the sources spell `霍尔木兹海峡` is neither what they wrote nor correct Traditional, so a
-reader can search for it in neither script — and being able to search for it is the entire reason
-the name is kept.\
+variety stays exactly as they spell it, because a reader who wants to look it up needs the string
+the sources used.\
 """
 
 #: Naming a language gets the language; it does not get the language's own IDIOM. A real run wrote

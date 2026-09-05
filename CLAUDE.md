@@ -807,33 +807,60 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       identifier rather than a converter; a full `zhconv` mapping then reported five, of which the
       published list was wrong on four. A `zhconv` diff counts characters that are correct
       Traditional in their own right (`干` in 干預/干擾, `台` in 一台, `群`, `里` in 里程碑), counts
-      proper nouns (`霍尔木兹海峡`, 12 hits, four occurrences of a Simplified place name copied from
-      a Simplified source), and counts Japanese entirely (391 hits — one notebook holds Japanese
-      sources, and shinjitai maps to Traditional). Excluding all three, two real notebooks carry
-      **`么 对 点 问 题` — five characters, five sites, ALL in podcast utterances**, with titles,
-      overviews, answers and follow-ups clean. `没 帮 们` appear zero times. **That is the inverse of
-      the sibling's case**, whose failure was in page TITLES, and it is why no validator was added:
-      every condition justifying one (short, navigational, repeated, demonstrably drifting) is
-      absent, and the one field that would qualify here does not drift.
+      and counts Japanese entirely (391 hits — one notebook holds Japanese sources, and shinjitai
+      maps to Traditional). Excluding those two, two real notebooks carry
+      **`尔 兹 峡 么 对 点 问 题` — eight characters, 19 sites, ALL in podcast fields**, with
+      titles, overviews, answers and follow-ups clean. `没 帮 们` appear zero times.
 
-      **Measured live, A/B on one notebook, and the drift half is NOT significant.** Same four
-      sources, same `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long`
-      tier — only the prompt differed, through the CLI path, which persists nothing (invariant 42)
-      so the stored episode was never overwritten. Drift went `4 / 5699 chars` to `1 / 4013`, i.e.
-      one per 1424 to one per 4013; but the null expectation for the shorter episode is 2.82 hits
-      and one was observed, a Poisson `P(X<=1) = 0.23`. **One run cannot establish this rule
-      works, and this line must not be read as though it did.** What the run DID establish is that
-      the rule now REACHES the model — see the proper-noun paragraph below, where behaviour
-      changed on exactly the collision the rule addresses. (The new episode also ran 27% shorter
-      per utterance, 71.2 to 52.1 characters. One sample; not attributed to anything.)
+      **A THIRD exclusion was applied and was itself wrong**: `霍尔木兹海峡` (12 of the 19) was
+      excluded as "a Simplified place name copied from a Simplified source", giving a published
+      figure of five characters and five sites. **Neither notebook's corpus contains a single
+      Chinese character.** `nb-d22c2a9a`'s sources say `the Strait of Hormuz` in English, 22 times,
+      with Japanese around it; `nb-6f2d49d3`'s hold no CJK at all. So no source spells that name in
+      any script, the model rendered it into Chinese out of its own priors, and Simplified is
+      simply what those priors produce — which makes it ORDINARY DRIFT and the largest single
+      block of it. The exclusion was never checked against the corpus, only against the plausible
+      story that a name in a foreign script must have come from somewhere.
+
+      **That is the inverse of the sibling's case**, whose failure was in page TITLES, and it is
+      why no validator was added: every condition justifying one (short, navigational, repeated,
+      demonstrably drifting) is absent, and the one field that would qualify here does not drift.
+
+      **Measured live, A/B on one notebook, and NOT significant.** Same four sources, same
+      `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long` tier, 258s — only
+      the prompt differed, through the CLI path, which persists nothing (invariant 42) so the
+      stored episode the baseline came from was never overwritten. Wrong-script characters went
+      `13 / 5699` to `7 / 4013`, one per 438 to one per 573; the null expectation for the shorter
+      episode is 9.2 and seven were observed, a Poisson `P(X<=7) = 0.31`. **One run cannot
+      establish this rule works, and this line must not be read as though it did.**
+
+      What the run DID establish is that the rule REACHES the model: the place name went from
+      `霍尔木兹海峡` (three of six characters in the wrong script, three occurrences) to
+      `霍爾木茲海峡` (ONE of six, six occurrences). Behaviour changed on exactly what the rule
+      asks for. It is still not right — `峡` should be `峽`, and that may simply be a character
+      this model does not write, which no wording reaches. (The new episode also ran 27% shorter
+      per utterance, 71.2 to 52.1 characters. One sample; not attributed.)
+
+      **A first reading of that run called the half-converted name a REGRESSION caused by the
+      rule**, on the premise the corpus paragraph above records as false — that the sources spelled
+      the name and the model had stopped copying them. Under the corrected premise the same
+      measurement reads the other way: two of three wrong characters were FIXED. The prompt sentence
+      added to forbid a partial conversion was reverted with it, having been written against a
+      collision that never occurred.
 
       **A PROPER NOUN outranks it, and the rule says so ONCE, covering both directions** — the two
-      collide whenever the sources spell a name in the other script, and nothing stated a precedence
-      until a live run made them collide: a Traditional podcast carried `霍尔木兹海峡` verbatim from
-      a Simplified source. The model chose the name over the script, which is right (converting it
-      costs the reader the string they would search for), but it chose without being told. The
-      superseded table carved the exception out of the Traditional rule only and left the Simplified
-      rule with the mirror-image exposure.
+      collide whenever the sources spell a name in the other script, and nothing stated a
+      precedence until the clause was added. The superseded table carved the exception out of the
+      Traditional rule only and left the Simplified rule with the mirror-image exposure.
+
+      **The incident recorded as motivating it did not happen.** The clause was added because a
+      Traditional podcast carried `霍尔木兹海峡` and that was read as the model keeping a Simplified
+      source's own spelling — choosing the name over the script, correctly, without being told. The
+      corpus check above kills it: those sources say `the Strait of Hormuz` in English and contain
+      no Chinese at all, so nothing was being kept and there was no collision. The precedence is
+      still worth stating — the sibling's Simplified-source case is real and this project cannot
+      rule it out — but it rests on that general argument now, NOT on an observation here, and the
+      one time it looked observed the evidence was a story nobody checked against the blob.
 
       **The carve-out did NOT hold the first time it was live, and the failure mode is a PARTIAL
       conversion — worse than either whole answer.** With the rule inert the name was copied
@@ -844,16 +871,8 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       route nobody had considered, because "keep the name" and "convert the name" were assumed to
       be the only two outcomes. Six consistent occurrences in one episode, so it is a settled
       spelling rather than a slip; still ONE name in ONE run on ONE model, and `峡`/`峽` may simply
-      be a character this model does not write.
-
-      **So the rule now names all THREE outcomes and says which is worst**, rather than trusting
-      "stays exactly as they spell it" to be read as "every character of it" — it plainly was not
-      read that way once, and the paragraph ruled out neither whole conversion nor a half one. The
-      example shows BOTH strings, because the hybrid is only visibly wrong beside what it is not.
-      **UNVERIFIED**: confirming it costs another live episode, and if the unconverted character is
-      one the model cannot write, no wording reaches it. That is the point at which the validator
-      this invariant declined would be back on the table — the condition it lacked was a measured
-      instance of a name being mangled, and there is now one.
+      be a character this model does not write. OPEN: whether "stays exactly as they spell it" has
+      to forbid a partial conversion in as many words — it plainly was not read that way once.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so

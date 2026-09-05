@@ -11,24 +11,35 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
-- **The proper-noun carve-out now forbids a PARTIAL conversion in as many words.** The live A/B
-  below found the model producing `霍爾木茲海峡` six times where the sources say `霍尔木兹海峡` —
-  two characters converted, one not — a string searchable in neither script. "Stays exactly as
-  they spell it" had been read as permitting that, and nothing in the paragraph ruled out either a
-  whole conversion or a half one: "keep the name" and "convert the name" were assumed to be the
-  only outcomes, so the worst of the three went unnamed.
+- **The Hormuz proper-noun story was false, and it had been used to justify two changes and to
+  discount twelve drift hits.** `霍尔木兹海峡` in a Traditional podcast was recorded as the model
+  faithfully keeping a Simplified source's own spelling. **Neither notebook's corpus contains a
+  single Chinese character.** `nb-d22c2a9a`'s sources say `the Strait of Hormuz` in English, 22
+  times, with Japanese prose around it; `nb-6f2d49d3`'s hold no CJK at all. The model rendered the
+  name into Chinese from its own priors, and Simplified is what those priors produce.
 
-  The rule now states all three and which is worst, and shows BOTH strings, because a hybrid is
-  only visibly wrong beside the two things it is not. Pinned by
-  `tests/test_instructions.py::test_a_proper_noun_outranks_the_script_rule_in_every_shipped_task`;
-  three mutations (removing the every-character clause, the half-converted clause, and the
-  example) each fail it.
+  Three things fall out, in the order they were wrong:
 
-  **UNVERIFIED, and stated as such rather than shipped as a fix.** Confirming it costs another
-  live episode. If `峡`/`峽` is simply a character `qwen36_35b_a3b` does not write, no wording
-  reaches it — which is the point where the validator invariant 39 declined comes back into
-  scope: the condition it lacked was a measured instance of a name being mangled, and there is now
-  exactly one.
+  | claim | as recorded | corrected |
+  |---|---|---|
+  | drift across both notebooks | `么 对 点 问 题`, 5 chars, 5 sites | `尔 兹 峡 么 对 点 问 题`, **8 chars, 19 sites** |
+  | the live A/B | 4 / 5699 -> 1 / 4013, `P<=1`=0.23 | **13 / 5699 -> 7 / 4013**, `P(X<=7)`=0.31 |
+  | the half-converted name | a REGRESSION the rule caused | an **improvement**: 3 of 6 wrong characters -> 1 of 6 |
+
+  **The exclusion was never checked against the corpus, only against a plausible story** — that a
+  name appearing in a foreign script must have been copied from somewhere. It was applied while
+  correcting a different bad exclusion in the same measurement, which is what made it feel
+  rigorous. Still not significant either way: one run, `P = 0.31`.
+
+  **`51d2dac` is reverted in full.** It added a sentence forbidding a PARTIAL proper-noun
+  conversion, with `霍尔木兹海峡` as "a name the sources spell" — a factually false statement about
+  this project's own data, shipping in all six prompts. The failure it described is not a
+  carve-out failure at all: the model rendered the name itself and left one character unconverted,
+  which is ordinary drift, and the script rule already says `throughout`. The clause may still be
+  right in general and there is no evidence for it, so it does not ship.
+
+  **The proper-noun precedence clause stays**, but on the sibling's measured Simplified-source
+  case and the general argument, NOT on an observation here — `CLAUDE.md` now says so.
 
 - **The script rule was measured live, and the run bought a REGRESSION rather than a
   confirmation.** A/B on one notebook (`nb-d22c2a9a`): same four sources, same
