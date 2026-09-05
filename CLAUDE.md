@@ -1828,7 +1828,17 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     measurement.
 
 66. **The pre-SUBMIT validator is `instructions.make_grounded_validator` for EVERY task — schema plus "no
-    `[[SRC:...]]` marker in the model's own prose".** The marker check was written for the podcast, whose
+    `[[SRC:...]]` marker in the model's own prose" — and SUBMIT belongs on a LATER REPL TURN than
+    the call that validated.**
+
+    "Only submit after it reports success" was read as an ORDERING WITHIN ONE CELL, and a real run
+    duly wrote `print(validate_podcastscript(json_str))` followed by `SUBMIT(final_output)`. That
+    validates nothing: the verdict is printed where the model cannot act on it, because the submit
+    beside it has already run. The run was told exactly which character was in the wrong script and
+    shipped it. **`_SCRIPT_REPORT_LIMIT` cannot rescue that** — the limit governs how many times the
+    validator will REJECT, and this model asked ONCE. The rule now names the anti-pattern with the
+    task's own tool name substituted in, and offers a guarded single cell as the alternative.
+ The marker check was written for the podcast, whose
     failure was loud (the voices read the markers aloud), but it was a guard on the SYMPTOM:
     `GenerateSummary` produced the same defect silently. Six tasks each holding their own validator is how
     one of them ended up with a check the other five lacked.

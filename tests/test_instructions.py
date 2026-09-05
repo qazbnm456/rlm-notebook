@@ -669,3 +669,31 @@ def test_a_rejection_verdict_can_carry_the_models_own_coordinate():
         "in instructions.py and CLAUDE.md that now say so have to change with it"
     )
     assert _VERDICT_CHARS == 1200, "the only bound on what a verdict contributes"
+
+
+def test_every_task_is_told_to_submit_on_a_LATER_turn_than_it_validates():
+    """"Only submit after it reports success" was read as an ORDERING within one cell, and a real
+    run duly wrote:
+
+        print(validate_podcastscript(json_str))
+        SUBMIT(final_output)
+
+    which validates nothing — the answer is printed where the model cannot act on it, because the
+    submit beside it has already run. That run was told exactly which character was in the wrong
+    script and shipped it. `_SCRIPT_REPORT_LIMIT` cannot help: the model asked ONCE.
+
+    Shared by all six tasks (invariant 13), so the rule lands everywhere at once.
+    """
+    from rlm_notebook.instructions import validate_before_submit_rule
+
+    rule = validate_before_submit_rule("validate_x")
+    assert "LATER REPL turn" in rule, rule
+    # It names the ANTI-PATTERN with the real tool name substituted in, so a model reading its own
+    # prompt sees the exact line it would otherwise write.
+    assert "print(validate_x(draft)); SUBMIT(draft)" in rule, rule
+    # ...and offers the branch as the alternative, since a model that wants one cell can still be
+    # correct.
+    assert "success arm" in rule, rule
+
+    for name, instructions in _shipped_tasks().items():
+        assert "LATER REPL turn" in instructions, f"{name} lost the ordering rule"

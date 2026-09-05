@@ -11,6 +11,35 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **"Only submit after it reports success" was read as an ordering within ONE CELL.** A run wrote:
+
+  ```python
+  print(validate_podcastscript(json_str))
+  SUBMIT(final_output)
+  ```
+
+  which validates nothing — the verdict is printed where the model cannot act on it, because the
+  submit beside it has already run. That run was told exactly which character was in the wrong
+  script (`utterances[23].text: 么 -> 麼`) and shipped it.
+
+  **`_SCRIPT_REPORT_LIMIT` cannot rescue this**, which is worth stating because raising it from one
+  to three was yesterday's fix for a neighbouring symptom: the limit governs how many times the
+  validator will REJECT, and this model asked ONCE. An earlier run that DID recover branched on the
+  result (`if 'success' in validation_result.lower(): SUBMIT(...)`), so the difference is entirely
+  whether the model acts on the answer.
+
+  `validate_before_submit_rule` now says the SUBMIT belongs on a LATER REPL turn, names the
+  anti-pattern with the task's own tool name substituted in, and offers a guarded single cell as
+  the alternative. Shared by all six tasks (invariant 13).
+
+- **The count-against-target rule works, visibly, and hugs the floor.** The run after it compared
+  its count to the target on EVERY turn — "I have 5 turns so far. Target is 60-90", "I have 30
+  turns so far and need to reach 60-90", "I have accumulated exactly 60 turns" — where before it
+  printed a count and compared it to nothing. It stopped at exactly 60, the band's floor, so the
+  rule reads as a minimum to clear rather than a range to land in. Inside target, and recorded
+  rather than tuned: one run is not a reason to move a number that eight runs put at the floor
+  already.
+
 - **A `long` episode came back at 43 turns against a 60-90 target, and the reason is a rule the
   accumulate-across-turns pattern needed and did not have.** That run hit an `IndexError` at step
   9, escalated to the sub-LM for 1m45s, spent two turns re-parsing the corpus, and submitted at 43
