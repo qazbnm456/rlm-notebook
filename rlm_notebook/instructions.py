@@ -1,7 +1,7 @@
 """Shared instruction fragments for every RLMTask that grounds its output in the corpus blob and
 cites it — `AnswerQuestion` (`task.py`), the four Notebook Guide tasks (`guide.py`) and
 `GeneratePodcastScript` (`audio.py`). Plain string constants/functions, not a class hierarchy: the
-citation-marker rules are IDENTICAL text every one of these tasks needs (CLAUDE.md invariant 4), and
+citation-marker rules are IDENTICAL text every one of these tasks needs (AGENTS.md invariant 4), and
 hand-duplicating that paragraph across SIX task classes (an independent audit found this docstring
 still saying five, from before the podcast joined them) is a drift hazard waiting to happen —
 a wording fix applied to one and forgotten in the
@@ -263,7 +263,7 @@ def _regional(src: str, dst: str, family: str) -> str:
     # `zh-tw` leaves that alone, while `账` itself maps straight to `帳`. Measured — the two agree
     # on 24 of the 33 characters where anything differs, and `via src` is right on all NINE of the
     # rest (`账`->`帳` plus the eight Taiwan element names `鈽 鍅 鉲 鎝 鉳 鑀 鋂 錼`). An earlier
-    # version of this comment said "four", which CLAUDE.md was corrected on and this was not.
+    # version of this comment said "four", which AGENTS.md was corrected on and this was not.
     regional = _zh.convert(src, "zh-tw")
     return regional if len(regional) == 1 and regional != src else dst
 
@@ -683,7 +683,7 @@ sentence as a sentence; the `citations` list is what carries the pointer.\
 """
 
 #: The carve-out every language instruction composes with. Kept SEPARATE from the language rules
-#: below so both of them share one copy (CLAUDE.md invariant 13) rather than each restating it.
+#: below so both of them share one copy (AGENTS.md invariant 13) rather than each restating it.
 #:
 #: Naming only `quote` would be insufficient, and the omission is not cosmetic: a model told to
 #: write everything in Chinese will equally localise a LOCATOR — `page:1` becomes `第1頁`, a YouTube

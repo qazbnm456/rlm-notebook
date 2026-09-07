@@ -10,7 +10,7 @@ loop in the pyodide sandbox, which is right when the model must explore a multi-
 produce verifiable citations, and absurd for five words of title: it would cost a sandbox
 boot plus several planner turns. This is one plain `dspy.Predict` over a short excerpt.
 
-It still runs inside the API's isolated subprocess, so CLAUDE.md invariant 21 is untouched —
+It still runs inside the API's isolated subprocess, so AGENTS.md invariant 21 is untouched —
 `worker.py` only ever calls `.arun(**kwargs)` on whatever class it is handed, so satisfying that
 one method is the entire contract, and `api.py` continues to import neither `dspy` nor
 `rlm_harness`. Nothing here is reachable from the model's own REPL either (invariants 1/3/14's

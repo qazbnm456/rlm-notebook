@@ -562,7 +562,7 @@ def test_a_non_latin_id_round_trips_through_save_and_load(tmp_path):
 
 def test_a_hashed_id_is_still_filesystem_safe(tmp_path):
     """The fallback must not reopen what the whitelist closed: no traversal, no separators, and a
-    bounded length (CLAUDE.md's notebook-id invariant)."""
+    bounded length (AGENTS.md's notebook-id invariant)."""
     for raw in ["../../etc/passwd", "。。/。。", "🐝" * 500, "\n\t"]:
         token = slug(raw)
         if not token:

@@ -17,7 +17,7 @@ SourceKind = Literal["text", "web", "pdf", "youtube"]
 class SourceBlock(BaseModel):
     """One citable unit of a source's text, tagged with the locator a citation must echo verbatim.
 
-    A `text`/`web` source has exactly one block, `locator="whole"` — see CLAUDE.md's Scope note:
+    A `text`/`web` source has exactly one block, `locator="whole"` — see AGENTS.md's Scope note:
     finer-grained (paragraph/char-offset) citation within a text/web source is a deferred follow-up.
     A `pdf` source has one block per page, `locator="page:<n>"` (1-indexed) — a PDF's own natural
     per-page granularity, which also gives OCR'd pages the same citable grain as text-layer ones.
@@ -28,7 +28,7 @@ class SourceBlock(BaseModel):
 
 
 class Source(BaseModel):
-    """One ingested source, already parsed into citable blocks (CLAUDE.md invariant 3 — parsing
+    """One ingested source, already parsed into citable blocks (AGENTS.md invariant 3 — parsing
     happens before this object exists; nothing here does any I/O)."""
 
     id: str
@@ -36,7 +36,7 @@ class Source(BaseModel):
     #: Human-readable origin for display (a file path or a URL) — never used as a locator.
     origin: str
     blocks: list[SourceBlock]
-    #: Deterministic prompt-injection heuristic flags from `injection_scan.py` (CLAUDE.md invariant
+    #: Deterministic prompt-injection heuristic flags from `injection_scan.py` (AGENTS.md invariant
     #: 6) — additive metadata, never a gate. Empty means "not flagged", not "verified clean".
     flags: list[str] = Field(default_factory=list)
     #: DISPLAY-ONLY metadata scraped from the page that was already fetched (a title, a description,
@@ -63,7 +63,7 @@ class Citation(BaseModel):
     actually saw in the corpus blob (see `task.py`'s instructions) — `citations.py` verifies this
     coordinate exists; it does not verify `quote` is genuinely verbatim from that block (the model is
     INSTRUCTED to copy it exactly — see `instructions.CITATION_RULES` — but nothing checks it; see
-    CLAUDE.md invariant 5)."""
+    AGENTS.md invariant 5)."""
 
     source_id: str
     locator: str
@@ -178,7 +178,7 @@ Speaker = Literal["host_a", "host_b"]
 
 class Utterance(BaseModel):
     """One line of dialogue in a `PodcastScript`, spoken by a fixed two-host cast (`host_a`/
-    `host_b` — see CLAUDE.md's Audio Overview invariant for why the cast is fixed rather than
+    `host_b` — see AGENTS.md's Audio Overview invariant for why the cast is fixed rather than
     freely-named). Citation-grounded like everything else this project generates: `citations`
     verifies the same way `Answer.citations` does."""
 
@@ -198,7 +198,7 @@ class PodcastScript(BaseModel):
 class VerifiedCitation(BaseModel):
     """A `Citation` after `citations.py` has checked it against the corpus (see `verify_citations`).
     `verified=False` means the coordinate did not resolve — the citation is surfaced as unverified,
-    never silently dropped (CLAUDE.md invariant 5)."""
+    never silently dropped (AGENTS.md invariant 5)."""
 
     citation: Citation
     verified: bool
@@ -223,7 +223,7 @@ class Note(BaseModel):
     """A user-curated note — written directly, or copied from a past `Answer`'s text (see the web
     UI's "Save as note" button, the web-UI blueprint's Notes addendum). Deliberately
     carries NO citations of its own: a note's text may have originated from a citation-grounded
-    `Answer`, but the note itself is not re-verified against `sources` (CLAUDE.md invariant 5's
+    `Answer`, but the note itself is not re-verified against `sources` (AGENTS.md invariant 5's
     coordinate-only guarantee doesn't extend to freeform notes) until/unless it's PROMOTED into a
     real `Source` (`notebook.promote_note`), at which point it's grounded and citable exactly like
     any other source, no differently."""

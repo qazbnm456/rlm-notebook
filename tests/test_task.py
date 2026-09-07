@@ -41,7 +41,7 @@ def _configure() -> None:
 
 
 def test_answer_question_tools_are_repl_safe():
-    """CLAUDE.md invariant: every tool this task exposes must have explicit named params (no
+    """AGENTS.md invariant: every tool this task exposes must have explicit named params (no
     *args/**kwargs — see rlm_harness.testing.assert_repl_safe's docstring for why)."""
     # An INSTANCE's tools — the ClassVar is empty now that the validator is built per run.
     _configure()
@@ -50,7 +50,7 @@ def test_answer_question_tools_are_repl_safe():
 
 
 def test_answer_question_never_exposes_a_network_capable_tool():
-    """CLAUDE.md invariant 1: no fetch/network tool is ever reachable from the chat task's REPL.
+    """AGENTS.md invariant 1: no fetch/network tool is ever reachable from the chat task's REPL.
     A regression guard, not a redundant check — the risk is someone later adding
     `make_fetch_tool(...)` to `tools=` "just to fetch one more page on request," which every other
     test here would keep passing right through."""
@@ -60,7 +60,7 @@ def test_answer_question_never_exposes_a_network_capable_tool():
         f"AnswerQuestion's tools contain a suspiciously network-shaped tool name: {names}"
     )
     assert names == {"validate_answer"}, (
-        f"AnswerQuestion's tools changed to {names} — if this is intentional, re-read CLAUDE.md "
+        f"AnswerQuestion's tools changed to {names} — if this is intentional, re-read AGENTS.md "
         f"invariant 1 before adding anything with network access."
     )
 

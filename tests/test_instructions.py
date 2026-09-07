@@ -666,7 +666,7 @@ def test_a_rejection_verdict_can_carry_the_models_own_coordinate():
     assert composed in verdict, "the model must get its own coordinate back to fix it"
     assert composed in out.read_text(), (
         "this test exists to record that it DOES reach the trace; if that changes, the comments "
-        "in instructions.py and CLAUDE.md that now say so have to change with it"
+        "in instructions.py and AGENTS.md that now say so have to change with it"
     )
     assert _VERDICT_CHARS == 1200, "the only bound on what a verdict contributes"
 

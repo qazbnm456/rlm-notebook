@@ -4,7 +4,7 @@
 This is rlm-harness's native mechanic, not a new indexing layer (see CHANGELOG.md's Unreleased entry):
 an RLM signature field is injected into the sandboxed REPL as a plain variable, and the model
 explores it with `.find()`/slicing rather than through embedding similarity search. `Corpus` only
-ever produces a string — see CLAUDE.md invariant 3, ingestion (which produces the `Source` objects
+ever produces a string — see AGENTS.md invariant 3, ingestion (which produces the `Source` objects
 this module assembles) happens entirely before any of this runs.
 """
 
@@ -16,7 +16,7 @@ from .schema import Source
 
 
 class CorpusTooLargeError(ValueError):
-    """Raised by `Corpus.blob()` when the assembled text exceeds `max_chars` (CLAUDE.md invariant 8)
+    """Raised by `Corpus.blob()` when the assembled text exceeds `max_chars` (AGENTS.md invariant 8)
     — a loud, ingestion-time failure rather than a silently slow/failing chat turn later."""
 
 

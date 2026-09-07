@@ -676,7 +676,7 @@ body.is-resizing .cols {
 }
 
 /* Where the model read this citation's source (Phase 3) — a heuristic lookup, never a
-   faithfulness proof (see CLAUDE.md invariant 5 and the citation-turn endpoint's own docstring).
+   faithfulness proof (see AGENTS.md invariant 5 and the citation-turn endpoint's own docstring).
    One shared slot per answer, not one per citation, so clicking a different citation replaces the
    previous detail rather than accumulating unboundedly. */
 .citation-list {
@@ -1152,7 +1152,7 @@ body.is-resizing .cols {
 /* The SECOND instance of the hidden-vs-display defect (see .modal-overlay below for the mechanism).
    This one shipped from Phase 3 and made the step log render permanently expanded with a dead
    `⌁ N steps` pill. It was missed when the first instance was fixed, and — worse — the commit
-   message and CLAUDE.md for that fix both cited "the ticker already toggles on re-click" as the
+   message and AGENTS.md for that fix both cited "the ticker already toggles on re-click" as the
    reason a citation detail should toggle too. It never toggled. An independent review caught both
    the miss and the false justification. */
 

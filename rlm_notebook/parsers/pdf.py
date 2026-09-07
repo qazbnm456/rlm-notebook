@@ -1,6 +1,6 @@
 """PDF ingestion: per-page text via `pypdfium2`, with hybrid OCR (`_ocr.py`) for scanned pages.
 
-CLAUDE.md invariant 7: a page whose text layer extracts to (near-)nothing is rendered to an image
+AGENTS.md invariant 7: a page whose text layer extracts to (near-)nothing is rendered to an image
 and dispatched to a locally-installed OCR backend (RapidOCR primary, Tesseract fallback — core
 `dependencies` in pyproject.toml, always installed by a plain `uv sync`, not an opt-in extra).
 `pypdfium2` (BSD-3-Clause/Apache-2.0, wraps Google's PDFium) replaces this project's former

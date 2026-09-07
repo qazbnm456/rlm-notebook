@@ -18,7 +18,7 @@ this module exists to avoid:
   is the honest "where did the time go" signal either way.
 
 Why a server-side decomposition rather than handing the raw trace to the browser: a trace can hold
-full ingested source text (CLAUDE.md invariant 29 already calls the trace endpoints a materially
+full ingested source text (AGENTS.md invariant 29 already calls the trace endpoints a materially
 different exposure than the rest of this no-auth API), and the per-field caps here are what keep a
 multi-megabyte REPL output from being shipped to a page that only ever renders a preview of it.
 """

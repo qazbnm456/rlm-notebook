@@ -1,6 +1,6 @@
 """Web page ingestion: fetch (host-side, one-shot) + extract main content with trafilatura.
 
-CLAUDE.md invariant 1: the fetch happens exactly ONCE, here, during ingestion — this module is
+AGENTS.md invariant 1: the fetch happens exactly ONCE, here, during ingestion — this module is
 never handed to the RLM as a `tools=` entry. Reuses `rlm_harness.tools.fetch`'s pure SSRF-guard
 functions (`is_safe_url`, `resolved_host_is_safe`), not `make_fetch_tool` itself — that factory
 builds a live RLM *tool*, which is exactly what invariant 1 says this call site must never become.

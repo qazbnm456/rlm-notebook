@@ -1,6 +1,6 @@
 """Source ingestion dispatch — shared by `cli.py` and `api.py` so neither depends on the other.
 
-CLAUDE.md invariant 3: this all runs host-side, before any `RLMTask` exists.
+AGENTS.md invariant 3: this all runs host-side, before any `RLMTask` exists.
 """
 
 from __future__ import annotations
@@ -27,7 +27,7 @@ def is_url(value: str) -> bool:
 
 
 def with_injection_flags(source: Source) -> Source:
-    """Deterministic prompt-injection heuristic flags (CLAUDE.md invariant 6) folded into
+    """Deterministic prompt-injection heuristic flags (AGENTS.md invariant 6) folded into
     `source.flags` — factored out of `ingest_new`'s own loop so every way a new source can enter a
     notebook (a batch of paths/URLs, an uploaded file, pasted text) applies the SAME scan, once."""
     flags = sorted({flag for block in source.blocks for flag in scan_source(block.text)})

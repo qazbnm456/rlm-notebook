@@ -163,7 +163,7 @@ def test_every_hidden_toggled_class_still_honours_the_hidden_attribute():
 
 
 def test_no_innerhtml_with_interpolated_content():
-    """CLAUDE.md invariant 29: every DOM node carrying model- or source-derived content is built
+    """AGENTS.md invariant 29: every DOM node carrying model- or source-derived content is built
     with createElement/textContent, never `innerHTML` with an interpolated string — a citation's
     `source_id`/`locator`/`quote` can echo attacker-supplied text from a prompt-injected source.
     Clearing a container is the one allowed use. `outerHTML`/`insertAdjacentHTML`/`document.write`
@@ -1475,7 +1475,7 @@ def test_regenerate_replaces_only_a_matching_last_turn():
     Read as TEXT rather than through `inspect.getsource(api.ask)`, because importing `api` needs
     the `api` extra: this file is source-tree assertions and every other test in it runs on a bare
     `uv sync`. Importing made this one FAIL rather than be absent without the extra, which is
-    sharper than the trap CLAUDE.md's Verify section records and misreports a missing dependency as
+    sharper than the trap AGENTS.md's Verify section records and misreports a missing dependency as
     a broken feature.
     """
     api_src = (Path(__file__).resolve().parent.parent / "rlm_notebook" / "api.py").read_text(

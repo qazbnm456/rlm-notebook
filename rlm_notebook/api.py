@@ -1,7 +1,7 @@
 """The HTTP API — an ADDITIONAL surface over the same notebooks `cli.py` drives, not a replacement
 for it. Every endpoint that runs an `RLMTask` does so in an isolated subprocess (`runner.py`)
 rather than in-process, so concurrent requests can't block each other and a long-running or stuck
-request can be reliably cancelled (`killpg` on the whole process group) — see CLAUDE.md's
+request can be reliably cancelled (`killpg` on the whole process group) — see AGENTS.md's
 execution-model invariant. `cli.py`'s synchronous in-process invocation is completely unaffected.
 
 Endpoints: `GET /notebooks` (list), `POST /notebooks/{id}/sources` (create/extend — URLs and/or
@@ -22,7 +22,7 @@ already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in
 (the web-UI blueprint's Phase 2 addendum has the full reasoning). A generated episode IS
 persisted — one file per
 notebook, served by `GET /notebooks/{id}/audio/file`. That reverses Phase 2's original
-no-audio-past-one-request decision, which cost the user their episode on every reload; see CLAUDE.md
+no-audio-past-one-request decision, which cost the user their episode on every reload; see AGENTS.md
 invariant 42. Retention stays a non-question because the file is REPLACED on regenerate.
 `/sources/upload` never accepts a local-path STRING (invariant 26 stays exactly as strict) — only
 opaque bytes the caller already had, plus a claimed filename used for kind detection and display.
@@ -32,13 +32,13 @@ the CLIENT picks the run id, not the server, so it can open the trace stream bef
 the request that will populate it. `_run_isolated` exclusively creates the trace file before
 spawning the subprocess (a hard uniqueness gate, mapped to a 409 on collision — see
 the web-UI blueprint's Phase 3 addendum P3.1 for why this is a real, not merely
-unlikely, concern once a client partly controls the id). See CLAUDE.md invariant 29 for why a
+unlikely, concern once a client partly controls the id). See AGENTS.md invariant 29 for why a
 reasoning-trace SSE endpoint was originally deferred as unbuildable, and what changed.
 
 This module also serves the web UI (`rlm_notebook/web/`, a zero-build static HTML/CSS/JS app) at
 `/`, mounted AFTER every API route below so the API always wins on a path collision.
 
-**This API has NO authentication or authorization of any kind** (CLAUDE.md invariant 25) — any
+**This API has NO authentication or authorization of any kind** (AGENTS.md invariant 25) — any
 caller can create/extend/query/ask/cancel any `notebook_id`. It is meant for local/trusted-network
 use only (the same posture ctx-distillery's studio takes); do not expose it to an untrusted network
 without adding auth first, which this slice does not attempt. The trace stream and citation-turn
@@ -53,7 +53,7 @@ which bounds how long that exposure lasts — it does not remove it.
 Every write to a notebook here goes through `notebook.mutate_notebook` (via `_mutate_or_http`),
 which re-reads the file under a per-notebook lock and applies only this request's delta. Persisting
 a snapshot read before a long-running step — a model run, an ingestion — silently destroyed
-whatever else was written meanwhile; see CLAUDE.md invariant 34.
+whatever else was written meanwhile; see AGENTS.md invariant 34.
 
 Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --extra api`).
 """
@@ -183,7 +183,7 @@ async def _lifespan(_app: FastAPI):
 app = FastAPI(title="rlm-notebook API", description=__doc__, lifespan=_lifespan)
 
 #: In-flight runs, keyed by notebook id — a SINGLE-PROCESS in-memory map, and ONE SLOT per
-#: notebook id. Two known, documented limitations (CLAUDE.md invariant 23), neither a silent bug:
+#: notebook id. Two known, documented limitations (AGENTS.md invariant 23), neither a silent bug:
 #: (1) running `uvicorn` with more than one worker process gives each its own copy of this dict,
 #: so `/cancel` only reaches whichever worker happens to hold the request; (2) two concurrent
 #: requests against the SAME notebook id share one slot — the second overwrites the first's entry,
@@ -234,7 +234,7 @@ def _tts_provider(config: NotebookConfig):
     """Mirrors `_config()`'s `SystemExit`-to-500 shape for the analogous `TTSError` case: an
     unknown/misconfigured `RN_TTS_PROVIDER` is a SERVER misconfiguration (the value comes from the
     environment, not the request body), resolved BEFORE `audio()` runs the expensive model call,
-    not after — the same ordering CLAUDE.md invariant 19 already requires of `cli._cmd_audio`, after
+    not after — the same ordering AGENTS.md invariant 19 already requires of `cli._cmd_audio`, after
     an earlier independent review found the reverse order wasted a real model call on a bad value."""
     try:
         return get_tts_provider(config.tts_provider)
@@ -597,7 +597,7 @@ def _notebook_response(notebook: Notebook) -> NotebookResponse:
     """Includes full turn history, not just a count — the web UI's Chat panel (blueprint §1) needs
     to render a re-opened notebook's past turns, not just ones asked during the current session.
     Every historical turn's citations are re-verified against the CURRENT corpus at read time, same
-    as a brand-new answer (CLAUDE.md invariant 11: history is never itself a trusted source of
+    as a brand-new answer (AGENTS.md invariant 11: history is never itself a trusted source of
     facts, and a citation is verified fresh every time regardless of what a past turn recorded).
     Also includes `notes` — every endpoint that returns a notebook gets them for free from this ONE
     conversion function, no per-endpoint change needed (blueprint's Notes addendum)."""
@@ -697,7 +697,7 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
     pre-filter (at worst a wasted re-fetch of something another request added meanwhile).
 
     **Only http(s) URLs are accepted here — NOT local file paths**, unlike `cli.py`'s `--source`
-    (CLAUDE.md invariant 26). `ingest.ingest_one` treats any non-URL string as a path on the
+    (AGENTS.md invariant 26). `ingest.ingest_one` treats any non-URL string as a path on the
     machine running this process and reads it with no allowlist or directory boundary — correct
     for a CLI whose operator already trusts their own machine, an arbitrary-file-read
     vulnerability for an unauthenticated network endpoint (found and reproduced by an independent
@@ -954,7 +954,7 @@ async def get_source(notebook_id: str, source_id: str) -> SourceDetailResponse:
 
     **Materially different exposure than every other endpoint here except the trace stream/
     citation-turn lookup, said explicitly rather than folded silently into "same as everything
-    else"** (CLAUDE.md invariant 25's no-auth posture already covers this in spirit — the model
+    else"** (AGENTS.md invariant 25's no-auth posture already covers this in spirit — the model
     itself already has the whole corpus — but the ENDPOINT SURFACE returning full source text is
     new). Reuses `corpus.Corpus.get`, the same lookup `citations.py` already performs on every
     `ask`/`guide` request, rather than a second hand-rolled scan."""

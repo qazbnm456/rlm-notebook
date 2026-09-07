@@ -1,10 +1,10 @@
 """Text-to-speech synthesis for the Audio Overview — host-side, provider-abstracted.
 
-CLAUDE.md's Audio Overview invariant: synthesis runs entirely host-side, on an already-generated,
+AGENTS.md's Audio Overview invariant: synthesis runs entirely host-side, on an already-generated,
 already schema-validated `PodcastScript` (`audio.py`) — never inside the RLM sandbox, and never a
 tool the model can call. The provider is selected by `RN_TTS_PROVIDER` (default `"edge-tts"`, a
 free service needing no API key) so the tool works with no paid credentials out of the box —
-mirroring the OCR default (CLAUDE.md invariant 7): a capability this project's core value
+mirroring the OCR default (AGENTS.md invariant 7): a capability this project's core value
 proposition depends on must not be pluggable-but-unusable by default.
 
 Two providers ship. `EdgeTTSProvider` is the default and concatenates raw MP3 streams;

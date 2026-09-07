@@ -54,7 +54,7 @@ def test_order_and_count_preserved():
 
 
 def test_does_not_check_quote_faithfulness():
-    """CLAUDE.md invariant 5: coordinate existence only. A wildly wrong quote at a real
+    """AGENTS.md invariant 5: coordinate existence only. A wildly wrong quote at a real
     coordinate still verifies — this module makes no claim about content faithfulness."""
     result = verify_citations(
         [Citation(source_id="s1", locator="page:1", quote="Oranges are purple dinosaurs.")],

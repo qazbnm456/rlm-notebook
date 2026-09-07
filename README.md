@@ -15,7 +15,7 @@ a Studio panel, a podcast player, and a live reasoning ticker — see "Web UI" b
 
 A notebook names itself, model-authored prose follows the READER's language rather than the
 documents', a settings page carries the presentation settings, and models can run on a Claude
-Pro/Max subscription instead of an API key. See `CLAUDE.md` for the hard invariants this project is
+Pro/Max subscription instead of an API key. See `AGENTS.md` for the hard invariants this project is
 built against — it is the authoritative record; this file is the tour.
 
 ## Install and run
@@ -40,7 +40,7 @@ export RN_SUB_MODEL=claude-agent-sdk/claude-fable-5   # or leave unset to inheri
 No `RN_API_KEY`/`RN_BASE_URL` is used for a role on that path, and mixing is fine (one role on the
 subscription, the other on a proxy). `ClaudeAgentLM` refuses to start when `ANTHROPIC_API_KEY` is
 set, since the Claude Code CLI silently prefers it over subscription OAuth and would bill API
-credit instead. See CLAUDE.md invariant 35.
+credit instead. See AGENTS.md invariant 35.
 
 ```bash
 # ask a one-off question grounded in one or more sources — nothing is saved
@@ -76,7 +76,7 @@ with no captions at all is a clear ingestion error, not a silent empty source. *
 Terms of Service prohibit automated access outside its own interfaces; fetching only captions is
 narrower/lower-risk than downloading media, but this project doesn't pretend the risk is zero —
 you accept it by using this feature, the same posture any `yt-dlp`-based tool's users already
-carry (CLAUDE.md invariant 33).
+carry (AGENTS.md invariant 33).
 
 ```bash
 # generate a whole-notebook artifact instead of asking a question
@@ -133,7 +133,7 @@ uv run uvicorn rlm_notebook.api:app
 ```
 
 ```bash
-# --source accepts URLs only here (not local paths — see CLAUDE.md invariant 26); use the CLI
+# --source accepts URLs only here (not local paths — see AGENTS.md invariant 26); use the CLI
 # above for a local file. -H is required — a POST body with no Content-Type: application/json
 # gets rejected with a 422, not silently accepted.
 curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application/json" \
@@ -164,12 +164,12 @@ curl -X POST localhost:8000/notebooks/mynb/sources -H "Content-Type: application
 curl -X POST localhost:8000/notebooks/mynb/sources/upload -F "file=@./paper.pdf"
 
 # A source's full text, every block — the web UI's source-text viewer, not just a citation's
-# short `quote`. A materially different exposure than most other endpoints here (CLAUDE.md
+# short `quote`. A materially different exposure than most other endpoints here (AGENTS.md
 # invariant 31).
 curl -X GET localhost:8000/notebooks/mynb/sources/s1
 
 # Notes: freeform, uncited text — write one directly, or save a Chat answer as one. Only grounded
-# once promoted into a real source (CLAUDE.md invariant 32).
+# once promoted into a real source (AGENTS.md invariant 32).
 curl -X POST localhost:8000/notebooks/mynb/notes -H "Content-Type: application/json" \
     -d '{"text": "a thought worth keeping around"}'
 curl -X DELETE localhost:8000/notebooks/mynb/notes/n1
@@ -190,8 +190,8 @@ local-path string — only bytes the caller already had — so it doesn't reopen
 restriction `sources` already enforces. `GET .../sources/{source_id}` returns a source's full
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
 materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
-citations of its own until it's promoted into a real source — see CLAUDE.md invariant 32. See
-`api.py`'s module docstring and CLAUDE.md invariants 20-43.
+citations of its own until it's promoted into a real source — see AGENTS.md invariant 32. See
+`api.py`'s module docstring and AGENTS.md invariants 20-43.
 
 Every write to a notebook — a source, a note, a chat turn — re-reads the notebook from disk under a
 per-notebook lock and applies just its own change, so a source you add while a question is still
@@ -217,7 +217,7 @@ own research loop of reading, noting, and deepening a notebook over successive t
 podcast plays in-page (and downloads) with a subtitle-style transcript: a timecode per line, click
 a line to seek to it, and the line being spoken is highlighted as it plays. A ⚙ settings page
 carries the output language and the two podcast voices (presentation settings only — no keys, no
-safety bounds). See `rlm_notebook/web/DESIGN.md` and CLAUDE.md invariants 29-45.
+safety bounds). See `rlm_notebook/web/DESIGN.md` and AGENTS.md invariants 29-45.
 
 ## What this is not (yet)
 
@@ -235,7 +235,7 @@ shell, not yet built). Those are follow-up work.
 (BSD-3-Clause/Apache-2.0) — an earlier version of this project used `pymupdf`/`pymupdf4llm`
 instead, which are dual-licensed AGPL-3.0-or-a-paid-Artifex-commercial-license; that dependency
 was replaced, not merely disclosed, once the conflict with this project's own MIT license (and its
-HTTP API, meant to run as a network service) was found — see CLAUDE.md invariant 7.
+HTTP API, meant to run as a network service) was found — see AGENTS.md invariant 7.
 
 The default TTS provider, `edge-tts` (`tts.py`), is LGPLv3. LGPL generally permits an unmodified
 dependency relationship from a permissively-licensed program without forcing that program under

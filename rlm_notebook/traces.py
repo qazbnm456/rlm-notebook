@@ -1,7 +1,7 @@
 """Retention for the reasoning-trace files `worker.py` writes (`traces/{run_id}.jsonl`).
 
 Until this slice there was no retention policy anywhere in this project — files accumulated
-forever, stated as a known gap in CLAUDE.md invariant 29 and in `api.citation_turn`'s docstring.
+forever, stated as a known gap in AGENTS.md invariant 29 and in `api.citation_turn`'s docstring.
 They are also the one artifact here that can contain FULL ingested source text (the model echoes
 spans of the corpus into its REPL output while reading it), so "keeps everything, forever, with no
 authentication in front of it" (invariant 25) is a worse default than it would be for, say, logs.

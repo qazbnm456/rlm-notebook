@@ -1,7 +1,7 @@
 """YouTube caption ingestion: fetch official/auto-generated captions via `yt-dlp` (no video/audio
-download — CLAUDE.md's captions-only MVP decision), then parse WebVTT into timestamped blocks.
+download — AGENTS.md's captions-only MVP decision), then parse WebVTT into timestamped blocks.
 
-CLAUDE.md invariant 1/3: this all runs host-side, during ingestion, never inside the RLM sandbox
+AGENTS.md invariant 1/3: this all runs host-side, during ingestion, never inside the RLM sandbox
 or reachable as a live tool — the same trust boundary `parsers/web.py` already establishes, just
 for a different source kind. See the web-UI blueprint's "Post-launch addendum 3" for
 the full design record, including the real ToS/legal caveat this feature accepts rather than
@@ -27,7 +27,7 @@ from .web import _opener
 _YOUTUBE_HOSTS = {"youtube.com", "www.youtube.com", "m.youtube.com", "youtu.be"}
 
 #: Citation-block granularity: coarser than a single caption cue, finer than "whole" — a
-#: deliberate MVP grain (CLAUDE.md's Scope note already applies this same "start coarse, refine
+#: deliberate MVP grain (AGENTS.md's Scope note already applies this same "start coarse, refine
 #: later if it turns out to matter" reasoning to text/web's own single `"whole"` locator).
 _CHUNK_SECONDS = 120.0
 
@@ -214,7 +214,7 @@ def _default_downloader(url: str) -> str:
 
 def parse_youtube(url: str, source_id: str, *, downloader=None) -> Source:
     """Ingest a YouTube video's captions (official, else auto-generated) — never the video/audio
-    itself (CLAUDE.md's captions-only MVP decision). `downloader` is an injection seam for tests,
+    itself (AGENTS.md's captions-only MVP decision). `downloader` is an injection seam for tests,
     mirroring `parse_web`'s `fetcher` parameter exactly: the default resolves and fetches a real
     caption track; a test-injected fake returns canned WebVTT text with no network access at all.
     """

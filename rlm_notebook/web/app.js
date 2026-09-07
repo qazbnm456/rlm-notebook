@@ -1215,7 +1215,7 @@ function initNotebookTitle() {
   });
   store.on("notebook:titled", ({ title, notebookId }) => {
     // textContent, never innerHTML — a title is model-authored text derived from source content
-    // a prompt-injected source could influence (CLAUDE.md invariants 6 and 29).
+    // a prompt-injected source could influence (AGENTS.md invariants 6 and 29).
     // The SAME fallback the picker row uses. They disagreed — the header said "Untitled notebook"
     // while the row showed the server's derived label for the same notebook, which reads as two
     // different notebooks.
@@ -1498,7 +1498,7 @@ function initSourcesPanel() {
 //
 // Built with createElement/textContent/setAttribute throughout, NEVER innerHTML or a raw HTML
 // string — `text` is the model's own answer prose and `citation.quote`/`source_id`/`locator` could
-// in principle echo attacker-supplied content from a prompt-injected source (CLAUDE.md invariant 6:
+// in principle echo attacker-supplied content from a prompt-injected source (AGENTS.md invariant 6:
 // a source's content is untrusted, and injection_scan.py's flags are advisory, not a filter). An
 // early version of this function built a `<span title="...">` via string interpolation, which a
 // `"` character inside `source_id`/`locator` could have broken out of; rewritten before this was

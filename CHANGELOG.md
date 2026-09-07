@@ -11,7 +11,29 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
-- **CLAUDE.md's own rule — "the incident that produced it lives in `CHANGELOG.md`" — had stopped
+- **The agent guide is `AGENTS.md` now, with `CLAUDE.md` as a one-line `@AGENTS.md` bridge.**
+  `AGENTS.md` is the cross-agent standard; Claude Code reads `CLAUDE.md` and not `AGENTS.md` (its own
+  documentation says so in as many words), so a project with only one of the two hands the other side
+  nothing. 144 references across 45 files were rewritten with it — test docstrings, `pyproject.toml`
+  comments, `.env.example`, `.gitignore`, `README.md`, `web/DESIGN.md` and the module docstrings that
+  cite invariants by number.
+
+  **The bridge is an `@` import and deliberately NOT a symlink**, which is what the usual advice
+  suggests. Committed as a symlink, git stores mode 120000, and a checkout with `core.symlinks=false`
+  — Windows without developer mode — writes a 9-byte TEXT file whose whole content is the target's
+  name. An agent reading that gets one word and no instructions, **worse than an absent file because
+  it looks present**. Measured rather than assumed: a sibling repo is committed exactly that way and
+  its `AGENTS.md` blob is 9 bytes reading `CLAUDE.md`.
+
+  And not the other way round either — only Claude Code expands `@`, so an `AGENTS.md` pointing at a
+  `CLAUDE.md` would hand every other agent that same one line.
+
+  **What this does NOT buy is a smaller instruction budget.** An `@` import loads at session start
+  like the file itself, so the ~53,000 tokens are still on every request. Progressive disclosure is a
+  separate change, and `/docs/` is gitignored here, so it cannot be the home for split-out rulebooks
+  without changing that first.
+
+- **AGENTS.md's own rule — "the incident that produced it lives in `CHANGELOG.md`" — had stopped
   being applied to two invariants.** The following entries recover what was moved: which draft was
   wrong, what the raw numbers were, which reading was corrected by which later one. The invariants
   keep the rule and the reasoning a later reader needs in order not to simplify it away; the
@@ -26,7 +48,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   section), and a check for material duplicated verbatim between the two files found 211 tokens in
   total. **A keyword scan of prose is a way to find candidates, not a way to count them.**
 
-- **Invariant 39's script drift — the measurement, corrected three times, moved out of CLAUDE.md.**
+- **Invariant 39's script drift — the measurement, corrected three times, moved out of AGENTS.md.**
   Each correction was published as settled before the next one killed it, which is the part worth
   keeping.
 
@@ -85,7 +107,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   whose failure was in page TITLES. Two of those conditions then moved: the drift is real and three
   times larger than published, and the correct output is demonstrably knowable by the model.
 
-- **Invariant 73's calibration figures and its two corrected paragraphs, moved out of CLAUDE.md.**
+- **Invariant 73's calibration figures and its two corrected paragraphs, moved out of AGENTS.md.**
 
   **`_MAX_SPANNING_FRACTION` transfers from rendered PDFs to real scans.** A real two-column scan
   (Physical Review Letters, 1958) measured 0.01-0.05 per page — the same band as the clean digital
@@ -104,10 +126,10 @@ questions with verifiable citations, and get a distilled research artifact out.
   **The whole-page column count's supporting number is about plausible bands, not observed ones**, and
   the hedge went missing twice. Measured over contiguous windows of the fixture's own geometry,
   7.8-11.1% of 3-to-8-region slices count more than two, peaking at seven-region windows. The commit
-  message carried the hedge; the docstring and CLAUDE.md dropped it. A first correction then reported
+  message carried the hedge; the docstring and AGENTS.md dropped it. A first correction then reported
   the sweep's ENDPOINTS (7.8 and 10.2) as its range.
 
-- **Invariant 66's script check — the measurements, moved out of CLAUDE.md.**
+- **Invariant 66's script check — the measurements, moved out of AGENTS.md.**
 
   **Live A/B, three episodes off one notebook, same models, same tier, same language:**
 
@@ -328,7 +350,7 @@ questions with verifiable citations, and get a distilled research artifact out.
     invariant 66 carried the pre-enumeration arithmetic and listed `规 监 随` as let-through when
     none of the three is Big5-encodable; invariant 70 said the replay's steps were "0.09s apart"
     when 0.09s is the total SPAN (spacings are 0.010-0.023s); a code comment said the two `zh-tw`
-    keyings disagree on four characters when it is nine, which `CLAUDE.md` had already been
+    keyings disagree on four characters when it is nine, which `AGENTS.md` had already been
     corrected on; and a test comment said 0.04/96% where the arithmetic gives 0.055/6%.
 
   **Invariants 59 and 75 now argue opposite ways about the same cap**, and that is recorded rather
@@ -625,7 +647,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 
   That reaches the one significant number this line of work produced. Six of the middle arm's seven
   flags are `峡`, which the check's own rejection message tells the model it may keep. On the
-  remainder alone the expectation is 1.15 and `P(X=0) = 0.32`. `CLAUDE.md` now carries the
+  remainder alone the expectation is 1.15 and `P(X=0) = 0.32`. `AGENTS.md` now carries the
   breakout beside the `0.0003`.
 
   **The check rejected correct Traditional with an instruction it could not follow.**
@@ -849,7 +871,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   — and `峽` alone on request.
 
   So the residual Simplified drift is a COMPLIANCE problem rather than a knowledge one: the model
-  holds the right answer and does not apply it across 4000 characters of dialogue. `CLAUDE.md`'s
+  holds the right answer and does not apply it across 4000 characters of dialogue. `AGENTS.md`'s
   sentence excusing it as a capability limit is removed.
 
   **This reopens the validator question with one of its conditions now met.** Invariant 39 declined
@@ -893,7 +915,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   right in general and there is no evidence for it, so it does not ship.
 
   **The proper-noun precedence clause stays**, but on the sibling's measured Simplified-source
-  case and the general argument, NOT on an observation here — `CLAUDE.md` now says so.
+  case and the general argument, NOT on an observation here — `AGENTS.md` now says so.
 
 - **The script rule was measured live, and the run bought a REGRESSION rather than a
   confirmation.** A/B on one notebook (`nb-d22c2a9a`): same four sources, same
@@ -962,7 +984,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   an unconditional constant and did ship correctly. Whether the script rule prevents Simplified
   drift remains UNMEASURED.
 
-- **The Simplified-character measurement was wrong on four of its five characters.** `CLAUDE.md`
+- **The Simplified-character measurement was wrong on four of its five characters.** `AGENTS.md`
   recorded "five genuine ones — `么 没 干 帮 们`". Re-run over the same two notebooks (675 string
   fields), excluding the three classes the batch had itself identified:
 
@@ -994,7 +1016,7 @@ questions with verifiable citations, and get a distilled research artifact out.
     full suite.
   - **The real-detector fixture cannot demonstrate the per-band defect and never could**: it
     carries ONE spanning region, so that page is a single band of 104 and both schemes agree on it
-    exactly. `_ocr.py`'s docstring and `CLAUDE.md` both reported it as a three-region band the
+    exactly. `_ocr.py`'s docstring and `AGENTS.md` both reported it as a three-region band the
     fixture holds. The 6-15% figure is sound and was reproduced (7.8% / 8.8% / 9.9% / 10.2% for
     contiguous windows of 3/4/5/8 regions) — it is a claim about PLAUSIBLE bands, and the hedge the
     commit message carried was dropped in both prose copies.
@@ -1586,7 +1608,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   **One rule had disappeared entirely.** `test_no_event_is_subscribed_twice_inside_one_init_function`
   (`tests/test_web_assets.py:209`) still runs, and the prohibition it enforces — one subscription per
   event per init, because four inits in `app.js` spell the same event names and a duplicate handler
-  reads as a race that isn't one — appeared nowhere in CLAUDE.md. Deleting that test would have
+  reads as a race that isn't one — appeared nowhere in AGENTS.md. Deleting that test would have
   contradicted nothing.
 
   **One statement had been inverted, which matters most.** Invariant 52 said the ticker's `detail`
@@ -1806,7 +1828,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 - **First slice: ingestion (text/web/PDF with local hybrid OCR) + citation-grounded chat, driven
   from a CLI.** No session persistence, no API/UI, no Notebook Guide, no Audio Overview yet — see
-  CLAUDE.md's Scope note. Everything below is what this slice actually contains, and the design
+  AGENTS.md's Scope note. Everything below is what this slice actually contains, and the design
   calls that shaped it.
 
   **All sources become one blob, not a vector index.** `corpus.py` concatenates every ingested
@@ -1909,7 +1931,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   data-duplication/context-dilution issue, not a correctness or security one, and is deferred.
 
   **`AnswerQuestion`'s sandbox pin is now a numbered invariant** (9), not just a `config.py`
-  comment — found while renumbering CLAUDE.md for this slice's additions: the pin was already
+  comment — found while renumbering AGENTS.md for this slice's additions: the pin was already
   enforced in code and tested, just never promoted to the Invariants list the way the sibling
   projects promote theirs.
 
@@ -2291,7 +2313,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   (`rlm_harness.sub_lm`), a real source of false negatives in the citation-turn search. The trace
   stream and citation-turn endpoints inherit invariant 25's no-auth posture as a materially
   different, sharper exposure than every other endpoint (they can surface full ingested source
-  text, not just metadata/prose) — stated explicitly in CLAUDE.md, not left implicit.
+  text, not just metadata/prose) — stated explicitly in AGENTS.md, not left implicit.
 
 - **Ninth slice: file upload + paste-text ingestion, wiring up the Sources panel's previously-inert
   "File" and "Paste text" tabs.** Prompted by a Gemini-Notebook feature-parity assessment that
@@ -2516,7 +2538,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   old ONNX classifier did. This project's own actual scanned-PDF case (a page with no text layer
   at all) is unaffected; a bad-character-ratio heuristic for the garbled case is a smaller, later,
   independently-mergeable follow-up if it ever turns out to matter — a disclosed tradeoff, not
-  silently assumed equivalent (CLAUDE.md invariant 7 has the full account).
+  silently assumed equivalent (AGENTS.md invariant 7 has the full account).
 
   **`tests/_pdf_fixtures.py`** (new): builds test PDFs with `reportlab` (BSD), a `dev`-only
   dependency — never a runtime dependency of the shipped package. Replaces this project's former
@@ -2554,7 +2576,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   caller-supplied DELTA. Its closure never sees the caller's snapshot, so "write back the object I
   built earlier" is not expressible. Every mutating path became: expensive work unlocked against a
   snapshot → `mutate_notebook` with the delta. Critical sections are now bounded by a JSON load
-  plus a JSON write. Full account in CLAUDE.md invariant 34.
+  plus a JSON write. Full account in AGENTS.md invariant 34.
 
   **`extend_with_sources` was DELETED, not kept alongside its replacement pair** (`ingest_sources_for`
   + `append_sources`). Ingesting and appending in one breath is precisely what forces a caller to
@@ -3737,7 +3759,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 - **A fact-check of the documentation against the code found a fix that had only been written
   down.** `apply_skills` gated the skills CATALOG on a manifest existing but appended the
   `read_skill` TOOL whenever the directory did — so an empty skills directory handed the model a
-  tool whose description points at a list that is not in its instructions, while CLAUDE.md said
+  tool whose description points at a list that is not in its instructions, while AGENTS.md said
   that was prevented. The code does it now and a test pins both directions.
 
   Five other doc claims did not survive the same pass and are corrected rather than quietly
@@ -4015,7 +4037,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   the same event, a test that says "the handler" has to say which.
 
 - **`line-length = 110` was never enforced.** It is a formatter setting, ruff's default rule set has
-  no `E501`, and the name scrub duly left a 157-character line that `check` passed. CLAUDE.md said
+  no `E501`, and the name scrub duly left a 157-character line that `check` passed. AGENTS.md said
   the command enforced it; it says what is true now. Twenty over-long lines predate this and
   rewrapping them plus enabling `E501` is a follow-up, not a silent bundled edit. *(Done later in
   this same section: the rule is selected via `extend-select` and all 19 offenders are rewrapped.)*

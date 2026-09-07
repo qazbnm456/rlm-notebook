@@ -1,9 +1,9 @@
 """`api.py`'s HTTP endpoints, driven through FastAPI's `TestClient`. `runner.start_run`/
 `runner.wait_result` are monkeypatched to a fake in every test — this suite never spawns a real
 subprocess or needs model credentials; `test_runner.py` covers the real subprocess mechanics, and
-this project's "LIVE run" caveat (CLAUDE.md's Verify section) applies here too.
+this project's "LIVE run" caveat (AGENTS.md's Verify section) applies here too.
 
-The API only accepts http(s) URLs as sources (CLAUDE.md invariant 26 — local file paths were an
+The API only accepts http(s) URLs as sources (AGENTS.md invariant 26 — local file paths were an
 unauthenticated arbitrary-file-read vector, found and fixed after an independent review), so every
 test that needs a notebook with sources uses a fake `parse_web` (`_fake_web_ingestion` below)
 rather than a real network call.
@@ -39,7 +39,7 @@ _FAIL_URL = "https://example.com/fails-to-fetch"
 
 def test_guide_task_registries_stay_in_sync_between_cli_and_api():
     """`cli._GUIDE_TASKS` and `api._GUIDE_TASKS` are two independent dicts (api.py must not import
-    cli.py — see CLAUDE.md invariant 20), kept manually in sync. Found by an independent review:
+    cli.py — see AGENTS.md invariant 20), kept manually in sync. Found by an independent review:
     the sibling project's `_SPEAKER_LABELS` drift tripwire (added the previous slice, after an
     earlier review found the SAME class of gap) had no counterpart here yet."""
     assert set(cli._GUIDE_TASKS) == set(api._GUIDE_TASKS)
@@ -385,7 +385,7 @@ def test_get_notebook_returns_sources_and_turns(client):
 def test_get_notebook_includes_full_turn_history_with_freshly_verified_citations(client, monkeypatch):
     """The web UI's Chat panel needs a re-opened notebook's past turns to render immediately, not
     just a count — added when building the Phase 1 web UI. Citations are re-verified against the
-    CURRENT corpus at read time, same discipline as a brand-new answer (CLAUDE.md invariant 11)."""
+    CURRENT corpus at read time, same discipline as a brand-new answer (AGENTS.md invariant 11)."""
     _live_env(monkeypatch)
     _add_a_source(client)
     _mock_runner(
@@ -662,7 +662,7 @@ class _FakeTTSProvider:
     layer up since `api.py` only ever calls `provider.synthesize(...)`, never `edge-tts` directly."""
     # A `TTSProvider` now also declares its output FORMAT and its own language->voice defaults, so a
     # local model emitting WAV isn't forced through an MP3 encoder and one provider's voice names
-    # can't leak into another's request (CLAUDE.md invariant 43).
+    # can't leak into another's request (AGENTS.md invariant 43).
     suffix = ".mp3"
     media_type = "audio/mpeg"
 
@@ -881,7 +881,7 @@ def test_upload_reports_a_clean_500_when_the_size_cap_env_var_is_malformed(clien
 def test_audio_reports_a_clean_500_when_tts_provider_misconfigured_before_running_the_model(
     client, monkeypatch
 ):
-    """The TTS provider must be resolved BEFORE the expensive model call, not after — CLAUDE.md
+    """The TTS provider must be resolved BEFORE the expensive model call, not after — AGENTS.md
     invariant 19's ordering, extended to the API. Asserts BOTH the status code and that the
     subprocess was never started, so a bad RN_TTS_PROVIDER never wastes a real model call."""
     _live_env(monkeypatch)
@@ -2149,7 +2149,7 @@ def test_a_finishing_run_never_clears_a_LATER_runs_active_entry(client, monkeypa
 
 
 def test_deleting_a_source_never_renumbers_the_survivors(client):
-    """CLAUDE.md invariant 12: an existing source's id is never reassigned. This is the property
+    """AGENTS.md invariant 12: an existing source's id is never reassigned. This is the property
     that makes removal safe to offer at all — a citation in a saved turn either still resolves to
     the text it was written against, or fails verification loudly."""
     for url in ("https://example.com/a", "https://example.com/b", "https://example.com/c"):

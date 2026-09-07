@@ -18,7 +18,7 @@ from pathlib import Path
 
 from .atomic import atomic_write_text
 
-#: The one sandbox `AnswerQuestion` ever runs in (see CLAUDE.md invariant 9 — `from_env` below
+#: The one sandbox `AnswerQuestion` ever runs in (see AGENTS.md invariant 9 — `from_env` below
 #: refuses any other `RN_INTERPRETER` rather than silently overriding it).
 PINNED_INTERPRETER = "pyodide"
 
@@ -29,7 +29,7 @@ PINNED_INTERPRETER = "pyodide"
 #: shipped this pattern first — deliberately not a second spelling of the same idea.
 SUBSCRIPTION_PREFIX = "claude-agent-sdk/"
 
-#: Default cap on the assembled corpus blob (CLAUDE.md invariant 8) — a `chars`, not `tokens`,
+#: Default cap on the assembled corpus blob (AGENTS.md invariant 8) — a `chars`, not `tokens`,
 #: budget, matching rlm-harness's own `max_output_chars` convention. This is a memory-safety cap on the
 #: pyodide/deno sandbox, not a tuning knob; raise it only once real usage shows headroom.
 _DEFAULT_MAX_CORPUS_CHARS = 8_000_000
@@ -188,17 +188,17 @@ class NotebookConfig:
     max_output_chars: int = 40_000
     adapter: str = "json"
 
-    #: rlm-notebook-specific: the size cap on the assembled corpus blob (CLAUDE.md invariant 8).
+    #: rlm-notebook-specific: the size cap on the assembled corpus blob (AGENTS.md invariant 8).
     max_corpus_chars: int = _DEFAULT_MAX_CORPUS_CHARS
 
     #: Which OCR backend `parsers/pdf.py` dispatches scanned/image pages to. "local" (default) uses
     #: `parsers/_ocr.py`'s hybrid OCR (RapidOCR/Tesseract — core dependencies, always installed).
-    #: "vision_llm" is a deferred follow-up (CLAUDE.md invariant 7) — accepted here so config
+    #: "vision_llm" is a deferred follow-up (AGENTS.md invariant 7) — accepted here so config
     #: validation is ready for it, but `parsers/pdf.py` does not yet implement that branch.
     ocr_provider: str = "local"
 
     #: Which TTS backend `tts.py` dispatches to. Default is a free, no-API-key provider so
-    #: `rlm-notebook audio` works with no paid credentials — see CLAUDE.md's Audio Overview
+    #: `rlm-notebook audio` works with no paid credentials — see AGENTS.md's Audio Overview
     #: invariant (mirrors the OCR default's reasoning, invariant 7).
     tts_provider: str = "edge-tts"
     tts_voice_host_a: str = _DEFAULT_TTS_VOICE_HOST_A
@@ -233,7 +233,7 @@ class NotebookConfig:
         if interpreter != PINNED_INTERPRETER:
             raise SystemExit(
                 f"RN_INTERPRETER={interpreter!r} is refused — rlm-notebook only ever runs its chat "
-                f"task in the {PINNED_INTERPRETER!r} sandbox (CLAUDE.md invariant 9). Refusing "
+                f"task in the {PINNED_INTERPRETER!r} sandbox (AGENTS.md invariant 9). Refusing "
                 f"rather than silently ignoring what you configured."
             )
         return cls(
@@ -366,7 +366,7 @@ def output_language() -> str | None:
     and the third is a CACHED GUESS — `Notebook.output_language` exists only so a resolution isn't
     paid for per artifact. Putting the file below the cache would make a language chosen in the
     settings page inert for every notebook that has ever generated anything, i.e. exactly the
-    notebooks a user is looking at when they open settings. See CLAUDE.md invariant 39's ladder."""
+    notebooks a user is looking at when they open settings. See AGENTS.md invariant 39's ladder."""
     return clean_language(_env_wins("RN_OUTPUT_LANGUAGE") or read_settings()[0].get("output_language"))
 
 
@@ -425,7 +425,7 @@ def tts_voice_map(config: NotebookConfig, language: str | None, provider=None) -
 #
 # Presentation settings only: what language the model writes in, and which voice reads it. Retention,
 # the upload cap and every model/credential variable stay OPERATOR-ONLY and are not readable or
-# writable here — see CLAUDE.md's settings invariant. "Non-secret" was the wrong filter: lowering
+# writable here — see AGENTS.md's settings invariant. "Non-secret" was the wrong filter: lowering
 # `RN_TRACE_RETENTION_DAYS` DELETES trace files that can hold ingested source text, and raising
 # `RN_MAX_UPLOAD_BYTES` is a straight DoS lever. Moving a safety bound onto an unauthenticated page
 # (invariant 25) is the same mistake as moving a key there, just quieter.

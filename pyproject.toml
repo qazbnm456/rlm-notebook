@@ -43,7 +43,7 @@ dependencies = [
     # JSON table. The module import is cheap; its 1MB+ character table is what loads lazily, on
     # the first `getdict` — i.e. only for a run whose output language names a Chinese script.
     "zhconv>=1.4",
-    # Ingestion (host-side only — see CLAUDE.md invariant 3): web extraction and PDF-to-text.
+    # Ingestion (host-side only — see AGENTS.md invariant 3): web extraction and PDF-to-text.
     "trafilatura>=1.12",
     # PDF text extraction + page rasterization (for OCR dispatch — parsers/_ocr.py). Wraps Google's
     # PDFium (BSD-3-Clause/Apache-2.0, verified down to every bundled native dependency) — NOT
@@ -51,7 +51,7 @@ dependencies = [
     # or a paid Artifex commercial license (`pymupdf-layout`, a pymupdf4llm transitive dependency,
     # carried a SECOND, even stricter Artifex license — Polyform Noncommercial). An MIT-licensed
     # project shipping an HTTP API meant to run as a network service (invariant 25) cannot carry an
-    # AGPL dependency undisclosed — see CLAUDE.md invariant 7 for the full account of why this was
+    # AGPL dependency undisclosed — see AGENTS.md invariant 7 for the full account of why this was
     # replaced, not merely disclosed.
     "pypdfium2>=4",
     # pypdfium2 declares NO runtime dependencies of its own — `.render(...).to_pil()` needs this
@@ -59,7 +59,7 @@ dependencies = [
     # already caught once for python-multipart, below).
     "Pillow>=10",
     # Local OCR backends `parsers/_ocr.py` dispatches scanned/image PDF pages to (RapidOCR primary,
-    # Tesseract fallback). CLAUDE.md invariant 7: this ships INSTALLED BY DEFAULT, not as an opt-in
+    # Tesseract fallback). AGENTS.md invariant 7: this ships INSTALLED BY DEFAULT, not as an opt-in
     # extra — a sibling open-source project (lfnovo/open-notebook, issue #819) shipped OCR as
     # pluggable-but-not-installed-by-default and image sources silently failed to parse in its
     # Docker image. RapidOCR (ONNX, <20MB models, CJK-strong) is primary; Tesseract is the fallback.
@@ -95,7 +95,7 @@ api = [
 
 # Run the planner and/or sub-LM on a Claude Pro/Max SUBSCRIPTION instead of an API key
 # (`RN_MAIN_MODEL`/`RN_SUB_MODEL` = `claude-agent-sdk/<id>`), via rlm-harness's `ClaudeAgentLM`,
-# injected by `config.setup` (CLAUDE.md invariant 35). Installs the SDK that adapter needs; it ALSO
+# injected by `config.setup` (AGENTS.md invariant 35). Installs the SDK that adapter needs; it ALSO
 # needs the Claude Code CLI installed and logged in — a runtime prerequisite pip cannot express.
 subscription = ["claude-agent-sdk>=0.1.60"]
 
@@ -104,7 +104,7 @@ subscription = ["claude-agent-sdk>=0.1.60"]
 # dependency: it pulls ~109 packages including torch and transformers (measured, ~1GB installed),
 # and model weights download on first use — invariant 15's "works out of the box" rests on the
 # DEFAULT provider needing neither a key nor a download. MIT for BOTH code and weights, and every
-# claim below was measured on Apple Silicon before it was added; see CLAUDE.md invariant 43.
+# claim below was measured on Apple Silicon before it was added; see AGENTS.md invariant 43.
 #
 # The two extra pins are not preferences, they are what makes it install and import at all:
 #   * numba>=0.61 — without it the resolver backtracks to numba 0.53.1 (via librosa's numba
@@ -137,7 +137,7 @@ dev = [
     # Test-only PDF fixture construction (tests/test_parsers_pdf.py, test_ingest.py, test_api.py) —
     # BSD-licensed, never a runtime dependency of the shipped package. Replaces the fitz (pymupdf)
     # fixture-building this project used to do, which relied on pymupdf being present as a
-    # (now-removed) AGPL runtime dependency — see CLAUDE.md invariant 7.
+    # (now-removed) AGPL runtime dependency — see AGENTS.md invariant 7.
     "reportlab>=4",
 ]
 # A dev-group MIRROR of the `subscription` extra above. It exists because an EXTRA is not synced by

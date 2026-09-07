@@ -12,7 +12,7 @@ podcast-style Audio Overview out — optionally as a multi-turn conversation.
 
 Needs model credentials (`RN_*`, see `.env.example`) and a sandbox (`brew install deno`). Without
 `--notebook`, every invocation ingests its `--source` list from scratch and runs exactly once —
-nothing is persisted (the sibling projects' "offline unless you ask" shape). See CLAUDE.md's Scope
+nothing is persisted (the sibling projects' "offline unless you ask" shape). See AGENTS.md's Scope
 note for what is not built yet.
 """
 
@@ -160,7 +160,7 @@ def _prepare(args) -> tuple[Notebook, Corpus] | None:
         append_sources(notebook, ingested)
 
     # Every source currently in the notebook, not just ones just added — a flag stays visible on
-    # every subsequent turn, not only the turn that ingested the flagged source (CLAUDE.md's
+    # every subsequent turn, not only the turn that ingested the flagged source (AGENTS.md's
     # injection-flag invariant: additive metadata, surfaced for as long as it's part of the active
     # context, never a one-time notice).
     flagged = [s for s in notebook.sources if s.flags]

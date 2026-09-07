@@ -1,6 +1,6 @@
 """Subprocess-per-run task execution, for `api.py`'s concurrent request handling.
 
-CLAUDE.md's execution-model decision: each run is its own OS process (`start_new_session=True`),
+AGENTS.md's execution-model decision: each run is its own OS process (`start_new_session=True`),
 not a pre-warmed worker pool — trading a bit of per-run cold-start latency for a genuinely
 reliable cancellation story (`killpg` on the whole process group, so a stuck Deno grandchild dies
 with its parent rather than being orphaned). `cli.py`'s in-process, synchronous invocation is

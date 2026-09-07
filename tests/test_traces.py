@@ -92,7 +92,7 @@ def test_count_sweep_removes_oldest_first_down_to_the_cap(tmp_path):
 def test_protected_run_ids_are_never_removed(tmp_path):
     """An in-flight run's trace must survive any policy: deleting it breaks its live SSE stream AND
     frees a run id `_run_isolated`'s exclusive-create gate is still relying on being taken, which
-    would let a second request append into the same file (CLAUDE.md invariant 29)."""
+    would let a second request append into the same file (AGENTS.md invariant 29)."""
     live = _trace(tmp_path, "nb-live", age_seconds=10_000_000)
     dead = _trace(tmp_path, "nb-dead", age_seconds=10_000_000)
 

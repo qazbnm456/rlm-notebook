@@ -124,7 +124,7 @@ def test_generate_timeline_offline_forward_pass():
 
 
 def test_generate_timeline_offline_forward_pass_empty_events():
-    """CLAUDE.md/guide.py: a source describing no sequence of events must produce an EMPTY
+    """AGENTS.md/guide.py: a source describing no sequence of events must produce an EMPTY
     timeline, not a fabricated one — the schema (Timeline.events default_factory=list) and the
     instructions both allow this; this pins that an empty list actually round-trips correctly."""
     result = _validate_then_submit(GenerateTimeline, "validate_timeline", "timeline", {"events": []})

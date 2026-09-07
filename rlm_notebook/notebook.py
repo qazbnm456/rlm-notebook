@@ -9,7 +9,7 @@ writer at a time," which was true when `cli.py` was the only entry point and has
 `api.py` started serving concurrent HTTP requests. A whole-file `save_notebook` of an object read
 minutes earlier silently destroys everything written in between — reproduced live over real HTTP
 (a source and a note added while an `ask` was running, both returning 200, both gone afterwards);
-see CLAUDE.md's notebook-durability invariant. Read the `mutate_notebook`/`notebook_lock`
+see AGENTS.md's notebook-durability invariant. Read the `mutate_notebook`/`notebook_lock`
 docstrings before adding a new write path.
 """
 
@@ -51,7 +51,7 @@ def slug(raw: str) -> str:
     strip leading and trailing `.`/`-` so it can never become a traversal segment (`..`, an absolute
     path, a nested directory), and cap at `_SLUG_MAX` characters — re-stripping after the cut so a
     truncation landing on a `-`/`.` never leaves a trailing separator. `--notebook` and the API's
-    `{notebook_id}` are user input that becomes a path component; see CLAUDE.md's notebook-id
+    `{notebook_id}` are user input that becomes a path component; see AGENTS.md's notebook-id
     invariant.
 
     **An id with no Latin characters at all falls back to a content hash rather than failing.** The
@@ -435,7 +435,7 @@ def history_text(notebook: Notebook) -> str:
     """Every prior turn as plain text, oldest first, for the RLM task's `history` field. Context
     only — the task must still ground every citation in `sources` fresh each turn (`citations.py`
     verifies regardless of what a prior turn cited), never treat a past answer as its own source of
-    truth. See CLAUDE.md's history invariant."""
+    truth. See AGENTS.md's history invariant."""
     if not notebook.turns:
         return "(no prior turns in this conversation)"
     parts = [

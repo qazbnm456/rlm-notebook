@@ -2,7 +2,7 @@
 
 The web frontend's design contract. Implementation (`index.html`/`style.css`/`app.js`) follows this
 file. Architecture and the full decision record (why this exists, what was audited, what's deferred)
-live in the web-UI blueprint and `CLAUDE.md` — this file owns *look and feel* only, the
+live in the web-UI blueprint and `AGENTS.md` — this file owns *look and feel* only, the
 same split `ctx-distillery/studio/DESIGN.md` established for the sibling family.
 
 **This is NOT a replay-only trace console, unlike every sibling's `studio/`.**
@@ -111,7 +111,7 @@ were all considered and rejected first):
 ### 5.2 Sources (left rail, ~280px)
 A kind-agnostic "Add source" form: URL / paste-text / file tabs (blueprint §7 — built extensible so
 a future video/audio ingestion slice doesn't need a UI rework). All three are wired to the API: URL
-posts to `POST /notebooks/{id}/sources` (`{sources: [...]}`, http(s) only — CLAUDE.md invariant 26
+posts to `POST /notebooks/{id}/sources` (`{sources: [...]}`, http(s) only — AGENTS.md invariant 26
 stays exactly as strict; a YouTube link is ingested transparently by the SAME field, dispatched
 server-side by `ingest.ingest_one` — no separate UI affordance needed, just a `<p class="hint">`
 under the URL input naming that YouTube links work and are captions-only, per invariant 33),
@@ -123,7 +123,7 @@ local-path ban. Below: the source list, one `.source-item` per source — kind, 
 (word-broken, never truncated into an unreadable middle; a pasted text's origin is a readable
 snippet plus a content hash, an uploaded file's origin is its filename, a YouTube source's origin
 is the video URL itself), and any `flags` from `injection_scan.py` shown as an amber warning line,
-never hidden and never blocking (CLAUDE.md invariant 6). Clicking a `.source-item` opens the
+never hidden and never blocking (AGENTS.md invariant 6). Clicking a `.source-item` opens the
 source-viewer modal (§5.7) for that source, no highlight target — a YouTube source's blocks render
 there with their `"ts:<mm:ss>"` locators, the same as any other source's blocks.
 
@@ -200,7 +200,7 @@ Every citation span with a known run id becomes clickable (`.citation-clickable`
 calls `GET .../citation-turn` and fills a single shared `.citation-detail` slot per answer (not one
 per citation — clicking a different citation replaces the previous detail rather than
 accumulating) with the raw trace-event payload, monospaced, and an explicit note that this shows
-WHERE the model read the source, never a faithfulness proof (CLAUDE.md invariant 5's limit,
+WHERE the model read the source, never a faithfulness proof (AGENTS.md invariant 5's limit,
 restated here rather than let the UI imply something stronger). A turn with no `run_id` (saved
 before this field existed) simply has no clickable citations — a graceful, silent degradation, not
 a broken link.
@@ -266,9 +266,9 @@ that OPTS IN, via the shared `saveAsNoteButton` factory — never inside
 `renderAnswerWithCitations` itself, which six call sites use. TWO sites opt in: a Chat answer
 and the chat overview (§5.9). The line is the SURFACE, not who authored the text: things
 rendered in the chat thread are the user's to curate; a Studio tab's artifact and the podcast
-transcript are not (CLAUDE.md invariant 32).
+transcript are not (AGENTS.md invariant 32).
 
-A note carries no citations of its own and is never re-verified against `sources` (CLAUDE.md
+A note carries no citations of its own and is never re-verified against `sources` (AGENTS.md
 invariant 5's coordinate-only guarantee doesn't extend to freeform notes) until it's promoted —
 nothing in this section's UI should imply a note is "grounded" before that point.
 
@@ -329,7 +329,7 @@ Studio) below 640px. Matches the family's existing breakpoint convention.
 ## 8. Do / Don't
 
 **Do**: key citation styling on `verified` (from `citations.py`, coordinate-existence only — see
-CLAUDE.md invariant 5), never imply stronger faithfulness than that; flag an unverified citation and
+AGENTS.md invariant 5), never imply stronger faithfulness than that; flag an unverified citation and
 an injection-scan hit, never hide either; show every state explicitly (pending, error, empty) rather
 than a blank gap; keep `--accent`/`--studio-accent` non-cross-used.
 

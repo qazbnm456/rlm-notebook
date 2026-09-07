@@ -1,7 +1,7 @@
 """`runner.py`'s subprocess-per-run mechanics, tested against small throwaway `-c` scripts that
 speak the same one-JSON-line-to-stdout contract `worker.py` does — not the real
 `rlm_notebook.worker` module, which needs model credentials and a sandbox this offline suite
-deliberately never has (see CLAUDE.md's Verify section). `test_api.py` covers the higher-level
+deliberately never has (see AGENTS.md's Verify section). `test_api.py` covers the higher-level
 behavior with a fully-mocked `runner` instead.
 """
 

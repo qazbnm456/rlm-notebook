@@ -19,9 +19,9 @@ __pycache__/
 # Secrets / local env (only .env.example is tracked)
 .env
 
-# Local research/design notes that fed into CLAUDE.md/CHANGELOG.md's durable invariants and
+# Local research/design notes that fed into AGENTS.md/CHANGELOG.md's durable invariants and
 # decisions — not tracked, per the same reasoning as not publishing raw design-debate transcripts:
-# the resolved "what and why" belongs in CLAUDE.md/CHANGELOG.md, not the working notes that
+# the resolved "what and why" belongs in AGENTS.md/CHANGELOG.md, not the working notes that
 # produced it.
 /docs/
 

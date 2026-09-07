@@ -45,7 +45,7 @@ def test_ask_parses_notebook_flag():
 
 def test_cmd_ask_refuses_with_no_sources_and_no_notebook(capsys):
     """This early-return path runs before any model config/call, so it's safe to exercise offline
-    (see the known gap noted in CLAUDE.md/CHANGELOG: `_cmd_ask`'s live-model path is untested)."""
+    (see the known gap noted in AGENTS.md/CHANGELOG: `_cmd_ask`'s live-model path is untested)."""
     parser = build_parser()
     args = parser.parse_args(["ask", "a question"])
     assert _cmd_ask(args) == 1
@@ -263,7 +263,7 @@ def test_cmd_audio_reports_an_empty_script_explicitly_instead_of_printing_nothin
 class _FakeTTSProvider:
     # A `TTSProvider` now also declares its output FORMAT and its own language->voice defaults, so a
     # local model emitting WAV isn't forced through an MP3 encoder and one provider's voice names
-    # can't leak into another's request (CLAUDE.md invariant 43).
+    # can't leak into another's request (AGENTS.md invariant 43).
     suffix = ".mp3"
     media_type = "audio/mpeg"
 

@@ -7,7 +7,7 @@ stdout as the result.
 
 This module is never invoked directly by a human — `runner.start_run` spawns it. It is the ONLY
 thing that runs inside the isolated subprocess. (`api.py` DOES import both transitively — see
-CLAUDE.md invariant 21, which records the stronger import claim as verified false. The
+AGENTS.md invariant 21, which records the stronger import claim as verified false. The
 guarantee is about EXECUTION: `.arun()` is called here and nowhere else, so a crash deep in a
 model run takes down a worker subprocess, never the API server.)
 """

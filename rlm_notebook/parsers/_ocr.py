@@ -142,7 +142,7 @@ def _order_band(band: list[_Region], centre: float) -> list[str]:
 
 
 def reading_order(regions: Sequence[tuple[Sequence[Sequence[float]], str]]) -> str:
-    """Join OCR'd text regions in reading order (CLAUDE.md invariant 73), from the bounding quads
+    """Join OCR'd text regions in reading order (AGENTS.md invariant 73), from the bounding quads
     the detector already reported. A region CROSSING the content's horizontal centre spans both
     columns and closes the band above it; a band with regions on both sides of the centre is read as
     two columns, all of the left then all of the right, instead of line-by-line across both.
@@ -287,7 +287,7 @@ def _try_tesseract(image) -> str | None:
 
 
 def ocr_image(image) -> str:
-    """RapidOCR primary, Tesseract fallback (CLAUDE.md invariant 7) — tried in that order, falling
+    """RapidOCR primary, Tesseract fallback (AGENTS.md invariant 7) — tried in that order, falling
     through on either an import failure OR a runtime failure/empty result, never raising from the
     first backend's own failure. Returns `""` (never raises) if NEITHER backend produces text —
     `parse_pdf` decides what an empty-after-OCR page means, this function doesn't."""
