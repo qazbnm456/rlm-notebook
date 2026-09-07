@@ -14,8 +14,9 @@ import urllib.request
 from urllib.parse import urlparse
 
 import trafilatura
-from rlm_harness.tools.fetch import is_safe_url, resolved_host_is_safe
+from rlm_harness.tools.fetch import is_safe_url, parse_cidrs, resolved_host_is_safe
 
+from ..config import fetch_allow_cidrs
 from ..schema import Source, SourceBlock
 
 Fetcher = "Callable[[str], str]"  # documented shape; see parse_web's `fetcher` param
@@ -25,13 +26,29 @@ class FetchError(RuntimeError):
     """A URL was unsafe to fetch, or the fetch/extraction otherwise failed."""
 
 
+def allow_nets() -> tuple:
+    """The operator's SSRF carve-out, resolved fresh per call — the ONE place either host-side
+    fetcher gets it (`parsers/youtube.py` imports this rather than re-reading the variable, so the
+    two can never disagree about what is permitted).
+
+    Read per call rather than cached at import: a module-level constant would freeze whatever the
+    environment held when `web.py` was first imported, which a test cannot then change and a
+    long-running server cannot pick up. `parse_cidrs` on a one- or two-entry tuple costs nothing
+    beside a network fetch. `config.fetch_allow_cidrs` has already rejected an unparseable entry,
+    so `parse_cidrs`'s own warn-and-skip can never silently empty this."""
+    return parse_cidrs(fetch_allow_cidrs())
+
+
 def _check_safe(url: str) -> None:
     if not is_safe_url(url):
         raise FetchError(f"refused: {url!r} is not a permitted external http(s) URL")
     parsed = urlparse(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    if not resolved_host_is_safe(parsed.hostname or "", port):
-        raise FetchError(f"refused: {url!r} resolves to a disallowed address")
+    if not resolved_host_is_safe(parsed.hostname or "", port, allow_nets=allow_nets()):
+        raise FetchError(
+            f"refused: {url!r} resolves to a disallowed address "
+            "(if you are behind a fake-IP proxy or split-DNS VPN, set RN_FETCH_ALLOW_CIDRS)"
+        )
 
 
 class _SafeRedirectHandler(urllib.request.HTTPRedirectHandler):

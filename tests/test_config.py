@@ -285,7 +285,7 @@ def test_the_planner_token_cap_is_this_projects_own_choice(monkeypatch):
     same corpus; then a live run hit 16384 exactly and came back `Invalid Python syntax`, cut
     mid-code, while the model was already batching its output across turns.
 
-    **The size is measured, not doubled on principle.** a sibling project ran 3,683 calls on the same
+    **The size is measured, not doubled on principle.** A sibling project ran 3,683 calls on the same
     model under 32768: median 1,621, p99 15,030, at cap 0.71%, and the band from 60% to 90% of that
     cap is EMPTY — legitimate long turns end below ~16k and everything at the cap is a runaway no
     cap would save. So this buys the tail the old value was cutting, and a further doubling buys

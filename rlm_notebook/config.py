@@ -10,6 +10,7 @@ at the point it is actually about to configure a model.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 import os
 import re
@@ -164,7 +165,7 @@ class NotebookConfig:
     #: not fit) and NOT invariant 64's (an output that should never have been one reply). The
     #: project's own rule says only the first justifies a raise.
     #:
-    #: a sibling project supplied the distribution this project cannot produce for itself — 3,683
+    #: A sibling project supplied the distribution this project cannot produce for itself — 3,683
     #: model calls on the same `qwen36_35b_a3b` under a 32768 cap: median 1,621, p90 6,993, p99
     #: 15,030, at cap 26 (0.71%). **The band from 60% to 90% of that cap is EMPTY.** Legitimate
     #: long turns end below ~16k — the 26 calls in the 13-16k bucket are exactly what THIS cap was
@@ -280,6 +281,43 @@ def max_upload_bytes() -> int:
     reflects this by never calling `_config()` either. Caught while designing the upload endpoint,
     not left for an audit to find."""
     return _env_int("RN_MAX_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES)
+
+
+def fetch_allow_cidrs() -> tuple[str, ...]:
+    """`RN_FETCH_ALLOW_CIDRS` — comma-separated CIDRs whose addresses the SSRF guard should treat as
+    external. Empty by default, which is full strictness.
+
+    **This exists because full strictness is WRONG on a fake-IP resolver, and silently so.** A
+    split-DNS VPN or fake-IP proxy (Clash/Mihomo/Surge, default range `198.18.0.0/16`) answers every
+    public hostname with a synthetic address in a RESERVED range, so `resolved_host_is_safe` refuses
+    it — correctly, on the information it has — and EVERY web and YouTube ingestion on that machine
+    fails with "resolves to a disallowed address". The guard is not wrong; it cannot see that the
+    operator's own resolver is lying to it, which is why the carve-out has to be operator-supplied.
+
+    **A standalone reader, deliberately NOT a `NotebookConfig` field**, for invariant 30's reason
+    one path further: `from_env()` raises `SystemExit` whenever `RN_MAIN_MODEL` is unset, and
+    ingesting a URL has nothing to do with whether a model is configured — `add_sources` never calls
+    `_config()` at all.
+
+    **An unparseable entry raises rather than being skipped.** `rlm_harness.tools.parse_cidrs` warns
+    and drops one so a typo "can't sink a run", which is right for a tool the model calls mid-run and
+    wrong here: dropping the only entry restores full strictness, so a typo'd variable reproduces the
+    exact symptom the variable was set to fix, with nothing on screen connecting the two. Same
+    reasoning as `_env_int` raising, and as the lifespan refusing to start on a malformed
+    `RN_TRACE_RETENTION_DAYS` rather than warning and defaulting."""
+    raw = os.environ.get("RN_FETCH_ALLOW_CIDRS", "").strip()
+    if not raw:
+        return ()
+    entries = tuple(part.strip() for part in raw.split(",") if part.strip())
+    for entry in entries:
+        try:
+            ipaddress.ip_network(entry, strict=False)
+        except ValueError:
+            raise SystemExit(
+                f"RN_FETCH_ALLOW_CIDRS={raw!r} contains {entry!r}, which is not a CIDR "
+                "(e.g. 198.18.0.0/16)"
+            ) from None
+    return entries
 
 
 def trace_retention_seconds() -> float:

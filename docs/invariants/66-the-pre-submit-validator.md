@@ -108,7 +108,7 @@ script's inventory.
   arithmetic are in `CHANGELOG.md`. The accepted recall loss is real and showed up once (`厘清`
   survived; `厘` is valid Big5 for `公厘`).
 
-**The sibling a sibling project solves the same problem in a DIFFERENT PLACE, and that is why its
+**A sibling project solves the same problem in a DIFFERENT PLACE, and that is why its
 output was stable while ours was not.** It runs HOST-SIDE and POST-HOC in its pipeline, not
 before SUBMIT: `output_language_mismatch` is a MAJORITY comparison on page BODIES (advisory,
 tolerant — "a single stray character in several thousand says nothing"), `strict_script_offenders`

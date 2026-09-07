@@ -463,3 +463,11 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     (`trajectory.budget_summary`, the Trajectory drawer's budget note).** Reading an absent field as
     "nothing was truncated" turns a corpus boundary into a property of the code.
     ([why](docs/invariants/75-three-readings-of-a-token-budget.md))
+
+76. **The SSRF guard's DNS half is handed an operator-supplied carve-out (`RN_FETCH_ALLOW_CIDRS`),
+    resolved in ONE place (`web.allow_nets`) that both host-side fetchers read.** A fake-IP resolver
+    answers every public hostname with a RESERVED address, so full strictness refuses every
+    ingestion on that machine — the guard is not wrong, it just cannot see that the operator's own
+    resolver is lying to it.
+    ([why](docs/invariants/76-the-ssrf-carve-out-for-fake-ip-resolvers.md))
+

@@ -289,8 +289,8 @@ def _suggest(text: str, family: str, wrong: dict[str, str]) -> dict[int, str]:
     **A character-level table cannot answer this and shipping one was a defect.** `历` is `歷` in
     `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is `匯` in `汇率` and
     `彙` in `词汇`. The table gives whichever form is commoner, so the validator was telling a model
-    to write the wrong character roughly whenever the word was the less common one. (Found by
-    a sibling project, which hit it in its converter; confirmed here against this project's own table.)
+    to write the wrong character roughly whenever the word was the less common one. (Found by a
+    sibling project, which hit it in its converter; confirmed here against this project's own table.)
 
     So the whole string is converted — `zh-hant` is phrase-aware and script-only — and each
     offender takes the character at its own index. **The regional preference (invariant 66's

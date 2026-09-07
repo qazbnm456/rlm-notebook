@@ -728,6 +728,8 @@ async def add_sources(notebook_id: str, body: SourcesRequest) -> NotebookRespons
         raise _invalid_notebook_id(notebook_id, exc) from exc
     try:
         ingested = await asyncio.to_thread(ingest_sources_for, snapshot, body.sources)
+    except SystemExit as exc:  # a malformed RN_FETCH_ALLOW_CIDRS, same shape as `_config()`'s
+        raise HTTPException(500, f"server misconfigured: {exc}") from exc
     except (FetchError, ValueError, OSError) as exc:
         raise HTTPException(422, f"could not ingest a source: {type(exc).__name__}: {exc}") from exc
 

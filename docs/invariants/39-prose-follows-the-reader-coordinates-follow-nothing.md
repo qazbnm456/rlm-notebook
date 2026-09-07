@@ -15,7 +15,7 @@ together, and is composed BEFORE `CITATION_RULES`.
 
 - **SCRIPT** (`instructions.SCRIPT_PINNED`): a language with more than one script is
   under-specified by its name, and a model treats the scripts as interchangeable. The sibling
-  a sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
+  A sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
   every page TITLE came back Simplified, so the nav and the page disagreed on screen — the rule
   names the characters (`概览` must be `概覽`) because that cannot be read as a loose synonym.
 

@@ -11,6 +11,46 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The private sibling project is no longer named anywhere in tracked files.** 28 references
+  across `CHANGELOG.md`, `docs/invariants/`, `instructions.py`, `config.py`, `trajectory.py` and four
+  test files now say "a sibling project". Nothing else changes: every measurement it supplied — the
+  3,683-call token distribution, the 287-of-972 first-in-turn figure, the Big5 let-through
+  enumeration, the phrase-aware suggestion defect — is still recorded with its numbers, because the
+  evidence is what makes those decisions reviewable and only the attribution had to go. The repo is
+  private, so this closes an exposure that would open the day it is not.
+
+- **Web and YouTube ingestion was refusing EVERY URL behind a fake-IP proxy, and the failing test
+  saying so was dismissed three times as a sandbox artifact.** `_check_safe` called
+  `resolved_host_is_safe(host, port)` with no `allow_nets`, so on a machine running Clash / Mihomo /
+  Surge — where every public hostname resolves into the fake-IP range `198.18.0.0/16` — the guard
+  refused everything. Verified end to end on the developer's machine: `parse_web("https://example.com/")`
+  raised `refused: … resolves to a disallowed address` before the fix and returned the page after it.
+
+  **The misreading is the transferable part.** `test_default_fetcher_uses_the_guarded_opener_never_plain_urlopen`
+  had been failing locally and passing in CI, and three commit messages in a row recorded it as
+  "pre-existing and unrelated". Two separate faults were hiding behind that phrase: the test does live
+  DNS, which violates the suite's stated "fully offline" property, AND the product genuinely refused
+  every URL on that machine. **A test that fails on one developer's machine and passes in CI is
+  evidence about the product until someone proves otherwise** — "pre-existing" describes when it
+  started, not whether it matters. The first fix drafted here stubbed the guard in the test, which
+  would have made the suite green and left ingestion broken.
+
+  Now: `RN_FETCH_ALLOW_CIDRS` (a standalone reader, invariant 30's reasoning), resolved once in
+  `web.allow_nets` and imported by `parsers/youtube.py` rather than re-read, so the two host-side
+  fetchers cannot disagree. The carve-out reaches only the DNS-rebinding half — `is_safe_url` is
+  syntactic and still refuses loopback and metadata targets at `0.0.0.0/0`, which a test pins. The
+  refusal message names the variable, since the failure is otherwise indistinguishable from a genuine
+  SSRF refusal.
+
+  **An unparseable entry raises instead of being skipped, inverting upstream's own policy on purpose.**
+  `rlm_harness.tools.parse_cidrs` warns and drops one so a typo "can't sink a run"; here, dropping the
+  only entry restores full strictness and reproduces the exact symptom the variable was set to fix.
+  That `SystemExit` turned out to be invariant 24's documented trap, live: `add_sources` caught
+  `(FetchError, ValueError, OSError)` and nothing else, so a malformed variable would have escaped a
+  request handler as an unhandled 500.
+
+  Suite is **669 passed, 0 failed** — green for the first time in this sequence of changes.
+
 - **The 76 invariants are an INDEX in `AGENTS.md` plus one file each under `docs/invariants/`.**
   `AGENTS.md` goes from **53,300 to 8,800 tokens** — every request had been carrying the full
   argument for OCR two-column reading order while someone edited CSS. Each index entry keeps the
@@ -388,7 +428,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   the time a turn really took divided by the speed, and with no bar that is indistinguishable from
   a frozen panel — the same "watched it and read it as a crash" complaint the run ticker's
   long-wait tier exists to answer, in a panel that has no other sign of life. Reported against
-  a sibling project, which has one.
+  A sibling project, which has one.
 
   It names the stop as well as drawing the bar (a bar alone says how long is left, not what for),
   and the transition is restarted per stop — cleared, snapped to zero, forced reflow, run — because
@@ -445,7 +485,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 - **A turn's FIRST tool call no longer shows a gap-derived duration.** The gap reaches back to the
   previous timeline event, which for a turn's first call is on the far side of the model generating
   that whole code cell — so the number displayed was mostly model time wearing a tool's name.
-  a sibling project measured **287 of 972 calls first-in-turn**, a third of every duration its drawer
+  A sibling project measured **287 of 972 calls first-in-turn**, a third of every duration its drawer
   showed. A call that measured ITSELF is unaffected (`duration_measured`); this only discards a
   fallback that was never the tool's.
 
@@ -555,7 +595,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   truncated call left 407 characters of reasoning and 995 of code in the trace. The tokens went
   into chain-of-thought that dspy discards.
 
-  **One truncation is not a size.** a sibling project supplied the distribution this project cannot
+  **One truncation is not a size.** A sibling project supplied the distribution this project cannot
   produce for itself — 3,683 calls on the same `qwen36_35b_a3b` under a 32768 cap:
 
   | | |
@@ -708,7 +748,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   length rather than the character set.
 
 - **The Big5 gate's recall loss is larger than recorded, and the hole is now stated rather than
-  characterised away.** a sibling project enumerated all 135 let-through characters and reported that
+  characterised away.** A sibling project enumerated all 135 let-through characters and reported that
   the "almost exactly the genuinely ambiguous set" claim — made here after reading the first forty —
   holds for about eight of them. Verified: `基于`, `机器`, `后端`, `优化` and `价值` produce NO
   flag, and `网络`, `标准`, `确认`, `范围` and `复杂` flag one of their two characters. That is this

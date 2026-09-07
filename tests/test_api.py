@@ -3365,7 +3365,7 @@ def test_the_worker_turns_off_dspys_cache_only_when_asked():
 def test_a_turns_first_call_keeps_no_gap_derived_duration():
     """The gap reaches back to the previous timeline event, and for a turn's FIRST call that is on
     the far side of the model generating the whole code cell — so the number is mostly model time
-    wearing a tool's name. a sibling project measured 287 of 972 calls first-in-turn: a third of every
+    wearing a tool's name. A sibling project measured 287 of 972 calls first-in-turn: a third of every
     duration it displayed.
 
     A call that measured ITSELF is unaffected. This only ever discards a fallback that was never

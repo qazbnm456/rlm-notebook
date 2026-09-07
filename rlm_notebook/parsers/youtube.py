@@ -19,7 +19,7 @@ import yt_dlp
 from rlm_harness.tools.fetch import is_safe_url, resolved_host_is_safe
 
 from ..schema import Source, SourceBlock
-from .web import _opener
+from .web import _opener, allow_nets
 
 #: Hostnames that route to `parse_youtube` instead of the generic `parse_web` fallback in
 #: `ingest.ingest_one`. `music.youtube.com` deliberately excluded — a different product, not
@@ -169,8 +169,11 @@ def _check_caption_url_safe(url: str) -> None:
         raise CaptionError(f"refused: caption URL {url!r} is not a permitted external http(s) URL")
     parsed = urlparse(url)
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
-    if not resolved_host_is_safe(parsed.hostname or "", port):
-        raise CaptionError(f"refused: caption URL {url!r} resolves to a disallowed address")
+    if not resolved_host_is_safe(parsed.hostname or "", port, allow_nets=allow_nets()):
+        raise CaptionError(
+            f"refused: caption URL {url!r} resolves to a disallowed address "
+            "(if you are behind a fake-IP proxy or split-DNS VPN, set RN_FETCH_ALLOW_CIDRS)"
+        )
 
 
 def _fetch_caption_track(caption_url: str, *, timeout: float = 15.0) -> str:

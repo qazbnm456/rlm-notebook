@@ -83,10 +83,21 @@ def test_default_fetcher_uses_the_guarded_opener_never_plain_urlopen(monkeypatch
     `_SafeRedirectHandler.redirect_request` directly and never exercise WHICH opener does the
     fetching. `urlopen` uses the default opener, which follows redirects with no per-hop
     re-validation — the exact hole `_SafeRedirectHandler` exists to close.
+
+    `resolved_host_is_safe` is stubbed because it RESOLVES the host, and the suite is stated to be
+    fully offline (AGENTS.md's Verify section). Left live, this test asserted something about the
+    developer's own network: a fake-IP proxy — Surge/Clash/Mihomo, whose default range is
+    `198.18.0.0/16` — maps every public hostname into a RESERVED range, so `example.com` resolved
+    to `198.18.1.88` and the guard refused it, correctly. The test then failed on the machine of
+    anyone running such a proxy while passing in CI, which is the worst of both. `is_safe_url` is
+    deliberately NOT stubbed: it is syntactic, needs no network, and is what refuses the loopback
+    and metadata targets the two tests above cover.
     """
     import urllib.request
 
     from rlm_notebook.parsers import web
+
+    monkeypatch.setattr(web, "resolved_host_is_safe", lambda *a, **k: True)
 
     def _explode(*args, **kwargs):
         raise AssertionError("the plain default opener must never be reached")
@@ -112,6 +123,75 @@ def test_default_fetcher_uses_the_guarded_opener_never_plain_urlopen(monkeypatch
     assert web._default_fetcher("https://example.com/a") == "<html><body>ok</body></html>"
     assert len(opened) == 1
 
+
+
+def test_a_fake_ip_resolver_starves_ingestion_until_the_carve_out_is_set(monkeypatch):
+    """`resolved_host_is_safe` resolves the host, and a fake-IP proxy / split-DNS VPN
+    (Clash/Mihomo/Surge, default `198.18.0.0/16`) answers EVERY public hostname with a synthetic
+    address in a RESERVED range. Without a carve-out the guard refuses all of it — correctly, on
+    what it can see — so every web and YouTube ingestion on that machine fails.
+
+    This is not hypothetical and was not found by a review: it was the standing `pytest` failure on
+    the developer's own machine, misread once as a sandbox artifact. `getaddrinfo` is stubbed so the
+    test asserts the GUARD's behaviour rather than the machine's networking."""
+    from rlm_harness.tools import fetch as harness_fetch
+
+    from rlm_notebook.parsers import web
+
+    # `resolved_host_is_safe` calls `socket.getaddrinfo` in ITS OWN module's namespace, not in
+    # `web`'s — patching `web.socket` would silently do nothing and the test would pass on the
+    # machine's real DNS, which is what it exists to stop depending on.
+    monkeypatch.setattr(
+        harness_fetch.socket,
+        "getaddrinfo",
+        lambda host, port, *a, **k: [(2, 1, 6, "", ("198.18.1.88", port))],
+    )
+    assert harness_fetch.resolved_host_is_safe("example.com", 443) is False
+
+    monkeypatch.delenv("RN_FETCH_ALLOW_CIDRS", raising=False)
+    with pytest.raises(web.FetchError, match="RN_FETCH_ALLOW_CIDRS"):
+        web._check_safe("https://example.com/a")
+
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "198.18.0.0/16")
+    web._check_safe("https://example.com/a")  # no raise
+
+
+def test_the_carve_out_never_reopens_loopback_or_metadata(monkeypatch):
+    """`allow_nets` is handed to `resolved_host_is_safe`, which is the DNS-rebinding half. The
+    syntactic half (`is_safe_url`) runs first and is not given the carve-out, so no value of
+    `RN_FETCH_ALLOW_CIDRS` can make a loopback or cloud-metadata URL fetchable. Pinned because a
+    reader could reasonably assume an allow-list is an allow-list."""
+    from rlm_notebook.parsers import web
+
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "0.0.0.0/0")
+    for url in ("http://127.0.0.1/x", "http://169.254.169.254/latest/meta-data/", "http://[::1]/x"):
+        with pytest.raises(web.FetchError):
+            web._check_safe(url)
+
+
+def test_a_malformed_allow_cidr_is_refused_rather_than_skipped(monkeypatch):
+    """`rlm_harness.tools.parse_cidrs` warns and DROPS an unparseable entry so a typo "can't sink a
+    run" — right for a tool the model calls mid-run, wrong for an operator setting. Dropping the only
+    entry restores full strictness, so a typo'd variable reproduces the exact symptom it was set to
+    fix with nothing on screen connecting the two. `config.fetch_allow_cidrs` raises first."""
+    from rlm_notebook import config
+
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "198.18.0.0/16,not-a-cidr")
+    with pytest.raises(SystemExit, match="not-a-cidr"):
+        config.fetch_allow_cidrs()
+
+
+def test_both_fetchers_read_one_carve_out(monkeypatch):
+    """`parsers/youtube.py` imports `web.allow_nets` rather than re-reading the variable, so the two
+    host-side fetchers can never disagree about what is permitted (invariant 13's one-copy rule
+    applied to a guard). A source-tree assertion, since observing it needs a live fetch."""
+    from pathlib import Path
+
+    root = Path(__file__).resolve().parent.parent
+    yt = (root / "rlm_notebook" / "parsers" / "youtube.py").read_text(encoding="utf-8")
+    assert "from .web import _opener, allow_nets" in yt
+    assert "allow_nets=allow_nets()" in yt
+    assert "fetch_allow_cidrs" not in yt, "youtube.py must not read the variable itself"
 
 
 def test_a_preview_is_scraped_from_the_html_already_in_hand():

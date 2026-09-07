@@ -45,7 +45,7 @@ recording drew a 3.3-second segment for a call it had measured at 1.9ms.
 The gap remains the fallback, and a non-numeric report does not become one — but for the FIRST
 call of a turn even the fallback is dropped to `None`, because that gap reaches back through
 the model generating the whole code cell and the number would be mostly model time wearing a
-tool's name. a sibling project measured 287 of 972 calls first-in-turn: a THIRD of every duration
+tool's name. A sibling project measured 287 of 972 calls first-in-turn: a THIRD of every duration
 it displayed. `duration_measured` is what keeps a self-timed call out of that rule.
 
 **A run can legitimately have NO model calls, and the drawer says so correctly.** `dspy.LM`

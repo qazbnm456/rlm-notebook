@@ -326,7 +326,7 @@ def build_trajectory(events: list[dict]) -> dict:
         # **A turn's FIRST call keeps no gap-derived duration.** The gap reaches back to the
         # previous timeline event, which for the first call of a turn is on the far side of the
         # model generating that whole code cell — so the number shown is mostly model time wearing
-        # a tool's name. a sibling project measured 287 of 972 calls first-in-turn, a third of every
+        # a tool's name. A sibling project measured 287 of 972 calls first-in-turn, a third of every
         # duration it displayed. A call that measured ITSELF is unaffected; this only ever discards
         # a fallback that was never the tool's.
         seen_turns: set[int] = set()
