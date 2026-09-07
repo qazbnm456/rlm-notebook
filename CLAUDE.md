@@ -818,93 +818,31 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       while the feature was entirely dead. Passing for a reason unrelated to its name, at FEATURE
       level rather than assertion level.
 
-      **The local measurement was corrected twice**: a first pass reported zero Simplified
-      characters using a ~90-character hand table, which its own author documents as a script
-      identifier rather than a converter; a full `zhconv` mapping then reported five, of which the
-      published list was wrong on four. A `zhconv` diff counts characters that are correct
-      Traditional in their own right (`干` in 干預/干擾, `台` in 一台, `群`, `里` in 里程碑), counts
-      and it counts Japanese entirely (386 Han-only diff positions in `nb-d22c2a9a`'s sources alone,
-      which are Japanese and whose shinjitai map to Traditional). Excluding both classes, two real
-      notebooks carry
-      **`尔 兹 峡 么 对 点 问 题` — eight characters, 19 sites, ALL in podcast fields**, with
-      titles, overviews, answers and follow-ups clean. `没 帮 们` appear zero times.
+      **A `zhconv` CONVERTER is the wrong shape for this and stays refused**: it rewrites `干`, `台`,
+      `群` and `里`, which are ordinary Traditional characters this project's own notebooks use
+      correctly. What is built instead is a reject-and-look-again check (invariant 66's fourth), and
+      what justifies it is that the correct output is demonstrably knowable BY THE MODEL — asked
+      directly it writes `霍爾木茲海峽` correctly, while composing 4000 characters of dialogue it does
+      not. The residual drift is a COMPLIANCE problem, not a knowledge one. **When a measurement
+      leaves a capability question open, ASK THE MODEL before designing around the answer** — that
+      one cost less than a thousandth of the episode that raised the question.
 
-      **A THIRD exclusion was applied, and CORRECTING it produced a second wrong answer — only the
-      CHARACTER-level split is true.** `霍尔木兹海峡` (12 of the 19) was first excluded whole as "a
-      Simplified place name copied from a Simplified source"; the correction said no source spells
-      it in any script and counted all 12 as drift. Measured per character: `nb-d22c2a9a`'s sources
-      hold **5,456 Han characters of JAPANESE**, containing `海峡` **67 times** and `ホルムズ海峡`
-      24, and `霍`, `尔`, `兹` **zero** times. `nb-6f2d49d3`'s hold no CJK at all.
+      **A PROPER NOUN outranks the script rule, and the rule says so ONCE, covering both
+      directions** — the two collide whenever the sources spell a name in the other script, and
+      nothing stated a precedence until the clause was added. It rests on a GENERAL argument (the
+      sibling's Simplified-source case is real and this project cannot rule it out), **not on any
+      observation here**: the incident once recorded as motivating it was checked against the corpus
+      and did not happen. A superseded table carved the exception out of the Traditional rule only
+      and left the Simplified rule with the mirror-image exposure.
 
-      So `霍尔木兹` is the model's own rendering and IS drift, while `峡` is a character its sources
-      spell that way sixty-seven times. The live A/B says so without being asked: the two
-      characters ABSENT from the corpus converted (`尔`->`爾`, `兹`->`茲`) and the one present 67
-      times did not. Both earlier readings argued about the whole NAME, and the name is not the unit.
-
-      **That is the inverse of the sibling's case**, whose failure was in page TITLES. It is why a
-      validator was declined for a long time — every condition justifying one (short, navigational,
-      repeated, demonstrably drifting) was read as absent, and the one field that would qualify
-      does not drift. **Two of those moved and one is now built** (invariant 66's fourth check):
-      the drift is real and three times larger than published, and the correct output is
-      demonstrably knowable BY THE MODEL — asked directly it writes `霍爾木茲海峽` correctly — which
-      is what separates a reject-and-look-again check from a converter. A `zhconv` CONVERTER stays
-      wrong for the reason recorded above: it rewrites `干`, `台`, `群` and `里`.
-
-      **Measured live, A/B on one notebook, and NOT significant.** Same four sources, same
-      `qwen36_35b_a3b`/`gpt-5.6-luna` pair, same Traditional Chinese, same `long` tier, 258s — only
-      the prompt differed, through the CLI path, which persists nothing (invariant 42) so the
-      stored episode the baseline came from was never overwritten. Wrong-script characters went
-      `13 / 5699` to `7 / 4013`, one per 438 to one per 573; the null expectation for the shorter
-      episode is 9.2 and seven were observed, a Poisson `P(X<=7) = 0.31`. **One run cannot
-      establish this rule works, and this line must not be read as though it did.**
-
-      What the run DID establish is that the rule REACHES the model: the place name went from
-      `霍尔木兹海峡` (three of six characters in the wrong script, three occurrences) to
-      `霍爾木茲海峡` (ONE of six, six occurrences). Behaviour changed on exactly what the rule
-      asks for. It is still not right — `峡` should be `峽`. (The new episode also ran 27% shorter
-      per utterance, 71.2 to 52.1 characters. One sample; not attributed.)
-
-      **"The model cannot write that character" was the obvious excuse and it is FALSE**, settled
-      for about 600 tokens against the same configured LM: asked directly, it returns
-      `霍爾木茲海峽`, all six characters correct, and `峽` alone on request. So the residual drift
-      is a COMPLIANCE problem, not a knowledge one — the model holds the right answer and does not
-      apply it while composing 4000 characters of dialogue. That is the finding that most changes
-      what to do next, and it cost less than a thousandth of the episode that raised the question:
-      **when a measurement leaves a capability question open, ASK THE MODEL before designing
-      around the answer.**
-
-      **A first reading of that run called the half-converted name a REGRESSION caused by the
-      rule**, on the premise the corpus paragraph above records as false — that the sources spelled
-      the name and the model had stopped copying them. Under the corrected premise the same
-      measurement reads the other way: two of three wrong characters were FIXED. The prompt sentence
-      added to forbid a partial conversion was reverted with it, having been written against a
-      collision that never occurred.
-
-      **A PROPER NOUN outranks it, and the rule says so ONCE, covering both directions** — the two
-      collide whenever the sources spell a name in the other script, and nothing stated a
-      precedence until the clause was added. The superseded table carved the exception out of the
-      Traditional rule only and left the Simplified rule with the mirror-image exposure.
-
-      **The incident recorded as motivating it did not happen.** The clause was added because a
-      Traditional podcast carried `霍尔木兹海峡` and that was read as the model keeping a Simplified
-      source's own spelling — choosing the name over the script, correctly, without being told. The
-      corpus check above kills it: those sources say `the Strait of Hormuz` in English and contain
-      no Chinese at all, so nothing was being kept and there was no collision. The precedence is
-      still worth stating — the sibling's Simplified-source case is real and this project cannot
-      rule it out — but it rests on that general argument now, NOT on an observation here, and the
-      one time it looked observed the evidence was a story nobody checked against the blob.
-
-      **The carve-out did NOT hold the first time it was live, and the failure mode is a PARTIAL
-      conversion — worse than either whole answer.** With the rule inert the name was copied
-      verbatim, `霍尔木兹海峡`, three times. With it shipping, the same notebook produced
-      `霍爾木茲海峡` six times: `尔`→`爾` and `兹`→`茲` converted, `峡`→`峽` not. That string is
-      neither the Simplified the sources use nor the Traditional `霍爾木茲海峽`, so it is
-      searchable in NEITHER — precisely the harm the exception exists to prevent, reached by a
-      route nobody had considered, because "keep the name" and "convert the name" were assumed to
-      be the only two outcomes. Six consistent occurrences in one episode, so it is a settled
-      spelling rather than a slip; still ONE name in ONE run on ONE model, and `峡`/`峽` may simply
-      be a character this model does not write. OPEN: whether "stays exactly as they spell it" has
-      to forbid a partial conversion in as many words — it plainly was not read that way once.
+      **The failure mode to watch for is a PARTIAL conversion — worse than either whole answer.**
+      With the rule shipping, one episode produced `霍爾木茲海峡` six times: `尔`→`爾` and `兹`→`茲`
+      converted, `峡`→`峽` not. That string is neither the Simplified spelling nor the Traditional
+      `霍爾木茲海峽`, so it is searchable in NEITHER — precisely the harm the proper-noun exception
+      exists to prevent, reached by a route nobody had considered, because "keep the name" and
+      "convert the name" were assumed to be the only two outcomes. **OPEN**: whether "stays exactly
+      as they spell it" has to forbid a partial conversion in as many words — it plainly was not read
+      that way once. Arms, counts and the three corrected readings are in `CHANGELOG.md`.
     - **REGISTER** (`NATURAL_REGISTER`): observed here. A Traditional Chinese answer wrote `源文`
       for "the source text" where a reader expects `原文` — a word-for-word rendering of the English.
       No script rule can reach it, because 源 and 原 are both ordinary Traditional characters, so
@@ -1834,23 +1772,15 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     "Only submit after it reports success" was read as an ORDERING WITHIN ONE CELL, and a real run
     duly wrote `print(validate_podcastscript(json_str))` followed by `SUBMIT(final_output)`. That
     validates nothing: the verdict is printed where the model cannot act on it, because the submit
-    beside it has already run. The run was told exactly which character was in the wrong script and
-    shipped it. **`_SCRIPT_REPORT_LIMIT` cannot rescue that** — the limit governs how many times the
-    validator will REJECT, and this model asked ONCE. The rule now names the anti-pattern with the
-    task's own tool name substituted in, and offers a guarded single cell as the alternative.
+    beside it has already run. **`_SCRIPT_REPORT_LIMIT` cannot rescue that** — the limit governs how
+    many times the validator will REJECT, and a model in that shape asks ONCE. The rule names the
+    anti-pattern with the task's own tool name substituted in, and offers a guarded single cell as the
+    alternative. **Confirmed live, and it needed BOTH halves** — the ordering rule and the raised limit;
+    still one run, so invariant 4's hedge applies.
 
-    **Confirmed live, and it needed BOTH halves.** The first run after the rule shipped called the
-    validator three times: rejected on shape, rejected on five wrong-script characters, then
-    `Validation successful.` — with the SUBMIT alone in a later turn. **At the old
-    `_SCRIPT_REPORT_LIMIT` of one, that second rejection would have returned success and the five
-    characters would have shipped**; without the ordering rule the model would not have read either
-    verdict. The episode came out at 62 utterances with ZERO drift and one close, at its last
-    utterance. Still a prompt-compliance claim with invariant 4's hedge — one run is evidence, not
-    proof — but it is the first end-to-end pass this check has produced.
- The marker check was written for the podcast, whose
-    failure was loud (the voices read the markers aloud), but it was a guard on the SYMPTOM:
-    `GenerateSummary` produced the same defect silently. Six tasks each holding their own validator is how
-    one of them ended up with a check the other five lacked.
+    The marker check was written for the podcast, whose failure was loud (the voices read the markers
+    aloud), but it was a guard on the SYMPTOM: `GenerateSummary` produced the same defect silently. Six
+    tasks each holding their own validator is how one of them ended up with a check the other five lacked.
 
     **Not a schema-level reject, deliberately.** Nothing rewrites a stored artifact (invariant 62 strips on
     the way OUT), so a notebook written before this validator existed holds whatever the model produced —
@@ -1877,30 +1807,25 @@ transcription (as opposed to YouTube captions, which ship) are undone.
 
     - **The SUGGESTION is computed IN CONTEXT, because a character-level table cannot answer it.**
       `历` is `歷` in `历史` and `曆` in `日历`; `发` is `發` in `发现` and `髮` in `头发`; `汇` is
-      `匯` in `汇率` and `彙` in `词汇`. A table gives whichever form is commoner, so the validator
-      named the WRONG character whenever the word was the less common one — shipped, and found by
-      a sibling project hitting it in its converter. The whole string is converted instead
-      (`zh-hant` is phrase-aware and script-only) and each offender takes the character at its own
-      index, falling back to the table if the conversion changes LENGTH.
+      `匯` in `汇率` and `彙` in `词汇`. A table gives whichever form is commoner, so a table-driven
+      validator names the WRONG character whenever the word is the less common one. The whole string
+      is converted instead (`zh-hant` is phrase-aware and script-only) and each offender takes the
+      character at its own index, falling back to the table if the conversion changes LENGTH.
     - **The SUGGESTION is also the REGION's standard, not merely a Traditional form** — and the two
       rules compose in ONE direction only: the regional preference applies where the phrase-aware
       pass made no choice of its own (it agrees with the plain single-character answer), never over
       one. Applying it unconditionally would lose `日历`'s `曆` back to `歷`, which is the defect
-      above reintroduced from the other side.** `zh-hant` maps
-      `为` to `爲` where Taiwan writes `為`, and the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and
-      `伪`/`偽` — 22 of the flagged characters. Each is post-mapped through `zh-tw`, from the SOURCE
-      character rather than from `zh-hant`'s answer — the two disagree on NINE characters (`账`->
-      `帳` plus the Taiwan element names `鈽 鍅 鉲 鎝 鉳 鑀 鋂 錼`) and via-source is right on all
-      nine, because `zh-tw` maps `账` straight to `帳` and has no `賬`->`帳` entry — and
-      SINGLE-CHARACTER only, because `zh-tw` carries a
-      VOCABULARY layer that rewrites `鼠标` to `滑鼠` and would misalign a positional zip. Found by
-      a sibling project, which hit it first.
+      above reintroduced from the other side. `zh-hant` maps `为` to `爲` where Taiwan writes `為`,
+      and the same for `众`/`眾`, `启`/`啟`, `账`/`帳` and `伪`/`偽`. Each is post-mapped through
+      `zh-tw`, **from the SOURCE character rather than from `zh-hant`'s answer** (the two disagree on
+      nine characters and via-source is right on all nine), and **SINGLE-CHARACTER only**, because
+      `zh-tw` carries a VOCABULARY layer that rewrites `鼠标` to `滑鼠` and would misalign a
+      positional zip.
     - **The 131 characters the codec lets through are ENUMERATED, not characterised**
-      (`_BIG5_SHARED`, 52 of them). An earlier note called them "almost exactly the genuinely
-      ambiguous set" after reading the first forty; the tail is `机 网 于 云 并 确 范 优 价 复`, so
-      `基于`, `机器`, `后端`, `优化` and `价值` produced NO flag at all and `网络`, `标准`, `确认`,
-      `范围`, `复杂` flagged one character of two — this project's own subject matter. The other 79
-      are flagged despite the codec.
+      (`_BIG5_SHARED`, 52 of them; the other 79 are flagged despite the codec).
+      `test_the_big5_letthrough_is_fully_classified` asserts the two halves cover the codec's
+      let-through EXACTLY, so a zhconv upgrade fails the build rather than landing an unread
+      character in the unflagged half.
 
       **SHARED means a live Traditional use the PHRASE TABLE does not protect.** Where it does
       (`皇后`, `茶几`, `划船`, `拮据`, `佣金`, `老么`, `尸位素餐`, `夸父`, `并州`, `云云`,
@@ -1915,13 +1840,6 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       obedient model told `范 -> 範` writes `範仲淹`. The sibling ranks them the other way because
       its corpora are technical rather than literary corpora; both answers are defensible and the reason is recorded rather
       than averaged. `吁` and `咨` are the same call on an idiom, and are its weaker half.
-
-      **Two independent readings, agreeing on 72 and disagreeing on 16, and each caught real
-      errors in the other**: `伙食` and `凶宅` would have been corrupted by this one, `昵稱`,
-      `腌菜`, `昆虫`, `蚝油` and `蝎子` were missed by it. The residual disagreement is exactly the
-      five the sibling's own reviewer predicted would move. `test_the_big5_letthrough_is_fully_classified`
-      asserts the two halves cover the codec's let-through EXACTLY, so a zhconv upgrade fails the
-      build rather than landing an unread character in the unflagged half.
     - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
       tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
       project's real notebooks use correctly (`干預`, `一台`, `里程碑`) — so it would condemn good
@@ -1933,51 +1851,27 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       offender whose fix equals the character it already has — which is what `_suggest` returns
       wherever the phrase-aware pass confirms the character is right in that word. Without it the
       check rejected `拮据` with `据 -> 据` and `恒生` with `恒 -> 恒`, and sixteen gate characters
-      have such a context, so the one documented `拮据` was not the extent of it. A missed character
-      is one wrong glyph on screen; a false one is a rejection the model cannot satisfy, which is
-      the failure invariant 66 exists to forbid.
+      have such a context. A missed character is one wrong glyph on screen; a false one is a
+      rejection the model cannot satisfy, which is the failure invariant 66 exists to forbid.
     - **It is BOUNDED at `_SCRIPT_REPORT_LIMIT` (3) rejections per run, and the bound is the design
       — but ONE was measured too few, in BOTH directions.** Every other check here rejects
       something WRONG; a Simplified character is COSMETIC, and the detector cannot tell one from a
       Japanese glyph being quoted inline — `学`, `会`, `国` and `峡` are shinjitai, and this
       project's own corpora carry Japanese. A blocking check the model cannot satisfy spends the
       step budget looping and loses a paid-for episode over one glyph, which is the trade the "net
-      must not destroy what it was protecting" rule below already refuses.
-
-      At ONE, a live run rejected nine characters WITH their fixes (`权`->`權`, `时`->`時`,
-      `识`->`識`), the model submitted anyway, and all nine shipped — the single look bought
-      nothing. **The other direction is worse**: a COMPLIANT model that fixes and re-validates was
-      told `success` on its second call whether or not it had fixed anything, so the bound lied to
-      the model that deserved a real answer. Three gives fix, verify, and one more fix, at a worst
-      case of three planner turns against `max_iterations=25`. `quote` is exempt for the same
-      reason it is exempt from the marker walk, one step sharper.
-    - **Replayed against real measured output**: 17 offenders on the episode that motivated it and
-      7 on the one after, every one a genuine drift, and 2 on the notebook whose only drift is `么`.
-      Zero false positives across 119 utterances produced against a corpus containing Japanese.
-    - **Then measured LIVE, and this is the one number in this area that is significant.** Three
-      episodes off one notebook, same models, same tier, same language:
-
-      | | chars | characters this check would flag |
-      |---|---|---|
-      | rule inert | 5699 | 13 |
-      | rule shipping, no check | 4013 | 7 |
-      | rule + check | 4617 | **0** |
-
-      Against the middle run — whose ONLY difference is the check — the null expectation is 8.1 and
-      zero were observed, Poisson `P(X=0) = 0.0003`; against the first, 10.5 expected, `P = 0.00003`.
-      **Six of those seven middle-arm flags are `峡`, and the check's own rejection message tells the
-      model it may keep exactly that** — a character verbatim from a source, or Japanese being
-      quoted, and `海峡` is in those sources 67 times. Broken out, the middle arm is `峡`x6 plus
-      `么`x1, so on the remainder alone the expectation is 1.15 and `P(X=0) = 0.32`. **The one
-      significant number in this area rests on a character the rule does not clearly require
-      changing**, and is stated with that attached rather than as a clean result.
-      **The honest limitation is that the CLI writes no trace, so whether the validator actually
-      FIRED is unobservable**: the draft may simply have been clean. The measurement is of the
-      configuration, not of the tool being exercised, and it is still one episode per arm.
-      **The accepted recall loss still showed up, once**: `厘清` survived (it should be `釐清`),
-      because `厘` is valid Big5 for `公厘` and is not one of the eight measured additions. The
-      other survivor, `制` in `問責制`, is `zhconv` being wrong rather than the gate — `制度` is
-      correct Traditional, and flagging it would have been the false positive the gate prevents.
+      must not destroy what it was protecting" rule below already refuses. At ONE, a non-compliant
+      model's single look bought nothing, and a COMPLIANT model that fixed and re-validated was told
+      `success` on its second call whether or not it had fixed anything — so the bound lied to the
+      model that deserved a real answer. Three gives fix, verify, and one more fix, at a worst case
+      of three planner turns against `max_iterations=25`. `quote` is exempt for the same reason it
+      is exempt from the marker walk, one step sharper.
+    - **Measured live, A/B across three episodes, and it is the one significant number in this
+      area — with a caveat attached that does not come off.** Six of the seven flags in the control
+      arm are `峡`, a character the check's own rejection message tells the model it may keep, so
+      the significance rests on a character the rule does not clearly require changing; and the CLI
+      writes no trace, so whether the validator FIRED is unobservable. Arms, counts and the Poisson
+      arithmetic are in `CHANGELOG.md`. The accepted recall loss is real and showed up once (`厘清`
+      survived; `厘` is valid Big5 for `公厘`).
 
     **The sibling a sibling project solves the same problem in a DIFFERENT PLACE, and that is why its
     output was stable while ours was not.** It runs HOST-SIDE and POST-HOC in its pipeline, not
@@ -1990,24 +1884,12 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     entirely the model's own words; majority where it quotes source — and that reasoning is better
     than ours was.
 
-    **What does NOT transfer is its membership test**, and the difference is measured. It asks "would
-    the zhconv table rewrite this character", with a hand-kept `_KEEP_AS_WRITTEN` of ONE character
-    (`台`). Run against correct Traditional prose, its own shipped functions report `干` in `干預`,
-    `里` in `里程碑` and `群` in `一群`, and `to_script` would PERSIST `幹預`, `裏程碑` and `一羣`
-    into a title. Big5-encodability answers it without any hand list: over zhconv's own 3909
-    single-character rewrites (3909 of them) it flags 3857 and lets through 52. A real ambiguous
-    core is in there (`后` 皇后/後, `台` 台灣/臺, `余` 余/餘, `几` 几/幾, `丑` 丑/醜, `干`, `里`,
-    `群`) and is what makes the gate the right shape. **It is NOT "almost exactly the ambiguous
-    set", which an earlier wording claimed after reading the first forty**: the 131 also held four
-    curly quotation marks (`zh-hant` maps them to corner brackets — not characters at all) and a
-    long tail nobody writes in modern Traditional (`优 听 党 网 极 确 触 异 价 种 复 划 挂 洁`).
-    That tail is RECALL LOST and it lands on this project's own subject matter: `基于`, `机器`,
-    `后端`, `优化` and `价值` flag NOTHING, while `网络`, `标准`, `确认`, `范围` and `复杂` flag
-    only one of their two characters. **That hole is CLOSED**, by the enumeration recorded above —
-    all 131 read once, 52 SHARED, 79 flagged, with a test pinning both the union and the membership.
-    The paragraph you are reading describes the state BEFORE it, because the reasoning for the gate
-    is what a later reader needs and the arithmetic without it is what makes the enumeration look
-    optional. The sibling's four measured title offenders (`览 门 块 统`) are all CAUGHT either way.
+    **What does NOT transfer is its membership test.** It asks "would the zhconv table rewrite this
+    character", with a hand-kept `_KEEP_AS_WRITTEN` of ONE character (`台`) — so run against correct
+    Traditional prose its own shipped functions report `干` in `干預`, `里` in `里程碑` and `群` in
+    `一群`, and `to_script` would PERSIST `幹預`, `裏程碑` and `一羣` into a title. Big5-encodability
+    answers it with no hand list. Its four measured title offenders (`览 门 块 统`) are caught either
+    way.
 
     **The MIRROR direction is NOT enumerated and still uses the codec** (`_BIG5_SHARED["hans"]` is
     empty, GBK decides, 652 flagged). Collapsing the two branches into one is what shipped once:
@@ -2341,20 +2223,18 @@ transcription (as opposed to YouTube captions, which ship) are undone.
       crosses the centre only on what spans the measure (a banner heading, a caption, a centred page
       number); a single-column page crosses it on nearly every body line. Too low a value merely declines
       to improve a page, too high reorders one that was already right, so it is set on the SAFE side.
-      **The threshold was calibrated on rendered digital PDFs and then checked against the population it
-      actually serves** — only a page with NO text layer reaches OCR — and it transfers: a real
-      two-column scan (Physical Review Letters, 1958) measured 0.01-0.05 per page, the same band as the
-      clean renders, and every one of its 16 pages was reordered. Controlled skew of 0.25-2.0 degrees held
-      it at 0.00-0.08, so the drift a scanner introduces does not reach the threshold.
+      Calibrated on rendered digital PDFs, then confirmed against the population it actually serves — only
+      a page with NO text layer reaches OCR — on a real two-column scan, and controlled skew does not
+      reach the threshold. Figures in `CHANGELOG.md`.
     - **A centre-crossing region is a band BOUNDARY, never a veto.** The first draft distrusted any band
       holding a centre-crosser, and a real two-column page's single crossing region — the page number
       centred in its footer — cost the whole page its column order. Boundaries cut the page into bands and
       each band is column-split on its own.
     - **Within a band nothing is re-sorted; only the two columns are separated out of the detector's
-      order.** Sorting a band by vertical position measured WORSE on BOTH layouts (two-column 0.756 ->
-      0.743, single-column 0.774 -> 0.751): RapidOCR already emits a column's lines in reading order, and
-      re-sorting on a quad's vertical centre only disturbs near-ties like a superscript or a skewed line.
-      This is the half that is counter-intuitive and the half a later reader is most likely to "fix".
+      order.** Sorting a band by vertical position measured WORSE on BOTH layouts: RapidOCR already emits
+      a column's lines in reading order, and re-sorting on a quad's vertical centre only disturbs
+      near-ties like a superscript or a skewed line. This is the half that is counter-intuitive and the
+      half a later reader is most likely to "fix".
 
     **`_order_band` partitions rather than filtering twice**, because a zero-width region sitting exactly ON
     the centre satisfies both the left and the right test and would be emitted into both columns.
@@ -2382,31 +2262,29 @@ transcription (as opposed to YouTube captions, which ship) are undone.
     is why that cost is accepted against a +0.331 gain on two-column prose.
 
     **MORE than two columns is out of scope, and declines by two different mechanisms.** An ODD count
-    declines itself: a three-column scan (Scientific American Supplement, 1890) puts its middle column
-    across the centre, so it crosses on nearly every line and the page-level guard fires — the same
-    arithmetic that recognises a single-column page. An EVEN count does NOT, and that gap was real: a
-    four-column page has its centre in the middle gutter, nothing spans it, and the split cut the page in
-    half and then interleaved the rows inside each half — the exact defect this module exists to prevent,
-    at half scale. `_column_count` closes it by projecting a band onto the x-axis and counting the runs a
-    real gutter separates; above two, the band is returned in detection order.
+    declines itself: a three-column scan puts its middle column across the centre, so it crosses on nearly
+    every line and the page-level guard fires — the same arithmetic that recognises a single-column page.
+    An EVEN count does NOT, and that gap was real: a four-column page has its centre in the middle gutter,
+    nothing spans it, and the split cut the page in half and then interleaved the rows inside each half —
+    the exact defect this module exists to prevent, at half scale. `_column_count` closes it by projecting
+    a band onto the x-axis and counting the runs a real gutter separates; above two, the band is returned
+    in detection order.
 
     **`_MIN_GUTTER_SHARE` (0.02) has about 2x of margin, and the hazard of raising it runs UPWARD**:
     the real two-column page in `tests/fixtures/` has a 38px gutter across 996px of content, i.e. 0.038.
     A higher value merges runs and LOWERS the count — and since the only test is `> 2`, a count of 1
-    falls through to the split exactly as 2 does, so a two-column page keeps being reordered at any value
-    (byte-identical output measured at 0.02, 0.05 and 0.30). What breaks is the DECLINE: a four-column
-    page merges to two or fewer and is halved again. An earlier draft of this paragraph asserted the
-    opposite consequence in three places at once. The count is used only to ask "is this the two-column
-    case", never to locate a column — that stays `centre`'s job.
+    falls through to the split exactly as 2 does, so a two-column page keeps being reordered at any value.
+    What breaks is the DECLINE: a four-column page merges to two or fewer and is halved again. The count
+    is used only to ask "is this the two-column case", never to locate a column — that stays `centre`'s
+    job.
 
     **Counted over the whole PAGE, never one band.** A sparse band — a few short fragments between two
     spanning elements — reads its own intra-column whitespace as a gutter, counts 3 and declines,
     returning the interleaved order this exists to remove. **The real fixture does not demonstrate this
     and cannot**: it carries one spanning region, so that page is a single band of 104 and both schemes
-    agree on it. The hazard is measured over contiguous windows of its own geometry — 7.8-11.1% of
-    3-to-8-region slices count more than two, peaking at seven-region windows — a claim
-    about PLAUSIBLE bands, and the hedge the commit message carried was dropped in the docstring and
-    here. A first correction then reported the sweep's ENDPOINTS (7.8 and 10.2) as its range.
+    agree on it. The supporting number is a claim about PLAUSIBLE bands rather than observed ones —
+    measured over contiguous windows of the fixture's own geometry — and carries that hedge in
+    `CHANGELOG.md`.
 
     **A layout-detection MODEL was evaluated for this and rejected** (`PicoDet-S_layout_3cls`): its classes
     are table/image/stamp with no text class, so it cannot do the one thing that was actually broken. See
