@@ -11,19 +11,19 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
-- **a sibling project scrubbed, the other sibling's fingerprint scrubbed, and every doc-drift item the
-  three-reviewer round left open is now closed.**
+- **A second private sibling scrubbed, the other one's fingerprint scrubbed, and every doc-drift
+  item the three-reviewer round left open is now closed.**
 
-  **Names.** a sibling project is private and is gone from all six tracked sites (`naming.py`, `schema.py`,
-  `tests/conftest.py`, three CHANGELOG entries), including the filename `an ASR-locale design note`,
-  which identified it as surely as the name did. `ctx-distillery`, `cve-reverser`, `diff-sentry` and
-  `toolscout` are not private and stay.
+  **Names.** A second sibling project turned out to be private too, and is gone from all six tracked
+  sites (`naming.py`, `schema.py`, `tests/conftest.py`, three CHANGELOG entries) — including a design
+  note's FILENAME, which identified it as surely as the name did. Three other sibling projects named
+  in this repo are not private and stay.
 
-  **Fingerprint.** Removing a name is not removing an attribution: "shipped a Traditional Chinese
-  document set", "its corpora are technical rather than literary corpora" and "an 89,160-Han-character deployment" identified
-  the project to anyone who knew it existed. Rewritten to carry the same evidence — bodies versus
-  TITLES, technical rather than literary corpora, 89,160 Han characters of deployed output — without
-  the shape. Zero occurrences of `document set` remain in any tracked file.
+  **Fingerprint.** Removing a name is not removing an attribution: phrases describing the shape of
+  the other sibling's deployment — its document type, the nature of its corpora, and the size of its
+  output — identified it to anyone who knew it existed. Rewritten to carry the same evidence — bodies
+  versus TITLES, technical rather than literary corpora, 89,160 Han characters of deployed output —
+  without the shape.
 
   **The dead "web-UI blueprint" pointers, 16 of them, now point at tracked files.** That document is
   deliberately gitignored working notes, so `api.py`, `schema.py`, `parsers/youtube.py` and
