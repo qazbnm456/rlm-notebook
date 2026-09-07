@@ -32,8 +32,12 @@ new history in the CHANGELOG and new argument in `docs/invariants/`, not here.
   latest ruff at run time and can redden CI with nobody having touched a line of code.
 - `uv run python -m pytest -q` — the whole suite, fully offline. `test_task.py` drives a REAL
   `dspy.RLM.aforward` through `rlm_harness.testing.ScriptedInterpreter` + `scripted_lm`.
-  `test_api.py`/`tests/test_runner.py` need the `api` extra to be COLLECTED AT ALL — without it
-  they are silently absent, not failing, so a bare local `uv sync` can look greener than CI. **The
+  `test_api.py` needs the `api` extra to be COLLECTED AT ALL — it `importorskip`s `fastapi`/`httpx`,
+  so without the extra it is silently absent, not failing, and a bare local `uv sync` can look
+  greener than CI. **`tests/test_runner.py` does NOT** — it has no `importorskip`, imports only
+  stdlib plus `rlm_notebook.runner` (verified to import with `fastapi`/`starlette`/`httpx`/`uvicorn`
+  blocked), so its 9 tests — invariant 22's `killpg` grandchild tripwire among them — run on a bare
+  `uv sync`. CI names only `tests/test_api.py` for the extra; this line used to name both. **The
   same trap runs the OTHER way for `chatterbox`**, which CI does NOT sync: a local venv with that
   extra installed is greener than CI. Nothing in the suite may `importorskip` a package that ships
   only in an extra CI skips — `tests/test_tts.py` fakes `chatterbox.mtl_tts` AND `soundfile`

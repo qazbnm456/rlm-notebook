@@ -43,7 +43,7 @@ def _shipped_tasks():
 
 def test_every_shipped_task_pins_the_script_a_language_name_leaves_open():
     """Naming a language does not name its SCRIPT. A sibling project shipped a Traditional Chinese
-    document set whose body text were Traditional while every page TITLE came back Simplified, so the nav
+    document set whose body text was Traditional while every TITLE came back Simplified, so the nav
     and the page disagreed on screen — the rule names the characters IN the script, which cannot be
     read as a loose synonym.
 
@@ -331,7 +331,7 @@ def test_no_shared_character_is_ever_flagged_in_its_own_word():
 def test_a_proper_noun_keeps_its_character_unflagged():
     """Where this list deliberately diverges from a sibling project's, and the reason is invariant 69.
 
-    That project ranks `范`, `余`, `涌` as Simplified because the drift is commoner in technical rather than literary corpora
+    That project ranks `范`, `余`, `涌` as Simplified because the drift is commoner in technical prose
     than the surname. Here a name outranks it: told `范 -> 範`, an obedient model writes `範仲淹`,
     and a reader who wants to look the name up needs the string the sources used. `吁` and `咨` are
     the same call on an idiom rather than a name, and are the weaker half of it.

@@ -138,7 +138,7 @@ class SuggestLanguage:
     `SuggestTitle`, and a plain `dspy.Predict` for the same reason (one word does not justify a
     sandbox boot and a planner loop).
 
-    **Why a model call rather than ranking `Accept-Language` first.** The sibling project a sibling project
+    **Why a model call rather than ranking `Accept-Language` first.** A sibling project
     shipped exactly that class of bug in its ASR: it seeded the recogniser from `Locale.current`,
     which answers "what language should this app's UI be in", while ASR was asking "what language is
     this person speaking" — and transcribed Chinese speech as syllable-by-syllable English gibberish.

@@ -172,8 +172,9 @@ def script_family(language: str | None) -> str | None:
 #: where this list deliberately diverges from a sibling project's: `范` (范仲淹), `余` (余先生), `涌`
 #: (東涌), `涂`, `朴` (朴槿惠), `杰`, `岳`, `郁`. Invariant 69 forbids translating a name, and an
 #: obedient model told `范 -> 範` writes `範仲淹`. That project ranks them the other way because its
-#: corpora are technical rather than literary corpora; the two answers are both defensible and the reason is recorded rather
-#: than averaged. `吁` (長吁短嘆) and `咨` (咨文) are the same call on an idiom rather than a name.
+#: corpora are technical rather than literary; the two answers are both defensible and the
+#: reason is recorded rather than averaged. `吁` (長吁短嘆) and `咨` (咨文) are the same call
+#: on an idiom rather than a name.
 #:
 #: **Read once, character by character, and pinned.** `test_the_big5_letthrough_is_fully_classified`
 #: asserts SHARED ∪ SIMPLIFIED is EXACTLY the table's Big5-encodable rewrites, so a zhconv upgrade

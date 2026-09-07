@@ -3,8 +3,8 @@
 `config.settings_path`, `notebook.DEFAULT_NOTEBOOKS_DIR` and `api._TRACE_DIR` are all resolved
 against the process's working directory, so without this a test run picks up whatever the developer
 happens to have in their own `notebooks/` — and a settings file written by a live check silently
-changed the result of an unrelated TTS test. That is the same class of failure a sibling project's
-`an ASR-locale design note` records: an instrument that does not reproduce production's shape
+changed the result of an unrelated TTS test. That is the same class of failure a sibling
+project's ASR-locale design note records: an instrument that does not reproduce production's shape
 returns the right answer to the wrong question.
 
 Default arguments bind at definition time (`def settings_path(base_dir=_DEFAULT_NOTEBOOKS_DIR)`), so

@@ -2,7 +2,7 @@
 
 The web frontend's design contract. Implementation (`index.html`/`style.css`/`app.js`) follows this
 file. Architecture and the full decision record (why this exists, what was audited, what's deferred)
-live in the web-UI blueprint and `AGENTS.md` — this file owns *look and feel* only, the
+live in `AGENTS.md` and `docs/invariants/` — this file owns *look and feel* only, the
 same split `ctx-distillery/studio/DESIGN.md` established for the sibling family.
 
 **This is NOT a replay-only trace console, unlike every sibling's `studio/`.**
@@ -63,8 +63,7 @@ are `style.css`'s `:root` blocks — source of truth**; the values below are des
 **Both `--text-faint` values and Study's `--highlight-wash` were corrected during the
 pre-implementation audit** — the originals measured 3.08:1 (Paper) and 2.97:1 (Study) against
 `--surface-3` (WCAG AA's floor is 4.5:1 for normal text), and the original wash was self-contrast ≈1.0
-against an elevated panel. See the web-UI blueprint's audit round 1 for the computed
-values behind the fix.
+against an elevated panel. The computed values behind the fix are in `CHANGELOG.md`.
 
 **Accent discipline** (same "do not cross-use" rule the siblings enforce): `--accent` only on
 interactive elements and the citation highlighter; `--studio-accent` only inside the Studio panel,
@@ -116,7 +115,7 @@ stays exactly as strict; a YouTube link is ingested transparently by the SAME fi
 server-side by `ingest.ingest_one` — no separate UI affordance needed, just a `<p class="hint">`
 under the URL input naming that YouTube links work and are captions-only, per invariant 33),
 paste-text posts to the SAME endpoint with `{texts: [...]}` (a post-launch addendum — see
-the web-UI blueprint's "Post-launch addendum"), and file upload POSTs
+`docs/invariants/30-upload-and-paste-do-not-reopen-the-path-ban.md`), and file upload POSTs
 `multipart/form-data` to `POST /notebooks/{id}/sources/upload` (`.pdf`/`.txt`/`.md`, one file per
 request) — never a local-path string, which is what keeps it from reopening invariant 26's
 local-path ban. Below: the source list, one `.source-item` per source — kind, origin
@@ -131,10 +130,9 @@ there with their `"ts:<mm:ss>"` locators, the same as any other source's blocks.
 Turn history, oldest first, scrolled to bottom on append. A question renders as a right-aligned
 accent-filled bubble; an answer renders left-aligned in a bordered well, with citations rendered inline
 per §2 plus a compact citation list below (source id + locator, a checkmark or an "unverified" flag).
-Each citation-list row is itself clickable — opening the source-viewer modal (§5.7) with that
-citation's block highlighted — regardless of whether its `quote` matched inline in the answer text;
-a row also carries a secondary `⌁ trace` icon (only when a run id is known) that opens the Phase 3
-trace detail (§5.5) instead, stopping the row's own click from also firing.
+SUPERSEDED by invariant 58's References panel: a citation stroke calls `focusReference`, which
+expands that entry's `.ref-card`, and the source viewer opens from the SOURCES row instead. The
+per-row `⌁ trace` icon is gone; `⌁` now marks the persisted steps pill only.
 A pending turn (the model is still running — this is a real, potentially tens-of-seconds-long RLM
 loop, invariant 21) shows LIVE, updating copy from the Phase 3 reasoning ticker (§5.5) in place of a
 static "Thinking…" — the ticker is a secondary, opt-in layer; losing it (a dropped SSE connection)
@@ -274,8 +272,10 @@ nothing in this section's UI should imply a note is "grounded" before that point
 
 ### 5.9 Chat overview — the "generate the research artifact" action (Post-launch addendum 5)
 
-`#chat-overview`, a block ABOVE `#chat-history` (never inside it: `ask` rebuilds the history list
-wholesale from `state.turns` after every answer, which would wipe anything else in there).
+`#chat-overview`, the thread's FIRST ENTRY, inside `#chat-history` (invariant 57). It was a block
+ABOVE it originally, because `ask` rebuilt the history wholesale from `state.turns` and would have
+wiped anything in there; `rebuildHistory` re-appends the overview node now, so it simply scrolls
+away as the conversation grows instead of permanently owning up to half the column.
 
 Three states, one container (the third was added by invariant 38 and this list went stale at two):
 
@@ -291,9 +291,10 @@ Three states, one container (the third was added by invariant 38 and this list w
   run. `+ Save as note` stays here especially — a stale overview is precisely the one worth keeping
   before regenerating.
 
-Hidden entirely when the notebook has no sources. Bounded at `max-height: 45%` with its own scroll:
-a Summary runs to several paragraphs, and as an unbounded flex item it would refuse to shrink,
-collapse `.chat-history`, and push the ask box off screen.
+Hidden entirely when the notebook has no sources. It carried `max-height: 45%` and its own
+scroller while it was a SIBLING of `.chat-history` — as an unbounded flex item it would have
+refused to shrink and pushed the ask box off screen. Inside the scroller that reason evaporates,
+and `style.css` says so: "NO `max-height` and no scroller of its own any more".
 
 **Why it exists.** Adding a source used to leave the screen doing nothing — Chat said "ask a
 question once you've added a source", Studio said "pick a tab to generate it", and both waited on
@@ -315,8 +316,10 @@ not just when the notebook does).
 Minimal: 1px hairline borders between surface steps, `var(--radius)` (6px) on interactive elements,
 no glassmorphism, no marketing gradients. The header uses a subtle `backdrop-filter: blur` over a
 translucent background, matching the sibling studios' sticky-header treatment. Phase 3's ticker is
-deliberately NOT an animated signature — it's plain live-updating TEXT in an existing pending slot,
-no spinner, no pulse, no sweep. The one new interaction affordance (`.ticker-toggle`,
+originally NOT an animated signature — plain live-updating TEXT in an existing pending slot. That
+held until a run had to show it was alive across minutes: `run-pulse`, `source-sheen` and `spin`
+exist now (invariant 47), and the constraint that survived is that motion marks a RUNNING state and
+nothing else. The one new interaction affordance (`.ticker-toggle`,
 `.citation-clickable`) uses only the existing hover/focus language already established for buttons
 and tabs, not a new visual language of its own.
 

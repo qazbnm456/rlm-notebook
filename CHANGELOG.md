@@ -11,6 +11,45 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **a sibling project scrubbed, the other sibling's fingerprint scrubbed, and every doc-drift item the
+  three-reviewer round left open is now closed.**
+
+  **Names.** a sibling project is private and is gone from all six tracked sites (`naming.py`, `schema.py`,
+  `tests/conftest.py`, three CHANGELOG entries), including the filename `an ASR-locale design note`,
+  which identified it as surely as the name did. `ctx-distillery`, `cve-reverser`, `diff-sentry` and
+  `toolscout` are not private and stay.
+
+  **Fingerprint.** Removing a name is not removing an attribution: "shipped a Traditional Chinese
+  document set", "its corpora are technical rather than literary corpora" and "an 89,160-Han-character deployment" identified
+  the project to anyone who knew it existed. Rewritten to carry the same evidence — bodies versus
+  TITLES, technical rather than literary corpora, 89,160 Han characters of deployed output — without
+  the shape. Zero occurrences of `document set` remain in any tracked file.
+
+  **The dead "web-UI blueprint" pointers, 16 of them, now point at tracked files.** That document is
+  deliberately gitignored working notes, so `api.py`, `schema.py`, `parsers/youtube.py` and
+  `web/DESIGN.md` were sending readers to "Phase 3 addendum P3.1" and "audit round 1" — findable by
+  one person. Each now names the `docs/invariants/` file that actually holds the reasoning. The two
+  in `CHANGELOG.md` stay: they are history and say "gitignored" themselves.
+
+  **Four places described a UI that had been replaced.** Invariants 31, 36 and 44 and `DESIGN.md`
+  still specified the per-answer citation LIST — clickable `.citation-row`, a per-row `⌁ trace`
+  icon, `showCitationTurn`/`_shownKey` — none of which exists in `app.js`; invariant 58's References
+  panel replaced all of it, and `style.css` keeps only dead rules. Invariant 44's stated exclusion
+  list was the sharpest case: it named two dead classes and MISSED `.reference-link`, the live one,
+  which is why clicking "2 references" used to jump the podcast player. **A stale exclusion list
+  costs nothing until the thing it forgot to name ships.** Marked SUPERSEDED rather than deleted,
+  because older CHANGELOG entries still describe the earlier shape.
+
+  Also: `AGENTS.md`'s Verify section claimed `tests/test_runner.py` needs the `api` extra to be
+  collected. It has no `importorskip`, `rlm_notebook.runner` imports with `fastapi`/`starlette`/
+  `httpx`/`uvicorn` blocked (verified with a meta-path blocker, as that section itself demands), and
+  CI names only `test_api.py` — so its 9 tests, invariant 22's `killpg` grandchild tripwire among
+  them, run on a bare `uv sync`. `api.py` documented a citation "view reasoning" link that no client
+  calls. `README` described a citation → source-viewer modal reachable from no shipped affordance,
+  and understated the unauthenticated surface by omitting three live `DELETE`s and the global
+  `PUT /settings`. `DESIGN.md` contradicted invariant 57 on `#chat-overview` and claimed "no spinner,
+  no pulse, no sweep" against three shipped keyframes.
+
 - **A third reviewer checked the docs against the code and found two claims that were simply
   false, one of them a rule forbidding exactly the sentence another file was making.**
 
@@ -739,7 +778,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   **Where this diverges from a sibling project and why**: a PROPER NOUN keeps a character SHARED even
   where the Simplified drift is commoner (`范` 范仲淹, `余`, `涌` 東涌, `涂`, `朴`, `杰`, `岳`,
   `郁`). Invariant 69 forbids translating a name, and an obedient model told `范 -> 範` writes
-  `範仲淹`. That project ranks them the other way because its corpora are technical rather than literary corpora. Both answers
+  `範仲淹`. That project ranks them the other way because its corpora are technical rather than literary. Both answers
   are defensible; the reason is recorded rather than averaged.
 
   **Two independent readings, and each caught real errors in the other.** 72 agreed, 16 disagreed.
@@ -910,8 +949,8 @@ questions with verifiable citations, and get a distilled research artifact out.
   zip.
 
   **Eight characters are now flagged despite the Big5 gate** (`_MEASURED_OTHER_SCRIPT`). `体 适 荐
-  离 据` are five of the sibling's 29 real Simplified sites across 8 document sets and 89,160 Han
-  characters — `适` being the exact title, `執行環境與作業系統适配`, that started its conversion
+  离 据` are five of the sibling's 29 real Simplified sites across 89,160 Han
+  characters of deployed output — `适` being the exact title, `執行環境與作業系統适配`, that started its conversion
   work and that the bare gate would have left unfixed. `构 与 么` are this project's own gaps.
 
   This is where the two projects' tolerances legitimately differ and the difference is recorded
@@ -1386,7 +1425,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   composes into a single-script language's rule too, because the failure is about wording.
 
   **Borrowed: the script rule.** The sibling pins the script in the script itself (`概览` must be
-  `概覽`) after a real run returned a document set whose body text were Traditional while every page TITLE
+  `概覽`) after a real run returned a document set whose body text was Traditional while every TITLE
   came back Simplified, so the nav and the page disagreed on screen. This project had NO script rule
   at all — just "write your prose in {language}", the exact under-specification that failure came
   from.
@@ -3064,7 +3103,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   speaking", and transcribed Chinese speech as syllable-by-syllable English gibberish.
   `Accept-Language` is the same shape of wrong question. `naming.SuggestLanguage` (a cheap
   `dspy.Predict`, not an RLMTask) weighs the header, the sources' language, and any questions
-  already asked, with questions weighted highest. Two more of a sibling project's lessons applied directly: a
+  already asked, with questions weighted highest. Two more of that project's lessons applied directly: a
   ladder cannot correct its own input, and an instrument that cannot reproduce production's shape is
   not evidence — so the live check sends the `Accept-Language` a real browser sends.
 
@@ -3158,7 +3197,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   That same live check left a settings file in the working directory and turned an unrelated TTS
   test red, because every path here resolves against the process CWD. Rather than delete the file,
   `tests/conftest.py` now isolates every test into its own directory — a developer's local state
-  silently changing a test result is the same class a sibling project's ASR locale design records.
+  silently changing a test result is the same class a sibling project's ASR-locale design records.
 
 - **Twenty-second slice: the Audio Overview persists and plays from the page.** Phase 2 deliberately
   kept no audio past one request — no file-serving endpoint, no retention to get right — and it cost

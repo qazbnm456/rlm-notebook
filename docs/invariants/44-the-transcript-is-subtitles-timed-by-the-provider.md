@@ -46,9 +46,11 @@ read from `getBoundingClientRect`, not `offsetTop`, so the arithmetic doesn't br
 stops being positioned. Only a TIMED transcript becomes a scroll box.
 
 **A transcript line seeks on click, but not when the click was meant for something inside it** —
-excluding `.citation, .citation-row, .citation-detail, .podcast-timecode`. `.citation-detail` is
-the expanded trace payload appended as a SIBLING of the citation list inside the same utterance,
-so clicking into that JSON would jump the player. `click` also fires on the mouseup ending a
+excluding `.citation, .reference-link, .podcast-timecode`. `.reference-link` is the "N references"
+control, a SIBLING inside the same utterance, so clicking it would both jump the player and switch
+the panel away. That entry was MISSING while two dead classes from the replaced citation-list markup
+(`.citation-row`, `.citation-detail`) were still listed — **a stale exclusion list costs nothing
+until the thing it forgot to name ships**. `click` also fires on the mouseup ending a
 drag-selection, so a non-collapsed selection suppresses the seek. The `play()` promise is caught:
 a cleared file should be a silent no-op, not an unhandled rejection. **And a `.is-seekable:hover`
 rule must not touch a property `.is-speaking` sets** — the fix is DISJOINT PROPERTIES, not lower

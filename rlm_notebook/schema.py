@@ -215,13 +215,14 @@ class ChatTurn(BaseModel):
     #: migration needed) or for a turn created outside the API (e.g. `cli.py`, which has no
     #: subprocess-per-run concept to name). Lets the web UI's Chat panel offer a "view reasoning"
     #: link back to `traces/{run_id}.jsonl` on a re-opened notebook's history, even long after the
-    #: run finished — see the web-UI blueprint's Phase 3 addendum.
+    #: run finished — see `docs/invariants/29-the-web-ui-is-a-product-surface.md`.
     run_id: str | None = None
 
 
 class Note(BaseModel):
     """A user-curated note — written directly, or copied from a past `Answer`'s text (see the web
-    UI's "Save as note" button, the web-UI blueprint's Notes addendum). Deliberately
+    UI's "Save as note" button;
+    `docs/invariants/32-notes-are-uncited-until-promoted.md`). Deliberately
     carries NO citations of its own: a note's text may have originated from a citation-grounded
     `Answer`, but the note itself is not re-verified against `sources` (AGENTS.md invariant 5's
     coordinate-only guarantee doesn't extend to freeform notes) until/unless it's PROMOTED into a
@@ -295,8 +296,8 @@ class Notebook(BaseModel):
     #: persisted (`naming.SuggestLanguage`). `None` = never resolved, which falls back to today's
     #: behaviour. `RN_OUTPUT_LANGUAGE` overrides it at generation time, so changing the env takes
     #: effect without re-resolving. Records the CURRENT setting only: an artifact generated before it
-    #: changed carries no record of what it was written in — the same gap a sibling project had to close by
-    #: adding a locale column to its transcripts, noted here rather than fixed.
+    #: changed carries no record of what it was written in — the same gap a sibling project had to
+    #: close by adding a locale column to its transcripts, noted here rather than fixed.
     output_language: str | None = None
     #: The persisted Audio Overview, if one has been generated. The mp3 itself lives beside the
     #: notebook file (see `notebook.audio_path`), not in here — a multi-MB base64 blob inside the

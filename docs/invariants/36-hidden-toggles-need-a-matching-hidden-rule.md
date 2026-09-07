@@ -23,12 +23,12 @@ specificity and is the one that actually checks it.
 **A flex column stretches its children to full width, and that is a DEFAULT, not a choice** —
 only what should span may span.
 
-**A re-click on an already-open citation detail COLLAPSES it** (`showCitationTurn`'s `_shownKey`)
-rather than blanking to "Loading…" and re-fetching an identical payload. Keyed on WHICH citation
-is shown, so clicking a different one switches instead of closing — and the key includes
-`quote`, because text and web sources emit a single block with locator `"whole"`, so every
-citation into one such source shares that pair. Collapsing bumps the staleness token, so an
-in-flight response cannot repopulate a panel the user just closed.
+**SUPERSEDED**: this invariant used to require that a re-click on an already-open citation detail
+COLLAPSE it (`showCitationTurn`'s `_shownKey`) rather than blank to "Loading…" and re-fetch an
+identical payload, keyed on WHICH citation including its `quote` — because text and web sources emit
+a single block with locator `"whole"`, so every citation into one such source shares the
+`source_id|locator` pair. None of that markup survives; invariant 58's References panel replaced it.
+**The keying lesson does transfer** and is why `referenceKey` includes `quote` today.
 
 **Known gap**: this project has no JavaScript test runner at all (zero-build vanilla JS, by
 design), so interactive UI state has no test seam. A source-tree assertion catches the

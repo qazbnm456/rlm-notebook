@@ -24,7 +24,7 @@ DELETEs and the global `PUT /settings`: all unauthenticated, like everything els
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
 already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`
-(the web-UI blueprint's Phase 2 addendum has the full reasoning). A generated episode IS
+(`docs/invariants/29-the-web-ui-is-a-product-surface.md` has the full reasoning). A generated episode IS
 persisted — one file per
 notebook, served by `GET /notebooks/{id}/audio/file`. That reverses Phase 2's original
 no-audio-past-one-request decision, which cost the user their episode on every reload; see AGENTS.md
@@ -36,7 +36,7 @@ opaque bytes the caller already had, plus a claimed filename used for kind detec
 the CLIENT picks the run id, not the server, so it can open the trace stream before/alongside firing
 the request that will populate it. `_run_isolated` exclusively creates the trace file before
 spawning the subprocess (a hard uniqueness gate, mapped to a 409 on collision — see
-the web-UI blueprint's Phase 3 addendum P3.1 for why this is a real, not merely
+`docs/invariants/29-the-web-ui-is-a-product-surface.md` for why this is a real, not merely
 unlikely, concern once a client partly controls the id). See AGENTS.md invariant 29 for why a
 reasoning-trace SSE endpoint was originally deferred as unbuildable, and what changed.
 
@@ -510,7 +510,7 @@ async def list_notebooks() -> NotebookListResponse:
     """Every notebook that exists, for the web UI's notebook switcher. Reads the same
     `notebook.DEFAULT_NOTEBOOKS_DIR` constant every other notebook operation already uses — there is
     no separate config surface for this (checked: `NotebookConfig` has no notebooks-directory field
-    at all; see the web-UI blueprint's audit note). Reports each notebook's own `id`
+    at all; see `docs/invariants/25-the-api-has-no-authentication.md`). Reports each notebook's own `id`
     field, never the slugged filename stem (`notebook.slug()` is lossy, so the two can differ for
     the same file). A corrupted notebook file is listed under `unreadable` by its filename stem
     rather than silently dropped or breaking the whole listing."""
@@ -868,7 +868,8 @@ async def upload_source(notebook_id: str, request: Request) -> NotebookResponse:
     a path it reads from its own filesystem.
 
     **Size-cap enforcement, empirically verified before landing this** (a prior draft's plan didn't
-    actually enforce anything — see the web-UI blueprint's "Post-launch addendum" for
+    actually enforce anything — see
+    `docs/invariants/30-upload-and-paste-do-not-reopen-the-path-ban.md` for
     the full audit finding). Deliberately does NOT declare `file: UploadFile = File(...)` as a
     parameter — FastAPI parses the ENTIRE multipart body itself, inside its own request-handling
     code, BEFORE any handler with a `File`/`Form` parameter ever runs, for ANY route shaped that
@@ -981,7 +982,8 @@ async def get_source(notebook_id: str, source_id: str) -> SourceDetailResponse:
 class RunOptions(BaseModel):
     """Shared optional body for every endpoint that runs an isolated RLMTask — a CLIENT-supplied
     run id, so the caller can open `GET .../runs/{run_id}/stream` before or alongside firing the
-    request that will populate it (see the web-UI blueprint's Phase 3 addendum P3.1).
+    request that will populate it
+    (see `docs/invariants/29-the-web-ui-is-a-product-surface.md`).
     `None` (the default — an absent body binds to this) reproduces today's exact behavior: a
     server-generated id, invisible to the caller until the response arrives."""
 
@@ -1585,7 +1587,8 @@ async def audio(
     notebook_id: str, request: Request, body: AudioOptions = _NO_AUDIO_OPTIONS
 ) -> AudioResponse:
     """Generate a two-host podcast script grounded in `notebook_id`'s sources and synthesize it to
-    audio. Two host-side steps, not one (the web-UI blueprint's Phase 2 addendum):
+    audio. Two host-side steps, not one
+    (`docs/invariants/29-the-web-ui-is-a-product-surface.md`):
     `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide` already use — the
     only step that touches `dspy`/`rlm_harness`, and the only one cancellable via
     `POST .../cancel` — then TTS synthesis (`tts.py`) runs AFTER that subprocess returns, IN-PROCESS
@@ -2004,7 +2007,8 @@ async def _tail_trace_events(run_id: str):
 
 @app.get("/notebooks/{notebook_id}/runs/{run_id}/stream")
 async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
-    """Live reasoning-trace ticker (see the web-UI blueprint's Phase 3 addendum P3.2).
+    """Live reasoning-trace ticker
+    (see `docs/invariants/52-the-ticker-carries-words-never-the-output.md`).
     `run_id` already encodes `notebook_id`, by construction (`_derive_run_id`) — checked explicitly
     here too (mirroring `citation_turn`'s same check) rather than silently trusting the caller
     passed a matching pair, so a mismatched `notebook_id` can't be used to stream a trace that
@@ -2032,7 +2036,7 @@ async def stream_run(notebook_id: str, run_id: str) -> StreamingResponse:
 @app.get("/notebooks/{notebook_id}/runs/{run_id}/citation-turn")
 async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: str) -> dict:
     """Which trace turn (if any) shows the model reading a specific citation's source span (see
-    the web-UI blueprint's Phase 3 addendum P3.3). Searches the ENTIRE serialized
+    `docs/invariants/29-the-web-ui-is-a-product-surface.md`). Searches the ENTIRE serialized
     payload of each event, in step order, for the first one containing the literal marker
     `[[SRC:<source_id>|<locator>]]` — not a fixed field list, which audit round 1 found misses real
     marker occurrences in a `sub_call` event's `input`/`raw`/`processed` fields (a hardcoded
@@ -2046,9 +2050,12 @@ async def citation_turn(notebook_id: str, run_id: str, source_id: str, locator: 
     THAT event, though it may still turn up in another one.
 
     404s (never crashes) when the trace file doesn't exist at all — `traces.prune_traces` deletes
-    traces on a policy (`RN_TRACE_RETENTION_DAYS`/`RN_MAX_TRACE_FILES`), so a citation's "view
-    reasoning" link is durable for as long as that policy keeps its run's file and no longer. A
-    missing trace degrades this ONE affordance, not the rest of the page."""
+    traces on a policy (`RN_TRACE_RETENTION_DAYS`/`RN_MAX_TRACE_FILES`), so any affordance built on
+    this lookup is durable for as long as that policy keeps its run's file and no longer. **No
+    client calls it today** — the per-citation "view reasoning" link it was built for was removed
+    when the citation list became the References panel; the endpoint is kept because
+    `ChatTurn.run_id` still persists the coordinate it needs (invariant 29). A missing trace
+    degrades this ONE affordance, not the rest of the page."""
     if not run_id.startswith(f"{slug(notebook_id)}-"):  # slugged, same reason as `stream_run`
         raise HTTPException(404, f"run {run_id!r} does not belong to notebook {notebook_id!r}")
     trace_path = _TRACE_DIR / f"{run_id}.jsonl"
@@ -2117,7 +2124,7 @@ async def run_trajectory(notebook_id: str, run_id: str) -> dict:
 #: `html=True` serves `index.html` for `/` and any other directory-shaped request, matching how a
 #: single-page static app is normally served. Resolved relative to the INSTALLED PACKAGE directory
 #: (`Path(__file__).parent`), not the process's current working directory — the same reasoning
-#: the web-UI blueprint's audit note gives for why these assets live under
+#: `docs/invariants/29-the-web-ui-is-a-product-surface.md` gives for why these assets live under
 #: `rlm_notebook/web/` rather than a top-level `web/`: a wheel installed elsewhere on disk must still
 #: find them.
 class _RevalidatingStatics(StaticFiles):

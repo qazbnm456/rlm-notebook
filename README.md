@@ -126,8 +126,10 @@ language too.
 
 ## HTTP API
 
-**No authentication of any kind.** Any caller that can reach this API can create/read/ask/cancel
-against ANY notebook id — there is no concept of an owner. Run it only on `localhost` or an
+**No authentication of any kind.** Any caller that can reach this API can create, read, `ask`
+against, cancel, RENAME or irreversibly DELETE any notebook id — sources, notes and the whole
+conversation each have a live `DELETE` — and can change GLOBAL behaviour for notebooks it never
+named through `PUT /settings`. There is no concept of an owner. Run it only on `localhost` or an
 otherwise fully-trusted network; do not expose it to the internet or a shared network as-is.
 
 ```bash
@@ -216,11 +218,11 @@ Once the server above is running, open `http://localhost:8000/` in a browser: a 
 product surface (source management — URL, pasted text, or file upload — citation-grounded chat, a
 Studio panel with Guide tabs, a podcast player, and Notes, and a live "what is the model doing
 right now" reasoning ticker), not a developer trace console. Zero build step — it's served
-directly out of `rlm_notebook/web/` by the same FastAPI app. Clicking a citation opens a
-source-viewer modal with the full original passage highlighted and scrolled into view —
-NotebookLM's most basic closed loop — with a secondary `⌁ trace` icon on the same row still
-showing the trace turn where the model read that source span, a transparency mechanism, never a
-stronger faithfulness claim than `citations.py` itself already makes. Every Chat answer can be
+directly out of `rlm_notebook/web/` by the same FastAPI app. Clicking a citation in an answer
+lights up its entry in the References panel — number, source, provenance chip, use count and the
+passage — and clicking a row in Sources opens the full original text in a viewer. That is
+NotebookLM's most basic closed loop, and it is a transparency mechanism, never a stronger
+faithfulness claim than `citations.py` itself already makes. Every Chat answer can be
 saved as a note, and every note can later be promoted into a real, citable source — NotebookLM's
 own research loop of reading, noting, and deepening a notebook over successive turns. A generated
 podcast plays in-page (and downloads) with a subtitle-style transcript: a timecode per line, click

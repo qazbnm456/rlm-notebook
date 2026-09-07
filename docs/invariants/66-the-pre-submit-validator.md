@@ -73,7 +73,7 @@ script's inventory.
   that is where this list deliberately diverges from a sibling project's: `范` (范仲淹), `余`,
   `涌` (東涌), `涂`, `朴`, `杰`, `岳`, `郁`. Invariant 69 forbids translating a name and an
   obedient model told `范 -> 範` writes `範仲淹`. That project ranks them the other way because
-  its corpora are technical rather than literary corpora; both answers are defensible and the reason is recorded rather
+  its corpora are technical rather than literary; both answers are defensible and the reason is recorded rather
   than averaged. `吁` and `咨` are the same call on an idiom, and are its weaker half.
 - **The membership test is BIG5-ENCODABILITY, not `zhconv`'s own `SIMPONLY` set.** That set was
   tried first and contains `干`, `台`, `群` and `里` — ordinary Traditional characters this
