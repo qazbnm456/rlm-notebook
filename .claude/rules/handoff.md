@@ -3,7 +3,8 @@
 `rlm-notebook` already routes durable knowledge into its tracked docs — keep using them, and when
 the conversation is about to compact, preserve only what they do NOT already hold:
 
-- **Stable invariants** → the **Invariants** section of `AGENTS.md`.
+- **Stable invariants** → the index in `AGENTS.md` (the rule + the one sentence that stops you
+  breaking it) and `docs/invariants/<n>-<slug>.md` (the argument, the cost, the traps).
 - **Resolved decisions / shipped changes** → `CHANGELOG.md` (under `[Unreleased]` until cut).
 - **Open / proposed work** → the issue tracker, or the CHANGELOG's `[Unreleased]` section.
 
@@ -11,8 +12,8 @@ So a handoff summary should carry the *in-flight session state* those files miss
 order:
 
 1. **Decisions we agreed on this session** not yet in CHANGELOG/AGENTS — design choices and the
-   *reason*. Promote durable ones into AGENTS.md (invariant) or CHANGELOG.md (change) before they
-   fade.
+   *reason*. Promote durable ones into AGENTS.md + `docs/invariants/` (invariant) or CHANGELOG.md
+   (change) before they fade.
 2. **Files / symbols changed**, as `path:symbol` one-liners on the *final* shape. Drop diffs and
    intermediate revisions.
 3. **Current status.** What passes `uv run pytest` (and the count), what is broken, last command
@@ -24,7 +25,8 @@ order:
 
 **Do NOT preserve** (reconstructable / already durable):
 
-- Anything already in `AGENTS.md`, `CHANGELOG.md`, `README.md`, or `pyproject.toml`.
+- Anything already in `AGENTS.md`, `docs/invariants/`, `CHANGELOG.md`, `README.md`, or
+  `pyproject.toml`.
 - Tool-call transcripts, `grep` output, file listings, full file contents readable from disk.
 - Step-by-step exploration narration; speculative reasoning that led to no decision.
 
@@ -36,7 +38,7 @@ order:
 - Status: <what passes pytest, what doesn't, last command + result>
 
 ## Decisions
-- <decision> — <why>   (→ promote to AGENTS.md invariant / CHANGELOG.md)
+- <decision> — <why>   (→ promote to AGENTS.md index + docs/invariants/ / CHANGELOG.md)
 
 ## Changed
 - <path:symbol> — <what & why>

@@ -23,7 +23,13 @@ __pycache__/
 # decisions — not tracked, per the same reasoning as not publishing raw design-debate transcripts:
 # the resolved "what and why" belongs in AGENTS.md/CHANGELOG.md, not the working notes that
 # produced it.
-/docs/
+#
+# `docs/invariants/` is the ONE exception and IS tracked: it holds the argument behind each
+# indexed invariant, which is durable by definition. Note the shape — `/docs/*` excludes the
+# CONTENTS, where `/docs/` would exclude the directory itself and stop git ever descending into
+# it, which makes the negation below silently dead. Verified in a scratch repo, not assumed.
+/docs/*
+!/docs/invariants/
 
 # macOS
 .DS_Store

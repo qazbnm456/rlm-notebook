@@ -11,6 +11,32 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The 76 invariants are an INDEX in `AGENTS.md` plus one file each under `docs/invariants/`.**
+  `AGENTS.md` goes from **53,300 to 8,800 tokens** — every request had been carrying the full
+  argument for OCR two-column reading order while someone edited CSS. Each index entry keeps the
+  rule verbatim and one sentence of the sharpest reason; the argument, the cost and the traps move
+  to `docs/invariants/<n>-<slug>.md`, reachable by a `([why](…))` link. Every one of the 76 files
+  was verified to contain its invariant's original text verbatim before the section was replaced.
+
+  **Agent-agnostic on purpose, and that ruled out the mechanism that would have been easier.**
+  Claude Code's `.claude/rules/` with `paths:` frontmatter auto-loads a rule when a matching file is
+  read — no model choice involved — but nothing except Claude Code reads it, so splitting that way
+  would have hidden 41% of the rulebook from the very agents the `AGENTS.md` rename exists to serve.
+  A markdown link works everywhere. The cost is real and stated: a linked file is read only if the
+  agent chooses to, which is why every index entry carries a reason and the preamble says to read
+  the file before overturning anything.
+
+  **The index is declared non-growing, with the failure mode measured rather than imagined.** A
+  sibling repo made this same split: its indexed section has held at ~5,100 tokens for 56 decisions,
+  while an un-indexed section beside it grew to ~55,600. So the split is not self-sustaining — the
+  rule is that an index entry which has acquired a second paragraph has taken on something belonging
+  to `docs/invariants/` or `CHANGELOG.md`, and moves there.
+
+  `docs/` is otherwise gitignored here as a scratch area, so `docs/invariants/` is a tracked
+  exception. The shape matters and was verified in a scratch repo rather than assumed: `/docs/*`
+  excludes the CONTENTS and lets `!/docs/invariants/` fire, where `/docs/` would exclude the
+  directory itself and stop git ever descending into it, making the negation silently dead.
+
 - **The agent guide is `AGENTS.md` now, with `CLAUDE.md` as a one-line `@AGENTS.md` bridge.**
   `AGENTS.md` is the cross-agent standard; Claude Code reads `CLAUDE.md` and not `AGENTS.md` (its own
   documentation says so in as many words), so a project with only one of the two hands the other side
