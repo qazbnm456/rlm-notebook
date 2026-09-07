@@ -12,9 +12,12 @@ co-development against an in-progress rlm-harness checkout, install it editable 
 uv pip install -e ../rlm-harness
 ```
 
-**This file is the RULEBOOK: each invariant is what must hold, plus why it exists so a later reader
-does not "simplify" it away. The incident that produced it — who found it, what was measured, which
-draft was wrong — lives in `CHANGELOG.md`.** Put new history there, not here.
+**This file is the INDEX of the rulebook: one entry per invariant, stating what must hold and the
+one thing that would stop you breaking it.** The argument that keeps a later reader from
+"simplifying" it away lives in [`docs/invariants/`](docs/invariants/), one file per invariant; the
+incident that produced it — who found it, what was measured, which draft was wrong — lives in
+`CHANGELOG.md`. Three places, and the table under **Invariants** below says which gets what. Put
+new history in the CHANGELOG and new argument in `docs/invariants/`, not here.
 
 ## Verify
 

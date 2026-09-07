@@ -15,7 +15,12 @@ note into a real source), `POST /notebooks/{id}/ask`, `POST /notebooks/{id}/guid
 `GET /notebooks/{id}/runs/{run_id}/citation-turn` (a citation's trace-turn lookup),
 `GET /notebooks/{id}/audio/file` (the persisted episode), `POST /notebooks/{id}/title` (name a
 notebook from its sources), `POST /notebooks/{id}/overview` (the chat overview), and
-`GET`/`PUT /settings` (presentation settings — invariant 41). `/audio` is two
+`GET`/`PUT /settings` (presentation settings — invariant 41), `GET /settings/choices` (that page's
+dropdown values), `PUT /notebooks/{id}/title` (rename — a separate VERB from generating one,
+invariant 53), `DELETE /notebooks/{id}/sources/{source_id}`, `DELETE /notebooks/{id}/turns` (clear
+the conversation), `POST /notebooks/{id}/runs/{run_id}/cancel` (cancel ONE run, invariant 47) and
+`GET /notebooks/{id}/runs/{run_id}/trajectory` (the drawer's decomposition). Note the three
+DELETEs and the global `PUT /settings`: all unauthenticated, like everything else here. `/audio` is two
 host-side steps, not one: `GeneratePodcastScript` runs in the same isolated subprocess `ask`/`guide`
 already use, and TTS synthesis (`tts.py`) runs AFTER that subprocess returns, in-process here — see
 `audio()`'s own docstring for why that split is safe and doesn't touch `worker.py`/`runner.py`

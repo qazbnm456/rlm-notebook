@@ -12,8 +12,9 @@ boot plus several planner turns. This is one plain `dspy.Predict` over a short e
 
 It still runs inside the API's isolated subprocess, so AGENTS.md invariant 21 is untouched —
 `worker.py` only ever calls `.arun(**kwargs)` on whatever class it is handed, so satisfying that
-one method is the entire contract, and `api.py` continues to import neither `dspy` nor
-`rlm_harness`. Nothing here is reachable from the model's own REPL either (invariants 1/3/14's
+one method is the entire contract. (Invariant 21's guarantee is about EXECUTION, not imports —
+`api.py` does import both `dspy` and `rlm_harness` transitively, and that invariant forbids
+restating otherwise.) Nothing here is reachable from the model's own REPL either (invariants 1/3/14's
 reasoning): titling happens host-side, after ingestion, on text the model never gets to steer.
 
 A failure NEVER propagates. A title is a convenience; losing one must not cost the user the source

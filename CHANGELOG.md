@@ -11,6 +11,35 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **A third reviewer checked the docs against the code and found two claims that were simply
+  false, one of them a rule forbidding exactly the sentence another file was making.**
+
+  - **`naming.py` asserted that "`api.py` continues to import neither `dspy` nor `rlm_harness`".**
+    Invariant 21 names that sentence and says **"it is FALSE and was verified false"** — the
+    guarantee is about EXECUTION, not imports. Confirmed empirically: `import rlm_notebook.api` puts
+    both in `sys.modules`. One file in the package was asserting what an invariant explicitly forbids
+    asserting.
+  - **Invariant 6 and `README.md` said the injection flag was CLI-only and invisible to the API and
+    the web UI.** The premise was right (`AskResponse` carries no flags) and the conclusion wrong:
+    `api.py` emits `flags` on every source in `NotebookResponse` and on `SourceDetailResponse`, and
+    `app.js` renders an amber `⚠` chip in the Sources list — **from a block whose own comment cites
+    invariant 6 while contradicting it**. An ANSWER shows no flag; the SOURCE shows one everywhere.
+
+  Also corrected: `AGENTS.md`'s header still described the pre-split TWO-place arrangement and never
+  mentioned `docs/invariants/`, so an agent following it would have put the argument straight back
+  into the index the split exists to keep small. Invariant 33's "`web.py` is UNCHANGED" was falsified
+  by the carve-out one commit earlier. `api.py`'s `Endpoints:` list — which is also its OpenAPI
+  description — named 17 of 25 routes, omitting all three `DELETE`s. `max_tokens` was described as
+  "the PLANNER's" cap in two places, which invariant 59 explicitly corrects. `README.md` did not
+  mention `RN_FETCH_ALLOW_CIDRS`, the one new knob whose absence breaks every ingestion behind a
+  fake-IP proxy.
+
+  **Two of the three reviewers disagreed about invariant 75, and the disagreement was an artefact of
+  timing**: the second found its body undedented and carrying a stray section-closing line, the third
+  read the file after that was fixed and reported the finding as fabricated. Both were looking at
+  real states. Worth recording because a later reader comparing the two reports would otherwise trust
+  the wrong one — `git show d660f5f:docs/invariants/75-*.md` settles it.
+
 - **An independent review of the four preceding commits found that the SSRF carve-out's
   documentation and its test both asserted a guarantee the code did not provide.** `.env.example` and
   invariant 76 said "loopback and cloud-metadata targets stay refused regardless of what you list
@@ -102,10 +131,11 @@ questions with verifiable citations, and get a distilled research artifact out.
   Suite is **669 passed, 0 failed** — green for the first time in this sequence of changes.
 
 - **The 76 invariants are an INDEX in `AGENTS.md` plus one file each under `docs/invariants/`.**
+  (77 files: 1-76 plus the half-numbered 48.5.)
   `AGENTS.md` goes from **53,300 to 8,800 tokens** — every request had been carrying the full
   argument for OCR two-column reading order while someone edited CSS. Each index entry keeps the
   rule verbatim and one sentence of the sharpest reason; the argument, the cost and the traps move
-  to `docs/invariants/<n>-<slug>.md`, reachable by a `([why](…))` link. Every one of the 76 files
+  to `docs/invariants/<n>-<slug>.md`, reachable by a `([why](…))` link. Every one of the files
   was verified to contain its invariant's original text verbatim before the section was replaced.
 
   **Agent-agnostic on purpose, and that ruled out the mechanism that would have been easier.**

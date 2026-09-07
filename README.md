@@ -68,9 +68,10 @@ context for understanding a follow-up question only; every citation in every ans
 against the current sources regardless of what an earlier turn cited.
 
 Sources with a flagged prompt-injection pattern (see `injection_scan.py`) still answer normally;
-the flag is metadata on the source rather than a block. The CLI prints it alongside the answer; the
-HTTP API's `AskResponse` does not carry it today, so the web UI cannot show it either — stated
-because an earlier version of this paragraph implied otherwise.
+the flag is metadata on the source rather than a block. An ANSWER never carries one — `AskResponse`
+has no flags field — but the SOURCE shows it everywhere: the CLI prints it, the API returns it on
+each source, and the web UI puts an amber warning chip on the Sources row and a line in the source
+viewer.
 
 A YouTube URL ingests that video's captions — official if available, else auto-generated — never
 the video or audio stream itself (no `ffmpeg`, no transcription model, no API key needed). A video
@@ -191,7 +192,13 @@ upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) neve
 local-path string — only bytes the caller already had — so it doesn't reopen the local-path
 restriction `sources` already enforces. `GET .../sources/{source_id}` returns a source's full
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
-materially different exposure, alongside the trace stream/citation-turn lookup. A note carries no
+materially different exposure, alongside the trace stream/citation-turn lookup. **Behind a fake-IP proxy or split-DNS VPN?** Clash/Mihomo/Surge resolve every public hostname into
+a reserved range (default `198.18.0.0/16`), so the SSRF guard refuses it and EVERY web/YouTube
+ingestion fails with "resolves to a disallowed address". Set `RN_FETCH_ALLOW_CIDRS=198.18.0.0/16`
+to the range your resolver actually hands out. A value that would cover loopback, cloud metadata or
+RFC1918 is refused outright — see AGENTS.md invariant 76.
+
+A note carries no
 citations of its own until it's promoted into a real source — see AGENTS.md invariant 32. See
 `api.py`'s module docstring and AGENTS.md invariants 20-43.
 

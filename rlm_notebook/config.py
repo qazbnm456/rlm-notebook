@@ -143,7 +143,9 @@ class NotebookConfig:
     #: does not move. A transient first-turn parse failure is NOT the case to fix here: see
     #: `max_tokens` below, which is what actually caused the one that prompted this.
     max_retries: int = 1
-    #: The PLANNER's per-call generation cap, and the knob that actually killed the run this was
+    #: The per-call generation cap — applied to BOTH the main and the sub LM, since
+    #: `runtime.configure` builds ONE `lm_kwargs` and hands it to each (invariant 59) — and the
+    #: knob that actually killed the run this was
     #: raised for. 8192 is `RLMConfig`'s own default and is fine for an instruct model; it is a TRAP
     #: for a reasoning one, because dspy reads `content` and DISCARDS `reasoning_content`, so the
     #: chain-of-thought is billed against a cap it never appears in. Two deaths follow — the

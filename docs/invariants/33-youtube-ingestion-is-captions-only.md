@@ -39,7 +39,9 @@ it matters — `citations.py` and `CITATION_RULES` never parse it — so a new p
 **`_fetch_caption_track` reuses `parsers/web.py`'s hardened `_opener`** rather than a bespoke
 unguarded fetch. The caption URL comes from YouTube's own `timedtext` API, not from untrusted
 source content, so invariant 2's threat model doesn't apply — but reusing the hardened opener
-costs nothing and removes the residual risk instead of reasoning it away. `web.py` is UNCHANGED.
+costs nothing and removes the residual risk instead of reasoning it away. `web.py` was UNCHANGED
+by this reuse; invariant 76 later added `web.allow_nets`, which `youtube.py` also imports — a
+deliberate second shared point, not drift.
 
 ---
 
