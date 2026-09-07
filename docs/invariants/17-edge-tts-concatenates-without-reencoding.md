@@ -1,4 +1,4 @@
-# Invariant 17 — Edge TTS concatenates without reencoding
+# Invariant 17 — Edge-TTS concatenates without re-encoding
 
 **`EdgeTTSProvider` synthesizes one utterance at a time (one voice per `edge-tts` call) and
 concatenates the raw MP3 byte streams — it does not re-encode.** A deliberate tradeoff to avoid

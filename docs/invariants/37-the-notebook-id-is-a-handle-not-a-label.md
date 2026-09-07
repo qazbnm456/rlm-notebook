@@ -1,4 +1,4 @@
-# Invariant 37 — The notebook id is a handle not a label
+# Invariant 37 — The notebook id is a handle, not a label
 
 **A notebook's `id` is a HANDLE; `schema.Notebook.title` is the label a person reads. The UI
 mints the id itself and never asks for one.** Requiring a name before the first source made the

@@ -1,4 +1,4 @@
-# Invariant 46 — Run ids are announced before any pre work
+# Invariant 46 — Run ids are announced before any pre-work
 
 **Every run-taking handler ANNOUNCES its run id (`api._announced`) before any pre-work, not just
 before the spawn.** A DIFFERENT and much larger window than the one invariant 29 closed: that one

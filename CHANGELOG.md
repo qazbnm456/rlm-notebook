@@ -11,6 +11,56 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **An independent review of the four preceding commits found that the SSRF carve-out's
+  documentation and its test both asserted a guarantee the code did not provide.** `.env.example` and
+  invariant 76 said "loopback and cloud-metadata targets stay refused regardless of what you list
+  here; that check is syntactic and this does not reach it". True only for a URL whose host is a
+  LITERAL blocked IP. `is_safe_url` returns True for `http://evil.example.com/` however that name
+  resolves, so the DNS-rebinding check is the only layer that ever sees the resolved address — and
+  `allow_nets` short-circuits every property it tests. Under `RN_FETCH_ALLOW_CIDRS=0.0.0.0/0` a
+  public-looking hostname resolving to `127.0.0.1` or `169.254.169.254` was fetchable end to end,
+  through a redirect, on an API with no authentication (invariant 25).
+
+  **The test that "pinned" it was vacuous, and that is the sharper lesson.** It used literal-IP URLs,
+  which `is_safe_url` rejects before `resolved_host_is_safe` is consulted — so it passed with the
+  `resolved_host_is_safe` call DELETED from `_check_safe`, and all 669 tests stayed green under a
+  mutant that opened every IPv6 internal target. **A guard test that never reaches the guard is worse
+  than no test, because it gets cited as proof.** The replacement resolves a public-looking hostname
+  to each internal address in turn, and both mutants were re-run to confirm it now fails on them.
+
+  **Fixed by making the dangerous configuration unrepresentable rather than by softening the
+  wording.** `config._NEVER_ALLOWED` refuses any entry overlapping loopback, RFC1918, link-local,
+  unspecified or multicast, so `0.0.0.0/0`, `::/0` and `10.9.0.0/16` are rejected at read time and
+  the documented guarantee is true again by construction. It is an explicit list rather than
+  `ipaddress`'s `is_private`/`is_reserved`, because `198.18.0.0/16` reports `is_private` True and a
+  property-based rule would refuse the one value the variable exists to accept. This also closes a
+  hole the "does it parse" validator missed: `198.18.0.0/16` with a dropped character is
+  `198.18.0.0/1`, which normalises to `128.0.0.0/1` — cloud metadata and `192.168/16` included — and
+  parsed cleanly. Accepted and stated: a split-DNS VPN mapping into RFC1918 cannot be carved out.
+
+  The `SystemExit`-to-500 arm added in the previous commit was unpinned; it has a test now.
+
+- **The same review found four defects in the invariant split itself.**
+
+  - **Invariant 75's body was never dedented** — it is the last invariant, so the extractor swept in
+    the line that closed the whole section, and that line sits at indent 0, making the "minimum
+    indent" dedent a no-op. Three of its four paragraphs were rendering as indented CODE BLOCKS. The
+    stray closing line ("...behind every invariant above") went with it, where it was false.
+  - **`textwrap.fill` broke four hyphenated words across lines** (`rlm-notebook`,
+    `script-generation`, `source-handling`, `Accept-Language`), and markdown renders a paragraph
+    newline as a space, so the index read `rlm- notebook`. **Re-wrapping cannot fix this**: collapsing
+    `rlm-\n    notebook` turns the newline into a space, making them two separate words that wrap to
+    the same place. They had to be re-joined explicitly first.
+  - **The scrub's capitalisation pass fired on LINE start, not sentence start**, leaving
+    `The sibling` / `A sibling project shipped` across a wrap in invariant 39.
+  - **Two pointers promised "the full account" at what is now a three-line index entry**
+    (`pyproject.toml`, an older CHANGELOG entry); both now point into `docs/invariants/`. README said
+    `AGENTS.md` was the authoritative record without mentioning where the arguments went.
+
+  A new check asserts every index lead matches its detail file's opening statement VERBATIM — that is
+  what surfaced three of the four word-splits. The reference count in the rename entry was 139, not
+  144; corrected.
+
 - **The private sibling project is no longer named anywhere in tracked files.** 28 references
   across `CHANGELOG.md`, `docs/invariants/`, `instructions.py`, `config.py`, `trajectory.py` and four
   test files now say "a sibling project". Nothing else changes: every measurement it supplied — the
@@ -80,7 +130,7 @@ questions with verifiable citations, and get a distilled research artifact out.
 - **The agent guide is `AGENTS.md` now, with `CLAUDE.md` as a one-line `@AGENTS.md` bridge.**
   `AGENTS.md` is the cross-agent standard; Claude Code reads `CLAUDE.md` and not `AGENTS.md` (its own
   documentation says so in as many words), so a project with only one of the two hands the other side
-  nothing. 144 references across 45 files were rewritten with it — test docstrings, `pyproject.toml`
+  nothing. 139 references across 45 files were rewritten with it — test docstrings, `pyproject.toml`
   comments, `.env.example`, `.gitignore`, `README.md`, `web/DESIGN.md` and the module docstrings that
   cite invariants by number.
 
@@ -428,7 +478,7 @@ questions with verifiable citations, and get a distilled research artifact out.
   the time a turn really took divided by the speed, and with no bar that is indistinguishable from
   a frozen panel — the same "watched it and read it as a crash" complaint the run ticker's
   long-wait tier exists to answer, in a panel that has no other sign of life. Reported against
-  A sibling project, which has one.
+  a sibling project, which has one.
 
   It names the stop as well as drawing the bar (a bar alone says how long is left, not what for),
   and the transition is restarted per stop — cleared, snapped to zero, forced reflow, run — because
@@ -2604,7 +2654,8 @@ questions with verifiable citations, and get a distilled research artifact out.
   old ONNX classifier did. This project's own actual scanned-PDF case (a page with no text layer
   at all) is unaffected; a bad-character-ratio heuristic for the garbled case is a smaller, later,
   independently-mergeable follow-up if it ever turns out to matter — a disclosed tradeoff, not
-  silently assumed equivalent (AGENTS.md invariant 7 has the full account).
+  silently assumed equivalent (`docs/invariants/07-ocr-ships-enabled-by-default.md` has the full
+  account).
 
   **`tests/_pdf_fixtures.py`** (new): builds test PDFs with `reportlab` (BSD), a `dev`-only
   dependency — never a runtime dependency of the shipped package. Replaces this project's former

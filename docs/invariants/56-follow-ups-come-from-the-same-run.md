@@ -1,4 +1,4 @@
-# Invariant 56 — Follow ups come from the same run
+# Invariant 56 — Follow-ups come from the same run
 
 **`Answer.follow_ups` comes from the SAME run that produced the answer — never a second model call —
 and is not verified against anything.** The model already holds the corpus and its own answer in

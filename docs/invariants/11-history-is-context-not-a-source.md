@@ -1,4 +1,4 @@
-# Invariant 11 — History is context not a source
+# Invariant 11 — History is context, not a source
 
 **`history` (prior conversation turns) is context only — it is never itself a source of facts
 or citations.** `AnswerQuestion.instructions` says so, and nothing in `citations.py`

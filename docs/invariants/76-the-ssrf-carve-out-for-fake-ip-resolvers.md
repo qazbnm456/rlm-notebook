@@ -1,8 +1,8 @@
-# Invariant 76 — The SSRF carve out for fake IP resolvers
+# Invariant 76 — The SSRF carve-out for fake-IP resolvers
 
 **The SSRF guard's DNS half is handed an operator-supplied carve-out (`RN_FETCH_ALLOW_CIDRS`),
-resolved in ONE place (`web.allow_nets`) that both host-side fetchers read — because full strictness
-is WRONG on a fake-IP resolver, and silently so.**
+resolved in ONE place (`web.allow_nets`) that both host-side fetchers read.** Full strictness is
+WRONG on a fake-IP resolver, and silently so.
 
 A split-DNS VPN or fake-IP proxy (Clash / Mihomo / Surge, default range `198.18.0.0/16`) answers
 every public hostname with a synthetic address in a RESERVED range. `resolved_host_is_safe` then
@@ -11,9 +11,39 @@ machine fails with "resolves to a disallowed address". The guard is not buggy; i
 operator's own lying resolver from an attacker's redirect, which is exactly why the carve-out has to
 be opt-in and operator-supplied rather than inferred.
 
-**The carve-out reaches ONLY the DNS-rebinding half.** `is_safe_url` is syntactic, runs first, and is
-never given `allow_nets`, so no value — `0.0.0.0/0` included — makes a loopback or cloud-metadata URL
-fetchable. A reader could reasonably assume an allow-list is an allow-list, so a test pins it.
+**A value that would disable the guard is REFUSED, and that check is what makes this invariant's
+guarantee true.** `allow_nets` short-circuits every property `resolved_host_is_safe` tests —
+loopback, private, link-local, reserved, unspecified, multicast — so a wide value does not widen the
+carve-out, it turns the DNS-rebinding defence off. `config._NEVER_ALLOWED` therefore refuses any
+entry overlapping those ranges, so `0.0.0.0/0`, `::/0` and RFC1918 cannot be configured at all.
+
+**`is_safe_url` is NOT the backstop, and believing it was is how this shipped wrong the first time.**
+It refuses a URL whose host is a LITERAL blocked IP, and returns True for `http://evil.example.com/`
+however that name resolves — so it never sees the resolved address, and the DNS-rebinding check is
+the only layer that does. The first version of this invariant claimed "no value makes a loopback or
+cloud-metadata URL fetchable ... that check is syntactic", which was true only for literal-IP hosts
+and false for exactly the threat the guard exists to stop. Under `0.0.0.0/0` a public-looking
+hostname resolving to `127.0.0.1` was fetchable end to end, on an API with no authentication
+(invariant 25).
+
+**The test that "pinned" it was vacuous, and that is the more useful half of the lesson.** It used
+literal-IP URLs, which `is_safe_url` rejects before `resolved_host_is_safe` is consulted — so it
+passed with the `resolved_host_is_safe` call DELETED from `_check_safe` entirely, and the whole
+suite stayed green under a mutant that opened every IPv6 internal target. **A guard test that never
+reaches the guard is worse than no test, because it is cited as proof.** The replacement resolves a
+public-looking hostname to each internal address in turn and is verified to kill both mutants.
+
+**Validating only "does it parse" caught the harmless typo, not the dangerous one.** A dropped
+character turns `198.18.0.0/16` into `198.18.0.0/1`, which normalises to `128.0.0.0/1` — half the
+address space, cloud metadata and `192.168/16` included — and parses cleanly.
+
+**`_NEVER_ALLOWED` is an explicit list, deliberately NOT `ipaddress`'s own `is_private`/`is_reserved`
+properties**: `198.18.0.0/16` is RFC 2544 benchmarking space and reports `is_private` True, so a
+property-based rule would refuse the single value this variable exists to accept.
+
+**Accepted cost, stated rather than discovered later**: a split-DNS VPN mapping internal names into
+RFC1918 cannot be carved out. That is not an oversight — it is the SSRF this guard exists to
+prevent, and there is deliberately no override.
 
 **One copy, not two.** `parsers/youtube.py` has its own `_check_caption_url_safe` and imports
 `web.allow_nets` rather than re-reading the variable, so the two host-side fetchers can never

@@ -1,4 +1,4 @@
-# Invariant 73 — OCR reading order for two column scans
+# Invariant 73 — OCR reading order for two-column scans
 
 **RapidOCR's region coordinates decide reading order (`_ocr.reading_order`) — joining its regions in
 detection order interleaves the columns of a two-column scan.** RapidOCR reports a bounding quad per

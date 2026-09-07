@@ -283,6 +283,30 @@ def max_upload_bytes() -> int:
     return _env_int("RN_MAX_UPLOAD_BYTES", _DEFAULT_MAX_UPLOAD_BYTES)
 
 
+#: Ranges `RN_FETCH_ALLOW_CIDRS` may never overlap. Listing one of these does not widen the
+#: carve-out — it turns the DNS-rebinding defence off for that range, which is the whole attack
+#: `resolved_host_is_safe` exists to stop. Deliberately NOT derived from `ipaddress`'s own
+#: `is_private`/`is_reserved` properties: `198.18.0.0/16` (the documented fake-IP range, RFC 2544
+#: benchmarking) is `is_private` under those, so a property-based rule would refuse the one value
+#: this variable exists to accept.
+_NEVER_ALLOWED = tuple(
+    ipaddress.ip_network(n)
+    for n in (
+        "0.0.0.0/8",
+        "127.0.0.0/8",
+        "10.0.0.0/8",
+        "172.16.0.0/12",
+        "192.168.0.0/16",
+        "169.254.0.0/16",
+        "224.0.0.0/4",
+        "::1/128",
+        "fe80::/10",
+        "fc00::/7",
+        "ff00::/8",
+    )
+)
+
+
 def fetch_allow_cidrs() -> tuple[str, ...]:
     """`RN_FETCH_ALLOW_CIDRS` — comma-separated CIDRs whose addresses the SSRF guard should treat as
     external. Empty by default, which is full strictness.
@@ -304,19 +328,47 @@ def fetch_allow_cidrs() -> tuple[str, ...]:
     wrong here: dropping the only entry restores full strictness, so a typo'd variable reproduces the
     exact symptom the variable was set to fix, with nothing on screen connecting the two. Same
     reasoning as `_env_int` raising, and as the lifespan refusing to start on a malformed
-    `RN_TRACE_RETENTION_DAYS` rather than warning and defaulting."""
+    `RN_TRACE_RETENTION_DAYS` rather than warning and defaulting.
+
+    **An entry OVERLAPPING `_NEVER_ALLOWED` is refused too, and that check is what makes the
+    guarantee stated elsewhere actually true.** `allow_nets` short-circuits every property
+    `resolved_host_is_safe` tests — loopback, private, link-local, reserved, unspecified, multicast —
+    so a wide value does not merely widen the carve-out, it disables the DNS-rebinding defence
+    entirely. `is_safe_url` is NOT a backstop for that: it refuses a URL whose host is a LITERAL
+    blocked IP, and returns True for `http://evil.example.com/` however that name resolves. So under
+    `0.0.0.0/0` a public-looking hostname resolving to `127.0.0.1` or `169.254.169.254` was fetchable,
+    on an API with no authentication (invariant 25), and both the docs and the test that "pinned" it
+    said otherwise — the test used literal-IP URLs, which never reach this code path at all.
+
+    **Validating only "does it parse" caught the harmless typo and not the dangerous one**: a dropped
+    character turns `198.18.0.0/16` into `198.18.0.0/1`, which normalises to `128.0.0.0/1` — half the
+    address space, cloud metadata and `192.168/16` included — and parsed cleanly.
+
+    **Accepted cost, stated rather than discovered later**: a split-DNS VPN that maps internal names
+    into RFC1918 cannot be carved out here. That is not an oversight — it is the SSRF this guard
+    exists to prevent, and there is deliberately no override for it."""
     raw = os.environ.get("RN_FETCH_ALLOW_CIDRS", "").strip()
     if not raw:
         return ()
     entries = tuple(part.strip() for part in raw.split(",") if part.strip())
     for entry in entries:
         try:
-            ipaddress.ip_network(entry, strict=False)
+            net = ipaddress.ip_network(entry, strict=False)
         except ValueError:
             raise SystemExit(
                 f"RN_FETCH_ALLOW_CIDRS={raw!r} contains {entry!r}, which is not a CIDR "
                 "(e.g. 198.18.0.0/16)"
             ) from None
+        overlapping = [
+            str(n) for n in _NEVER_ALLOWED if n.version == net.version and net.overlaps(n)
+        ]
+        if overlapping:
+            raise SystemExit(
+                f"RN_FETCH_ALLOW_CIDRS={raw!r} contains {entry!r}, which covers "
+                f"{', '.join(overlapping)}. Allowing those would disable the SSRF guard's "
+                "DNS-rebinding check for loopback, cloud-metadata and private targets. Narrow it "
+                "to the range your resolver actually hands out (a fake-IP proxy uses 198.18.0.0/16)."
+            )
     return entries
 
 

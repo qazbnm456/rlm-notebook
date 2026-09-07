@@ -1,4 +1,4 @@
-# Invariant 34 — Every write goes through mutate notebook
+# Invariant 34 — Every write goes through mutate_notebook
 
 **Every write to a notebook goes through `notebook.mutate_notebook`, which re-loads the file
 from disk INSIDE a per-notebook lock and applies a caller-supplied DELTA — never a snapshot the

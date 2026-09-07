@@ -1,4 +1,4 @@
-# Invariant 72 — Web assets are served no cache
+# Invariant 72 — Web assets are served no-cache
 
 **The web assets are served `Cache-Control: no-cache`, because a zero-build app has no other way to stop
 a browser running last week's JavaScript.** Starlette's `StaticFiles` sends `ETag` and `Last-Modified`

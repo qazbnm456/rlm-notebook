@@ -156,17 +156,59 @@ def test_a_fake_ip_resolver_starves_ingestion_until_the_carve_out_is_set(monkeyp
     web._check_safe("https://example.com/a")  # no raise
 
 
-def test_the_carve_out_never_reopens_loopback_or_metadata(monkeypatch):
-    """`allow_nets` is handed to `resolved_host_is_safe`, which is the DNS-rebinding half. The
-    syntactic half (`is_safe_url`) runs first and is not given the carve-out, so no value of
-    `RN_FETCH_ALLOW_CIDRS` can make a loopback or cloud-metadata URL fetchable. Pinned because a
-    reader could reasonably assume an allow-list is an allow-list."""
+def _resolve_to(monkeypatch, addr):
+    """Point `getaddrinfo` at `addr` IN `rlm_harness.tools.fetch`'s namespace — where
+    `resolved_host_is_safe` actually calls it. Patching `web.socket` would silently do nothing."""
+    from rlm_harness.tools import fetch as harness_fetch
+
+    fam = 10 if ":" in addr else 2
+    monkeypatch.setattr(
+        harness_fetch.socket, "getaddrinfo", lambda h, p, *a, **k: [(fam, 1, 6, "", (addr, p))]
+    )
+
+
+@pytest.mark.parametrize(
+    "addr", ["127.0.0.1", "169.254.169.254", "10.0.0.5", "192.168.1.1", "172.16.0.1", "::1"]
+)
+def test_a_public_hostname_resolving_internally_is_refused_under_the_carve_out(monkeypatch, addr):
+    """The case the FIRST version of this test missed entirely, and the only one that matters.
+
+    That version used literal-IP URLs (`http://127.0.0.1/x`), which `is_safe_url` refuses
+    syntactically — so `resolved_host_is_safe` was never reached and the test passed with the call
+    DELETED from `_check_safe`. It asserted nothing about the carve-out. `is_safe_url` returns True
+    for `http://evil.example.com/` however that name resolves, so the DNS-rebinding check is the ONLY
+    layer that ever sees the resolved address, and `allow_nets` is exactly what can switch it off."""
     from rlm_notebook.parsers import web
 
-    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "0.0.0.0/0")
-    for url in ("http://127.0.0.1/x", "http://169.254.169.254/latest/meta-data/", "http://[::1]/x"):
-        with pytest.raises(web.FetchError):
-            web._check_safe(url)
+    _resolve_to(monkeypatch, addr)
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "198.18.0.0/16")
+    with pytest.raises(web.FetchError, match="disallowed address"):
+        web._check_safe("http://evil.example.com/")
+
+
+def test_the_fake_ip_range_still_resolves_under_the_same_setting(monkeypatch):
+    """The other half of the test above: the carve-out must still DO its job. Without this, a broken
+    `allow_nets` that refused everything would satisfy every assertion here."""
+    from rlm_notebook.parsers import web
+
+    _resolve_to(monkeypatch, "198.18.1.88")
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "198.18.0.0/16")
+    web._check_safe("https://example.com/a")  # no raise
+
+
+@pytest.mark.parametrize(
+    "value", ["0.0.0.0/0", "::/0", "198.18.0.0/1", "10.9.0.0/16", "198.18.0.0/16,192.168.0.0/16"]
+)
+def test_an_allow_cidr_that_would_disable_the_guard_is_refused(monkeypatch, value):
+    """`allow_nets` short-circuits EVERY property `resolved_host_is_safe` tests, so a wide value does
+    not widen the carve-out — it turns the DNS-rebinding defence off. `198.18.0.0/1` is the dropped
+    character in the one documented value, and it normalises to `128.0.0.0/1`: half the address
+    space, cloud metadata and `192.168/16` included, and it parses cleanly."""
+    from rlm_notebook import config
+
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", value)
+    with pytest.raises(SystemExit, match="disable the SSRF guard"):
+        config.fetch_allow_cidrs()
 
 
 def test_a_malformed_allow_cidr_is_refused_rather_than_skipped(monkeypatch):

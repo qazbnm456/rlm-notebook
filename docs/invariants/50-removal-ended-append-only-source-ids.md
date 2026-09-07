@@ -1,4 +1,4 @@
-# Invariant 50 — Removal ended append only source ids
+# Invariant 50 — Removal ended append-only source ids
 
 **A source can be REMOVED now, which ended append-only id numbering — and the survivors are never
 renumbered.** `notebook.next_source_id` derives from the MAX id in use; `len(sources) + 1` was

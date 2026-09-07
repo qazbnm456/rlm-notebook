@@ -878,6 +878,42 @@ def test_upload_reports_a_clean_500_when_the_size_cap_env_var_is_malformed(clien
     assert "server misconfigured" in resp.json()["detail"]
 
 
+def _real_web_ingestion(monkeypatch):
+    """Undo `_fake_web_ingestion` for a test that must exercise the REAL `parse_web`. Safe and still
+    offline: `config.fetch_allow_cidrs` raises inside `_check_safe`, which `_default_fetcher` calls
+    before it opens anything, so no network call is reachable from these tests."""
+    import rlm_notebook.parsers.web as real_web
+
+    monkeypatch.setattr("rlm_notebook.ingest.parse_web", real_web.parse_web)
+
+
+def test_add_sources_reports_a_clean_500_when_the_fetch_allow_cidrs_are_malformed(
+    client, monkeypatch
+):
+    """AGENTS.md invariant 24 says its RULE is the invariant and NOT the list of places it currently
+    applies — any standalone config reader a handler calls needs the same `SystemExit`-to-500
+    treatment. `config.fetch_allow_cidrs` is one, reached from `add_sources` through
+    `ingest_sources_for`, and `asyncio.to_thread` DOES propagate a `BaseException` back to the
+    awaiting coroutine, so `except (FetchError, ValueError, OSError)` genuinely leaked it as an
+    unhandled 500 rather than a clean one. Unpinned when the arm was added; pinned now, because a
+    refactor that drops it reinstates exactly the bug it fixed."""
+    _real_web_ingestion(monkeypatch)
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "198.18.0.0/16,not-a-cidr")
+    resp = client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert resp.status_code == 500
+    assert "server misconfigured" in resp.json()["detail"]
+    assert "RN_FETCH_ALLOW_CIDRS" in resp.json()["detail"]
+
+
+def test_a_guard_disabling_allow_cidr_is_refused_at_the_api_boundary_too(client, monkeypatch):
+    """The same arm, for the value that is dangerous rather than merely malformed."""
+    _real_web_ingestion(monkeypatch)
+    monkeypatch.setenv("RN_FETCH_ALLOW_CIDRS", "0.0.0.0/0")
+    resp = client.post("/notebooks/mynb/sources", json={"sources": ["https://example.com/a"]})
+    assert resp.status_code == 500
+    assert "disable the SSRF guard" in resp.json()["detail"]
+
+
 def test_audio_reports_a_clean_500_when_tts_provider_misconfigured_before_running_the_model(
     client, monkeypatch
 ):

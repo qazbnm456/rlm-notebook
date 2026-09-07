@@ -16,7 +16,9 @@ a Studio panel, a podcast player, and a live reasoning ticker — see "Web UI" b
 A notebook names itself, model-authored prose follows the READER's language rather than the
 documents', a settings page carries the presentation settings, and models can run on a Claude
 Pro/Max subscription instead of an API key. See `AGENTS.md` for the hard invariants this project is
-built against — it is the authoritative record; this file is the tour.
+built against — it indexes each one in a line or two, with the argument, the evidence and the traps
+behind it in `docs/invariants/<n>-<slug>.md`. Together they are the authoritative record; this file
+is the tour.
 
 ## Install and run
 

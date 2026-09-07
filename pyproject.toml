@@ -51,8 +51,8 @@ dependencies = [
     # or a paid Artifex commercial license (`pymupdf-layout`, a pymupdf4llm transitive dependency,
     # carried a SECOND, even stricter Artifex license — Polyform Noncommercial). An MIT-licensed
     # project shipping an HTTP API meant to run as a network service (invariant 25) cannot carry an
-    # AGPL dependency undisclosed — see AGENTS.md invariant 7 for the full account of why this was
-    # replaced, not merely disclosed.
+    # AGPL dependency undisclosed — see `docs/invariants/07-ocr-ships-enabled-by-default.md` for the
+    # full account of why this was replaced, not merely disclosed.
     "pypdfium2>=4",
     # pypdfium2 declares NO runtime dependencies of its own — `.render(...).to_pil()` needs this
     # explicitly, not by luck via some other package's transitive dependency (the exact class of gap

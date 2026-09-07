@@ -1,4 +1,4 @@
-# Invariant 57 — The overview is the threads first entry
+# Invariant 57 — The overview is the thread's first entry
 
 **The chat overview is the THREAD's first entry, inside the scroller — not a panel pinned above it.**
 As a sibling of `.chat-history` with `flex: 0 0 auto` and `max-height: 45%` it permanently owned up to

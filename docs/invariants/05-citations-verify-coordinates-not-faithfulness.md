@@ -1,4 +1,4 @@
-# Invariant 5 — Citations verify coordinates not faithfulness
+# Invariant 5 — Citations verify coordinates, not faithfulness
 
 **`citations.py` verifies coordinate existence only — never content faithfulness.** It confirms
 a claimed `source_id` exists and its `locator` resolves to real text in the corpus; it does NOT

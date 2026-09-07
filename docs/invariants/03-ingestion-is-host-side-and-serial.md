@@ -1,4 +1,4 @@
-# Invariant 3 — Ingestion is host side and serial
+# Invariant 3 — Ingestion is host-side and serial
 
 **Ingestion is host-side only AND SERIAL — never inside the sandbox, never in a thread pool.** `parsers/{text,web,pdf,youtube}.py`
 and `parsers/_ocr.py` all run before any `RLMTask` exists. `pypdfium2`, `trafilatura`, `yt-dlp`

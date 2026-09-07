@@ -1,4 +1,4 @@
-# Invariant 52 — The ticker carries words never the output
+# Invariant 52 — The ticker carries words, never the output
 
 **The live ticker's event shape is `{kind, primary, detail, meta}` and it carries the model's own
 words — but never the step's OUTPUT.** `_translate_trace_event` used to emit one fixed sentence per

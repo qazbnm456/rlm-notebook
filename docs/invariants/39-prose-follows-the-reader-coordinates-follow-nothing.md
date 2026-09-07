@@ -1,4 +1,4 @@
-# Invariant 39 — Prose follows the reader coordinates follow nothing
+# Invariant 39 — Prose follows the reader; coordinates follow nothing
 
 **Model-authored prose follows the READER's language, not the documents'. Citation coordinates
 never follow anything — and naming a language buys neither its SCRIPT nor its IDIOM.**
@@ -14,8 +14,8 @@ together, and is composed BEFORE `CITATION_RULES`.
 **Two things a language NAME does not settle, each with its own rule.**
 
 - **SCRIPT** (`instructions.SCRIPT_PINNED`): a language with more than one script is
-  under-specified by its name, and a model treats the scripts as interchangeable. The sibling
-  A sibling project shipped a Traditional Chinese document set whose page bodies were Traditional while
+  under-specified by its name, and a model treats the scripts as interchangeable. A sibling
+  project shipped a Traditional Chinese document set whose page bodies were Traditional while
   every page TITLE came back Simplified, so the nav and the page disagreed on screen — the rule
   names the characters (`概览` must be `概覽`) because that cannot be read as a loose synonym.
 

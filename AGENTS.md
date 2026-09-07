@@ -151,9 +151,9 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     model's job is finished long before any audio exists.
     ([why](docs/invariants/14-tts-is-host-side-never-a-tool.md))
 
-15. **The default TTS provider (`RN_TTS_PROVIDER=edge-tts`) needs no API key or paid account, so `rlm-
-    notebook audio` works out of the box** Ship a working default, not just a pluggable interface — and keep
-    the provider list in ONE place, because a second list drifts.
+15. **The default TTS provider (`RN_TTS_PROVIDER=edge-tts`) needs no API key or paid account, so
+    `rlm-notebook audio` works out of the box** Ship a working default, not just a pluggable interface — and
+    keep the provider list in ONE place, because a second list drifts.
     ([why](docs/invariants/15-default-tts-provider-needs-no-key.md))
 
 16. **`PodcastScript.utterances` may legitimately be empty, and `cli._cmd_audio` says so explicitly rather
@@ -171,15 +171,15 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     `config.tts_voice_map` hardcodes both keys with no tripwire.
     ([why](docs/invariants/18-the-podcast-cast-is-two-fixed-hosts.md))
 
-19. **`cli._cmd_audio` resolves the TTS provider before running the (potentially expensive) script-
-    generation model call, not after.** The original ordering wasted a real model call whenever
+19. **`cli._cmd_audio` resolves the TTS provider before running the (potentially expensive)
+    script-generation model call, not after.** The original ordering wasted a real model call whenever
     `RN_TTS_PROVIDER` was misconfigured.
     ([why](docs/invariants/19-resolve-the-tts-provider-before-the-model-call.md))
 
 20. **`ingest.py`/`notebook.py` (`is_url`/`ingest_one`/`ingest_new`, `load_or_create`,
     `ingest_sources_for`/`append_sources`, `mutate_notebook`) are shared by `cli.py` AND `api.py` — neither
-    entry point depends on the other.** Extracted once both entry points needed it, so a fix to source-
-    handling cannot land on only one of them.
+    entry point depends on the other.** Extracted once both entry points needed it, so a fix to
+    source-handling cannot land on only one of them.
     ([why](docs/invariants/20-shared-ingestion-module-for-both-entry-points.md))
 
 21. **Every API request that runs an `RLMTask` does so in an isolated subprocess (`runner.py`/`worker.py`),
@@ -429,9 +429,9 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     with.
     ([why](docs/invariants/68-the-timeout-scales-with-the-tier.md))
 
-69. **The INTERFACE language is a SIGNAL to output-language resolution — a fourth one, ranked above `Accept-
-    Language` — which narrows invariant 48 without merging it.** The one place a reader had actually SAID
-    which language they read was invisible to `naming.SuggestLanguage`.
+69. **The INTERFACE language is a SIGNAL to output-language resolution — a fourth one, ranked above
+    `Accept-Language` — which narrows invariant 48 without merging it.** The one place a reader had actually
+    SAID which language they read was invisible to `naming.SuggestLanguage`.
     ([why](docs/invariants/69-interface-language-signals-output-language.md))
 
 70. **The Trajectory drawer (`trajectory.py` + `GET .../runs/{run_id}/trajectory`) is where a run's
@@ -464,10 +464,8 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     "nothing was truncated" turns a corpus boundary into a property of the code.
     ([why](docs/invariants/75-three-readings-of-a-token-budget.md))
 
-76. **The SSRF guard's DNS half is handed an operator-supplied carve-out (`RN_FETCH_ALLOW_CIDRS`),
-    resolved in ONE place (`web.allow_nets`) that both host-side fetchers read.** A fake-IP resolver
-    answers every public hostname with a RESERVED address, so full strictness refuses every
-    ingestion on that machine — the guard is not wrong, it just cannot see that the operator's own
-    resolver is lying to it.
+76. **The SSRF guard's DNS half is handed an operator-supplied carve-out (`RN_FETCH_ALLOW_CIDRS`), resolved
+    in ONE place (`web.allow_nets`) that both host-side fetchers read.** A fake-IP resolver answers every
+    public hostname with a RESERVED address, so full strictness refuses every ingestion on that machine —
+    the guard is not wrong, it just cannot see that the operator's own resolver is lying to it.
     ([why](docs/invariants/76-the-ssrf-carve-out-for-fake-ip-resolvers.md))
-

@@ -1,4 +1,4 @@
-# Invariant 14 — TTS is host side never a tool
+# Invariant 14 — TTS is host-side, never a tool
 
 **TTS synthesis (`tts.py`) runs entirely host-side, on an already-generated,
 already-schema-validated `PodcastScript` — it is never a tool the model can call, and

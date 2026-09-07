@@ -1,4 +1,4 @@
-# Invariant 65 — The prompt skill split
+# Invariant 65 — The prompt/skill split
 
 **Every RLM task here carries `rlm_harness.skills` with `discovery="inject"`, and the prompt/skill
 split is a rule rather than a preference.** (This is `rlm-harness`'s own mechanism, distinct from the
