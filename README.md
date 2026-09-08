@@ -246,15 +246,15 @@ upload (`.pdf`/`.txt`/`.md`, capped at `RN_MAX_UPLOAD_BYTES`, default 50MB) neve
 local-path string — only bytes the caller already had — so it doesn't reopen the local-path
 restriction `sources` already enforces. `GET .../sources/{source_id}` returns a source's full
 text, every block, reusing the same `Corpus.get` lookup `citations.py` already performs — another
-materially different exposure, alongside the trace stream/citation-turn lookup. **Behind a fake-IP proxy or split-DNS VPN?** Clash/Mihomo/Surge resolve every public hostname into
+materially different exposure, alongside the trace stream and the Trajectory drawer. A note carries
+no citations of its own until it is promoted into a real source (AGENTS.md invariant 32). See
+`api.py`'s module docstring, and AGENTS.md invariants 20-47 and 70-72 for the API and web-UI rules.
+
+**Behind a fake-IP proxy or split-DNS VPN?** Clash/Mihomo/Surge resolve every public hostname into
 a reserved range (default `198.18.0.0/16`), so the SSRF guard refuses it and EVERY web/YouTube
 ingestion fails with "resolves to a disallowed address". Set `RN_FETCH_ALLOW_CIDRS=198.18.0.0/16`
 to the range your resolver actually hands out. A value that would cover loopback, cloud metadata or
 RFC1918 is refused outright — see AGENTS.md invariant 76.
-
-A note carries no
-citations of its own until it's promoted into a real source — see AGENTS.md invariant 32. See
-`api.py`'s module docstring and AGENTS.md invariants 20-43.
 
 Every write to a notebook — a source, a note, a chat turn — re-reads the notebook from disk under a
 per-notebook lock and applies just its own change, so a source you add while a question is still
@@ -280,7 +280,10 @@ own research loop of reading, noting, and deepening a notebook over successive t
 podcast plays in-page (and downloads) with a subtitle-style transcript: a timecode per line, click
 a line to seek to it, and the line being spoken is highlighted as it plays. A ⚙ settings page
 carries the output language and the two podcast voices (presentation settings only — no keys, no
-safety bounds). See `rlm_notebook/web/DESIGN.md` and AGENTS.md invariants 29-45.
+safety bounds). See `rlm_notebook/web/DESIGN.md` and AGENTS.md invariants 29-58, plus 70-72 for the
+Trajectory drawer, where a run's reasoning lives: every planner turn in the model's own
+words, a tool timeline scaled to real elapsed time, the token budget, and what the
+validator rejected before accepting the answer.
 
 ## What this is not (yet)
 

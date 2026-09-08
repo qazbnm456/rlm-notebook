@@ -30,6 +30,15 @@ since neither the section nor the button explained that promotion is what makes 
 `tests/test_web_assets.py` pins all of it as source-tree assertions, since there is no JS test
 runner.
 
+
+**ONE action is genuinely un-stoppable, and it SAYS so rather than pretending.** A podcast's TTS
+synthesis runs in-process after the script subprocess has returned, so `_run_isolated`'s `finally`
+has already cleared the entry `killpg` would have reached (invariant 29). `app.js` passes
+`stoppable: false` for that half, and `.btn:disabled` is styled precisely so a disabled Stop LOOKS
+disabled — invariant 60's rule, because a control that looks operable and swallows the click is
+worse than one that is visibly not available. With chatterbox that window is up to fifteen minutes
+(invariant 43), which is why the phase is named in the status line instead.
+
 ---
 
 One-line index: [`AGENTS.md`](../../AGENTS.md) · Incidents, measurements and superseded drafts: [`CHANGELOG.md`](../../CHANGELOG.md)

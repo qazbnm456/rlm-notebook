@@ -11,6 +11,69 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **`rlm-notebook serve`, a container, an install story for an application, and the three
+  independent reviews that found what all of it was missing.**
+
+  **The shape was wrong before the code was.** This was being described as "a service that goes
+  online", and it must not be: invariant 25 means any caller who reaches it can read every
+  notebook's full source text and reasoning traces, delete sources, and change global settings. It
+  is a LOCAL application with a web UI, in the shape of jupyter or aider. So PyPI is the right
+  channel and `pip install` was the wrong VERB — nobody imports `rlm_notebook`, and installing it
+  into a shared environment drags numpy, an ONNX runtime and a PDF engine along. `README.md` leads
+  with `uv tool install` / `pipx` now, and the `git clone` + `uv sync` that used to be the whole
+  section moved under "To develop it".
+
+  **`serve` binds 127.0.0.1 by default**, and that default is in code rather than in a README
+  paragraph because, with no authentication, which interface it binds IS the access control. A
+  non-loopback `--host` is allowed (a trusted network is a use the README sanctions) and warns.
+  `_is_loopback` treats `""` as EXPOSED: `bind("")` is `INADDR_ANY`, and a first draft listed it
+  beside `"localhost"` as obviously local, which would have silenced the warning on precisely the
+  binding that most needs it. Found by printing the classifier's own table rather than reading it.
+
+  **The Dockerfile exists for one reason**: `deno` and `tesseract` are system binaries no Python
+  manifest can express, so no `pip install` is ever complete on its own. Built and run rather than
+  claimed: deno 2.1.4 and tesseract 5.5.0 in the image, a container answering `/notebooks`, `/` and
+  `/settings` with no model configured.
+
+  **Three independent reviews, and every finding below was reproduced before being acted on.**
+
+  The commit's own security claim had NO TEST. Three mutations survived all 51: flipping the
+  default host to `0.0.0.0`, deleting the entire warning block, and sending the warning to stdout.
+  The only test exercised the pure `_is_loopback` predicate, so nothing asserted it was wired to
+  anything — the thesis was exactly the part with nothing behind it. Replaced with tests that drive
+  `_cmd_serve` against a stubbed uvicorn.
+
+  **Invariant 35's core sentence had become false.** It said `rlm_harness.configure` does not route
+  on the `claude-agent-sdk/` prefix, so `config.setup`'s injection is what makes the sentinel work.
+  `rlm-harness==1.10.0` routes on the identical prefix itself. Behaviour never changed — an
+  explicit `main_lm=` still wins — which is exactly why nobody noticed the justification had
+  expired. The injection WINS rather than enables, and deleting it would now "work", which is the
+  trap: it would hand every subscription run to a construction this project has never measured.
+
+  **The playground's Studio → Insight threw on every notebook, always**, and faq and timeline told
+  readers their own sources "didn't produce enough" — a fabricated claim on the one page whose
+  premise is that nothing there is fabricated. The guide fallback returned a field `app.js` reads
+  nowhere. **Its trace step ringed the wrong button** on four of six notebooks including the default
+  English one, because `regenerateTurnButton` carries the identical `ticker-toggle` class and only
+  the trace pill is wrapped in `.ticker-affordance`. **And every mutating shim route wrote to a
+  copy**: a deleted source came back, a rename reverted, a cleared conversation reappeared. Notes
+  were the single exception, because `view` spreads them by reference, and that exception is what
+  hid the class from the assertions already in the suite.
+
+  **One review suggestion was measured and REJECTED.** Capping `requires-python` to `<3.13` to make
+  pip's rapidocr refusal legible breaks the development environment outright: every venv here is
+  3.13, uv resolves past rapidocr's bound, and the `chatterbox` extra (marked `>= 3.13`) becomes
+  unsatisfiable. `uv run` stopped working entirely. The limit is stated in `README.md` instead.
+
+  Also: `--port 99999` raised `OverflowError`, which is not an `OSError`, so uvicorn's own startup
+  guard never caught it. The serving line announced a URL one line BEFORE the bind and was
+  block-buffered away entirely in the container. The image shipped MIT metadata with no LICENSE and
+  discarded deno's 15MB pyodide cache outside the mounted volume. `↓ Download` 404'd because the
+  media-element hook never sees an anchor. Stop did not stop. Doc drift closed across invariants
+  20, 25, 29, 41 and 47, `.env.example`, `DESIGN.md` and `api.py`'s docstring, which FastAPI serves
+  at `/docs` and which was still teaching readers the raw uvicorn command that routes around the
+  loopback default.
+
 - **A second private sibling scrubbed, the other one's fingerprint scrubbed, and every doc-drift
   item the three-reviewer round left open is now closed.**
 

@@ -56,6 +56,13 @@ Trajectory drawer, and a web UI (`rlm_notebook/web/`) that is a real end-user pr
 The API is the only place a run is subprocess-isolated (`runner.py`/`worker.py`); `cli.py` runs
 synchronously in-process.
 
+`rlm-notebook serve` starts the API and that web UI, binding loopback by default (invariant 25).
+A `Dockerfile` carries the two system binaries no Python manifest can express, `deno` (every live
+run, invariant 9) and `tesseract` (the OCR fallback, invariant 7), which is why no `pip install` is
+complete on its own. `playground/` builds the same web UI into a static, no-backend product page
+from real recorded notebooks; it has its own `README.md` and `smoke.mjs`, and CI does NOT run
+either — `.github/workflows/ci.yml` is pytest and ruff only.
+
 **Still unbuilt — do not assume any of these exist because a design discussion mentioned them:**
 the four Studio guide kinds are NOT cached onto a notebook (only the overview is — invariant 38);
 no guide artifact is citable as a source for a later `ask` without being promoted through a note

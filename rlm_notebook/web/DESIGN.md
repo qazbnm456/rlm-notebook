@@ -88,9 +88,10 @@ were all considered and rejected first):
   citation-verifiable-truth product. The body default (`body { font-family: "Public Sans", ... }`).
 - **JetBrains Mono** — the one deliberate callback to the sibling studios' technical identity, kept
   exactly where the product intentionally echoes a developer-console reading: Phase 3's reasoning
-  ticker pill (`.ticker-toggle`; `.ticker-detail` is gone — see below) and the citation-turn payload
-  (`.citation-detail-payload`) — nowhere else. The `.trace-face` class reserved for it in Phase 1/2
-  went unused until Phase 3 actually needed it.
+  ticker pill (`.ticker-toggle`) and, now, the Trajectory drawer's code and payload panes. BOTH of
+  the selectors this line used to name are gone: `.ticker-detail` and `.citation-detail-payload`
+  appear nowhere under `web/` — see 5.5. The `.trace-face` class reserved for it in Phase 1/2 went
+  unused until Phase 3 actually needed it, and the pill still carries it.
 
 ## 5. Components
 
@@ -180,7 +181,7 @@ reporting no boundary events returns. An independent audit simulated the length-
 every line stamped `0:00`, the second row highlighted for the whole episode, every click seeking to
 zero. Mis-aligned subtitles are worse than none at all.
 
-### 5.5 Reasoning-trace ticker + citation-turn detail (Phase 3)
+### 5.5 Reasoning-trace ticker + citation-turn detail (Phase 3; the detail half is SUPERSEDED)
 
 Every `ask`/Guide-tab/podcast-generate call picks its OWN run id client-side (`crypto.randomUUID()`,
 prefixed with the notebook id — the client, never the server, since a server-generated id would
@@ -194,12 +195,18 @@ pill (`.ticker-toggle`). **Superseded**: that pill no longer expands a plain-tex
 the same trace with the code each turn ran, the tool calls and real per-turn timing. Recorded here
 rather than rewritten, because this file is the Phase 3 design record and the change came later.
 
-Every citation span with a known run id becomes clickable (`.citation-clickable`): clicking it
-calls `GET .../citation-turn` and fills a single shared `.citation-detail` slot per answer (not one
-per citation — clicking a different citation replaces the previous detail rather than
-accumulating) with the raw trace-event payload, monospaced, and an explicit note that this shows
-WHERE the model read the source, never a faithfulness proof (AGENTS.md invariant 5's limit,
-restated here rather than let the UI imply something stronger). A turn with no `run_id` (saved
+**Superseded, the same way and for the same reason as the paragraph above.** Every citation span
+with a known run id becomes clickable (`.citation-clickable`, which is still live) and it used to
+call `GET .../citation-turn` and fill a single shared `.citation-detail` slot per answer with the
+raw trace-event payload, monospaced. That slot is GONE — `.citation-detail` and
+`.citation-detail-payload` appear nowhere in `app.js`, `style.css` or `index.html`, and nothing
+under `web/` fetches `citation-turn` any more. A click now opens the References panel (invariant
+58), where the passage is a row that expands. The endpoint survives with no client; `api.py` says
+so itself.
+
+What has NOT changed is the limit that paragraph existed to state: this shows WHERE the model read
+the source, never a faithfulness proof (AGENTS.md invariant 5, restated in the UI rather than left
+for it to imply something stronger). A turn with no `run_id` (saved
 before this field existed) simply has no clickable citations — a graceful, silent degradation, not
 a broken link.
 

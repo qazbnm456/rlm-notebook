@@ -672,7 +672,6 @@ def test_an_unknown_language_falls_back_to_the_providers_own_cast_not_another_pr
     from rlm_notebook.config import NotebookConfig, tts_voice_map
     from rlm_notebook.tts import ChatterboxProvider
 
-    monkeypatch.setenv("RN_NOTEBOOKS_DIR", str(tmp_path))
     for name in ("RN_TTS_VOICE_HOST_A", "RN_TTS_VOICE_HOST_B"):
         monkeypatch.delenv(name, raising=False)
     config = NotebookConfig(main_model="m", sub_model="m")

@@ -1,5 +1,7 @@
 """THE entry point for this slice: sources in, a grounded answer, a whole-notebook artifact, or a
-podcast-style Audio Overview out — optionally as a multi-turn conversation.
+podcast-style Audio Overview out — optionally as a multi-turn conversation. `serve` starts the
+HTTP API and the web UI instead, which is a different execution model (invariant 21) reached
+through the same command.
 
     rlm-notebook ask "what does it say about X?" --source ./paper.pdf --source https://example.com
     rlm-notebook guide summary --source ./paper.pdf

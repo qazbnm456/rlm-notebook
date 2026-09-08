@@ -312,7 +312,8 @@ def test_an_id_outside_the_latin_whitelist_is_a_usable_notebook_not_a_400(
 
     This SUPERSEDES the earlier "400 not 500" test for these payloads; the 500 that invariant 27
     was created to fix is still gone, it is just no longer reachable by this input at all. Only a
-    genuinely empty id still raises, which `test_an_empty_notebook_id_is_still_a_400` covers.
+    genuinely empty id still raises, which
+    `test_an_empty_notebook_id_is_still_a_400_on_every_id_taking_endpoint` covers.
     (`"////"` is deliberately absent: Starlette's path converter doesn't match a literal `/` inside
     one segment, so it 404s at the ROUTING layer, a different and already-safe path.)"""
     _live_env(monkeypatch)

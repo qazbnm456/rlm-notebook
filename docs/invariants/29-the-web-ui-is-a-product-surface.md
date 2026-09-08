@@ -29,8 +29,11 @@ notebook title**, since `download` is an attribute the browser turns into a path
 **its extension follows the SERVED file**, because a provider may emit WAV (invariant 43) and
 naming it `.mp3` unconditionally would mislabel half of them. That second rule has no other home:
 an audit once found it listed among invariant 43's "handled" consequences when it was not. The
-response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
-uniform with every other endpoint.
+GENERATE response is JSON with base64-encoded audio, never a raw binary body, so error handling stays
+uniform with every other endpoint. **`GET .../audio/file` is the exception and has to be**: it is a
+`FileResponse`, because that is what lets the browser range-request an episode instead of
+re-downloading it to seek (invariant 42). The rule is about the endpoint that can FAIL after
+spending a model run, not about the one that serves a file already on disk.
 
 **The live reasoning-trace stream rests on five rules:**
 

@@ -1905,3 +1905,40 @@ def test_studio_regenerate_is_shown_only_when_there_is_something_to_regenerate()
     assert click.index("cache.delete(activeKind)") < click.index("showRegenerate(activeKind)") < click.index(
         "fetchKind(activeKind)"
     ), "the click drops the cache, re-decides the button, then runs"
+
+
+def test_design_md_never_names_a_selector_the_code_no_longer_has():
+    """`DESIGN.md` is the web UI's design record, and a record that describes a removed component as
+    current is worse than no record: a later reader trusts it.
+
+    Two paragraphs had drifted. One described clicking a citation as filling a `.citation-detail`
+    slot, which was replaced by the References panel (invariant 58): the class appears nowhere in
+    `app.js`, `style.css` or `index.html`, and nothing under `web/` fetches `citation-turn` any
+    more. The other named `.ticker-detail` and `.citation-detail-payload` in the typography section
+    as the places JetBrains Mono is used.
+
+    A class the code no longer has is allowed to STAY in this file: it is a design record, and the
+    reasoning behind a superseded component is worth keeping. It just has to be marked, in the same
+    paragraph, so nobody reads it as current.
+    """
+    design = (WEB / "DESIGN.md").read_text(encoding="utf-8")
+    live = "".join((WEB / f).read_text(encoding="utf-8") for f in ("app.js", "style.css", "index.html"))
+
+    named = sorted({m.group(1) for m in re.finditer(r"`\.([a-z][a-z0-9-]+)`", design)})
+    assert len(named) > 15, "the extraction broke; this would pass vacuously"
+
+    # Paragraph-level, not a fixed character window: a marker three sentences earlier still governs
+    # the sentence that names the class, and a window measured in characters cuts across that.
+    paragraphs = design.split("\n\n")
+    MARKERS = ("gone", "supersed", "nowhere", "removed", "no longer", "used to")
+    unmarked = []
+    for cls in named:
+        if cls in live:
+            continue
+        holding = [p for p in paragraphs if f"`.{cls}`" in p]
+        if not any(any(m in p.lower() for m in MARKERS) for p in holding):
+            unmarked.append(cls)
+    assert not unmarked, (
+        f"DESIGN.md names {unmarked} as current, but no such class exists under web/. Either the "
+        "class came back, or the paragraph needs to say it is superseded."
+    )
