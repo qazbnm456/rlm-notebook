@@ -136,12 +136,12 @@
       // Name the button, do not say "press the button". If the spotlight fails to land the reader
       // still knows what to look for, and the label is the same string the product renders.
       en: ["Generate the overview",
-           "Press ✨ Generate overview in the middle column. This is a real model run: a summary of " +
-           "the whole corpus, plus the questions worth asking first.\n\nWatch the status line. The " +
-           "reasoning going past was recorded from the run that produced this overview."],
+           "Press ✨ Generate overview in the middle column.\n\nIt is a real model run: a summary " +
+           "of the whole corpus plus the questions worth asking first. The reasoning in the status " +
+           "line was recorded from the run that produced it."],
       "zh-Hant": ["產生概覽",
-           "按中間欄的「✨ 產生概覽」。這是一次真實的模型執行，會給你整份語料的摘要，還有幾個值得先問的問題。" +
-           "\n\n過程中看一下狀態列。跑過去的那些推理，是當初產出這份概覽時錄下來的。"],
+           "按中間欄的「✨ 產生概覽」。\n\n這是真實的模型執行，會給你整份語料的摘要和幾個值得先問的問題。" +
+           "狀態列跑過去的推理，是當初產出它時錄下來的。"],
     },
     ask1: {
       en: ["Ask the first question",
@@ -281,6 +281,7 @@
       id: "sources",
       key: "sources",
       fulfil: "sources",
+      side: "right", align: "start",
       target: '#add-source-form button[type="submit"]',
       repeat: true,
       done: (p) => p.sources >= p.sourcesTotal,
@@ -290,31 +291,32 @@
       id: "overview",
       key: "overview",
       fulfil: "overview",
+      side: "right", align: "start",
       // Built at runtime by `renderChatOverview` (`.chat-starter` wrapping a `.btn`), so the
       // selector has to match what app.js CREATES, not the static markup.
       target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button, #chat-overview",
       done: (p) => p.overview,
     },
-    { id: "ask1", key: "ask1", target: "#ask-submit", fill: (p) => p.questions[0],
+    { id: "ask1", key: "ask1", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[0],
       fulfil: "turn1", done: (p) => p.turns >= 1 },
-    { id: "trace", key: "trace",
+    { id: "trace", key: "trace", side: "right", align: "start",
       target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
       done: () => !document.getElementById("traj-drawer").hidden },
-    { id: "ask2", key: "ask2", target: "#ask-submit", fill: (p) => p.questions[1],
+    { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
       fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
-    { id: "podcast-tab", key: "podcastTab",
+    { id: "podcast-tab", key: "podcastTab", side: "left", align: "start",
       target: '.studio-views [data-view="podcast"], .studio-views button',
       done: () => !!document.querySelector("#podcast-generate:not([hidden])") },
-    { id: "podcast-length", key: "podcastLength", target: ".podcast-length",
+    { id: "podcast-length", key: "podcastLength", target: ".podcast-length", side: "left",
       done: () => true, manual: true },
-    { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate",
+    { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate", side: "left",
       fulfil: "podcast", done: (p) => !!p.podcast },
-    { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio",
+    { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio", side: "left",
       done: () => {
         const a = document.querySelector("#podcast-body audio");
         return !!a && a.currentTime > 1.5;
       } },
-    { id: "compare", key: "compare", target: ".pg-btn, .header-btn",
+    { id: "compare", key: "compare", target: ".pg-btn, .header-btn", side: "bottom", align: "end",
       done: () => false, last: true },
   ];
 

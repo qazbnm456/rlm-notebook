@@ -180,7 +180,20 @@
         popoverClass: "pg-pop",
       });
       const [title, body] = PG.text(step.key);
-      this.driver.highlight({ element: target, popover: { title, description: body } });
+      // A SIDE HINT per step. driver.js has a fifth arrow state, `-side-over`
+      // (`.driver-popover-arrow-side-over { display: none }`): when the popover does not fit beside
+      // the element it lands ON it and the arrow is hidden, which is what "no arrow" was. Naming a
+      // side with room keeps the popover anchored and the arrow pointing at the thing it describes.
+      // driver still falls back on its own if the hint does not fit.
+      this.driver.highlight({
+        element: target,
+        popover: {
+          title,
+          description: body,
+          ...(step.side ? { side: step.side } : {}),
+          ...(step.align ? { align: step.align } : {}),
+        },
+      });
     }
 
     clearSpotlight() {
