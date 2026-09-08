@@ -1,0 +1,11 @@
+.git
+.venv
+notebooks/
+traces/
+audio/
+playground/dist/
+docs/
+tests/
+*.mp3
+*.wav
+.env

@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ipaddress
 import sys
 from collections.abc import Iterator
 from pathlib import Path
@@ -447,7 +448,84 @@ def build_parser() -> argparse.ArgumentParser:
     )
     au.set_defaults(func=_cmd_audio)
 
+    s = sub.add_parser("serve", help="run the HTTP API and the web UI (needs the `api` extra)")
+    s.add_argument(
+        "--host", default="127.0.0.1",
+        help="interface to bind (default: 127.0.0.1, loopback only). This API has NO "
+             "AUTHENTICATION of any kind (AGENTS.md invariant 25), so any other value is a "
+             "deliberate decision to let everyone who can reach that interface read, rewrite and "
+             "delete every notebook on this machine",
+    )
+    s.add_argument("--port", type=int, default=8000, help="port to bind (default: 8000)")
+    s.add_argument(
+        "--reload", action="store_true",
+        help="restart on source changes (development only; needs uvicorn's watchfiles)",
+    )
+    s.set_defaults(func=_cmd_serve)
+
     return p
+
+
+#: Every address that is NOT a promise to stay on this machine. Kept as a set of network objects
+#: rather than a string compare, so `--host ::1`, `--host 127.0.0.2` and an IPv4-mapped loopback all
+#: read as loopback without anyone enumerating spellings.
+def _is_loopback(host: str) -> bool:
+    # NOT the empty string, which is the trap: `bind("")` is `INADDR_ANY`, so `--host ""` is the
+    # most exposed value there is. An earlier draft of this function listed it beside "localhost"
+    # and would have suppressed the warning on exactly the binding that most needs it.
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        # A hostname we cannot classify without resolving it. Resolving here would make the warning
+        # depend on DNS, so treat it as exposed: over-warning costs a line, under-warning costs
+        # invariant 25.
+        return False
+
+
+def _cmd_serve(args: argparse.Namespace) -> int:
+    """Run the API and the web UI it serves.
+
+    The API is reachable ONLY from this machine by default, and that default is the point. It has
+    no authentication of any kind (invariant 25): any caller can create, rename, query, cancel,
+    irreversibly delete a source from, and read the FULL TEXT and reasoning traces of any notebook,
+    and can change global settings for notebooks they never named. Until this grows auth, "which
+    interface it binds" is the whole access-control story, so it belongs in the code rather than
+    only in a warning in `README.md`.
+
+    A non-loopback `--host` is allowed, because a genuinely trusted network is a use the README
+    already sanctions, and refusing it would be this command deciding something the operator knows
+    better. It is not allowed to be QUIET, though: the same reasoning invariant 9 uses for
+    `RN_INTERPRETER`, where an operator who set the value believes something that has to be true.
+
+    Deliberately does NOT read `NotebookConfig.from_env`: that raises `SystemExit` whenever
+    `RN_MAIN_MODEL` is unset, and a server with no model configured must still start, or the
+    settings page invariant 41 built for exactly that operator is unreachable.
+    """
+    try:
+        import uvicorn
+    except ImportError:
+        print(
+            "rlm-notebook serve needs the `api` extra:\n"
+            "    uv tool install 'rlm-notebook[api]'      # or: uv sync --extra api",
+            file=sys.stderr,
+        )
+        return 2
+
+    if not _is_loopback(args.host):
+        print(
+            f"WARNING: binding {args.host}, not loopback. This API has NO AUTHENTICATION: anyone "
+            f"who can reach {args.host}:{args.port} can read every notebook's full source text and "
+            "reasoning traces, delete sources, and change settings for notebooks they never named. "
+            "Only do this on a network you fully trust.",
+            file=sys.stderr,
+        )
+    # `notebooks/`, `traces/` and `audio/` are relative paths resolved against the working
+    # directory (invariant 34), so where you START this decides where your notebooks live.
+    print(f"rlm-notebook serving http://{args.host}:{args.port}/  (data in {Path.cwd()})")
+    uvicorn.run("rlm_notebook.api:app", host=args.host, port=args.port, reload=args.reload)
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:

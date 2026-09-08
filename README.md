@@ -22,6 +22,53 @@ is the tour.
 
 ## Install and run
 
+`rlm-notebook` is an APPLICATION, not a library: nothing here is meant to be imported into your own
+code, and installing it into a shared environment would drag numpy, an ONNX runtime and a PDF
+engine in with it. Install it into its own:
+
+```bash
+uv tool install "rlm-notebook[api] @ git+https://github.com/qazbnm456/rlm-notebook"
+# or: pipx install "rlm-notebook[api] @ git+https://github.com/qazbnm456/rlm-notebook"
+```
+
+Not on PyPI yet, hence the repository URL. Drop `[api]` if you only want the CLI.
+
+**Python 3.11 or 3.12, not 3.13.** `rapidocr-onnxruntime` declares `Requires-Python <3.13`, so pip
+refuses to resolve this project on 3.13 (`uv` will install it anyway, which is uv resolving past
+that bound rather than the bound not being there).
+
+**Two system dependencies no Python manifest can express**, which is also why there is a container:
+
+```bash
+brew install deno         # REQUIRED. Every live run executes in a Deno-hosted pyodide sandbox
+brew install tesseract    # optional. The OCR fallback for scanned PDFs; RapidOCR is primary and
+                          # ships as a normal dependency, so this only widens coverage
+```
+
+Then a model, in the environment. Nothing auto-loads `.env`:
+
+```bash
+export RN_MAIN_MODEL=...   # and RN_API_KEY, or use the subscription path below
+rlm-notebook ask "what does it say about X?" --source ./paper.pdf
+rlm-notebook serve         # the HTTP API and the web UI, on http://127.0.0.1:8000/
+```
+
+### In a container
+
+The image carries deno and tesseract, so it is the one install that is complete by itself:
+
+```bash
+docker build -t rlm-notebook .
+docker run --rm -p 127.0.0.1:8000:8000 -v "$PWD/data:/data" --env-file .env rlm-notebook
+```
+
+**Publish the port to loopback, as above.** A bare `-p 8000:8000` puts an API with no
+authentication on every interface of your machine. The volume matters too: `notebooks/`, `traces/`
+and `audio/` are relative to the working directory, so without it a removed container takes the
+notebooks with it.
+
+### To develop it
+
 ```bash
 git clone https://github.com/qazbnm456/rlm-notebook && cd rlm-notebook
 uv sync                       # installs the local OCR backends scanned PDFs need too — no extra flag
@@ -133,9 +180,14 @@ named through `PUT /settings`. There is no concept of an owner. Run it only on `
 otherwise fully-trusted network; do not expose it to the internet or a shared network as-is.
 
 ```bash
-uv sync --extra api                                    # installs fastapi + uvicorn
-uv run uvicorn rlm_notebook.api:app
+rlm-notebook serve                      # binds 127.0.0.1:8000 — loopback, deliberately
+rlm-notebook serve --host 0.0.0.0       # allowed, and it warns, because of the paragraph above
 ```
+
+`serve` binds loopback by DEFAULT rather than by convention: with no authentication, which
+interface it binds is the entire access-control story, so it belongs in the code. It starts
+without a model configured, on purpose, since the settings page exists for exactly that operator.
+From a source checkout: `uv run rlm-notebook serve` after `uv sync --extra api`.
 
 ```bash
 # --source accepts URLs only here (not local paths — see AGENTS.md invariant 26); use the CLI
@@ -214,7 +266,7 @@ run's trace and anything written in the last hour are never touched.
 
 ## Web UI
 
-Once the server above is running, open `http://localhost:8000/` in a browser: a real end-user
+Once `rlm-notebook serve` is running, open `http://127.0.0.1:8000/` in a browser: a real end-user
 product surface (source management — URL, pasted text, or file upload — citation-grounded chat, a
 Studio panel with Guide tabs, a podcast player, and Notes, and a live "what is the model doing
 right now" reasoning ticker), not a developer trace console. Zero build step — it's served

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import inspect
 from pathlib import Path
 
 import pytest
@@ -754,3 +755,68 @@ def test_a_model_failure_is_not_reported_as_a_bad_trace_path(monkeypatch, tmp_pa
         raise TimeoutError("the sandbox went away")
 
     assert out.exists() and out.read_text().strip(), "a failed run must still leave its trace"
+
+
+@pytest.mark.parametrize(
+    "host,loopback",
+    [
+        ("127.0.0.1", True),
+        ("localhost", True),
+        ("::1", True),
+        ("127.0.0.2", True),
+        ("::ffff:127.0.0.1", True),   # IPv4-mapped: still this machine
+        ("0.0.0.0", False),
+        ("", False),                  # bind("") is INADDR_ANY, the MOST exposed value
+        ("192.168.1.5", False),
+        ("example.com", False),       # unclassifiable without DNS: warn rather than resolve
+    ],
+)
+def test_serve_recognises_which_hosts_stay_on_this_machine(host, loopback):
+    """`serve` binds loopback by default, and says so loudly when told not to.
+
+    This API has no authentication of any kind (AGENTS.md invariant 25), so until it grows some,
+    which interface it binds IS the access-control story. That belongs in code rather than only in
+    a warning in `README.md`.
+
+    The empty string is the case worth a test of its own: `bind("")` is `INADDR_ANY`, so `--host ""`
+    is the most exposed value there is. A first draft listed it beside "localhost" as obviously
+    local and would have silenced the warning on exactly the binding that most needs it.
+    """
+    assert cli._is_loopback(host) is loopback
+
+
+def test_serve_reports_a_missing_api_extra_instead_of_an_import_traceback(monkeypatch, capsys):
+    """`serve` lives on the base CLI but uvicorn ships in the `api` extra, so the common first run
+    is one without it. That has to name the extra, not raise `ModuleNotFoundError: uvicorn`."""
+    import builtins
+
+    real_import = builtins.__import__
+
+    def no_uvicorn(name, *a, **kw):
+        if name == "uvicorn":
+            raise ImportError("No module named 'uvicorn'")
+        return real_import(name, *a, **kw)
+
+    monkeypatch.setattr(builtins, "__import__", no_uvicorn)
+    rc = cli.main(["serve"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "api" in err and "rlm-notebook[api]" in err
+
+
+def test_serve_never_reads_the_model_config():
+    """A server with no model configured must still start.
+
+    `NotebookConfig.from_env` raises `SystemExit` whenever `RN_MAIN_MODEL` is unset, which is
+    correct for `ask`/`guide`/`audio` and wrong here: the settings page invariant 41 built for
+    exactly that operator is served BY this process, so refusing to start would make it
+    unreachable. Same reasoning as `config.max_upload_bytes` in invariant 30.
+    """
+    # The CODE, with the docstring cut away: the docstring has to be free to explain WHY it must
+    # not call `from_env`, and a substring check over the whole source makes saying so a failure.
+    # The same collision caught `renderChatOverview`'s regenerate-count tripwire one file over.
+    source = inspect.getsource(cli._cmd_serve)
+    body = source.split('"""', 2)[2]
+    assert "uvicorn.run" in body, "the extraction broke; this would pass vacuously"
+    assert "from_env" not in body
+    assert "NotebookConfig" not in body
