@@ -59,10 +59,12 @@
     en: { head: "Guided demo", skip: "Skip", exit: "Exit", waiting: "Waiting for you…",
           finding: "Looking for the control…",
           manual: "Do this yourself, then the tour continues.",
+          doing: "Doing it for you…",
           done: "That is the whole product. The Install button has what you need." },
     "zh-Hant": { head: "導覽", skip: "略過", exit: "結束", waiting: "等你操作…",
                  finding: "正在尋找控制項…",
                  manual: "請自己操作一次，導覽會接著走。",
+                 doing: "正在幫你完成…",
                  done: "這就是產品的全貌。安裝方式在上面的「↓ Install」。" },
   };
   const L = (k) => {
@@ -110,7 +112,7 @@
       const foot = el("div", "pg-tour-foot");
       this.skip = el("button", "btn pg-step-btn", L("skip"));
       this.skip.type = "button";
-      this.skip.addEventListener("click", () => this.advance(true));
+      this.skip.addEventListener("click", () => this.fulfilAndAdvance());
       foot.appendChild(this.skip);
       this.exit = el("button", "btn pg-step-btn", L("exit"));
       this.exit.type = "button";
@@ -279,6 +281,24 @@
         this.repeating = false;
         if (!this.stopped) target.click();
       }, 700);
+    }
+
+    //: Skip means "do it for me": it advances the SHIM's stage and re-opens the notebook through
+    //: `openNotebook`, the product's own entry point, so the workspace ends up in exactly the state
+    //: pressing the button would have produced.
+    async fulfilAndAdvance() {
+      const now = await this.current();
+      const step = now && now.step;
+      if (step && step.fulfil) {
+        this.setHint(L("doing"));
+        try {
+          await PG.fulfil(notebookId(), step.fulfil);
+          if (typeof window.openNotebook === "function") await window.openNotebook(notebookId());
+        } catch (err) {
+          console.warn("playground: could not fulfil the step", err);
+        }
+      }
+      this.advance(true);
     }
 
     advance(manual) {

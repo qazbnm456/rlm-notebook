@@ -250,6 +250,64 @@ console.log("\nheadline demos are present in every scenario:");
 // tour runs has to opt back in with a rule that BEATS that one on specificity — comparing by string
 // would accept a rule that loses the cascade, so this computes it, the way the product's own
 // stylesheet tripwires do.
+// "Do it for me" has to leave the workspace in the state pressing the button would have produced.
+// When it only advanced the script, skipping step 1 left the notebook with no sources, so
+// `renderChatOverview` returned early, `#chat-overview` stayed hidden, and step 2 hunted for a
+// button that had never been built. Every later step inherited that.
+console.log("\nskipping a step fulfils it, and never strands a later one:");
+{
+  const s = { console: { log() {}, warn() {} }, JSON, Math, Object };
+  s.window = s;
+  vm.createContext(s);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), s);
+  const SCRIPT = s.rlmPlayground.SCRIPT;
+
+  // A fresh shim instance so this walk cannot be satisfied by earlier tests' mutations.
+  const sh = { console: { log() {}, warn() {} }, URL, Request: Q, Response: R, MessageEvent: ME,
+    EventTarget, structuredClone: clone, setTimeout, clearTimeout, JSON, Math, Object, Number,
+    Map, Set, Promise, String, Array, Error,
+    location: { href: `file://${DIST}/index.html`, hash: "" },
+    document: { currentScript: { src: `file://${DIST}/shim.js` } },
+    HTMLMediaElement: function () {}, addEventListener() {},
+    fetch: async (input) => {
+      const path = String(input && input.url ? input.url : input).replace(/^file:\/\//, "").split("?")[0];
+      return new R(readFileSync(path, "utf8"), { headers: { "Content-Type": "application/json" } });
+    } };
+  sh.window = sh;
+  sh.HTMLMediaElement.prototype = {};
+  Object.defineProperty(sh.HTMLMediaElement.prototype, "src", {
+    configurable: true, get() { return this._src; }, set(v) { this._src = v; },
+  });
+  const shc = vm.createContext(sh);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), shc, { filename: "tour.js" });
+  vm.runInContext(readFileSync(join(DIST, "shim.js"), "utf8"), shc, { filename: "shim.js" });
+  const SPG = sh.rlmPlayground;
+
+  const nbId = fixtures.scenarios[0].id;
+  let p0 = await SPG.progress(nbId);
+  ok(p0.sources === 0 && !p0.overview && p0.turns === 0,
+     "a fresh notebook starts empty (nothing pre-loaded)");
+
+  const fulfilling = SCRIPT.filter((st) => st.fulfil);
+  ok(fulfilling.length >= 4, `${fulfilling.length} steps declare what they fulfil`);
+  const stranded = [];
+  for (const step of fulfilling) {
+    await SPG.fulfil(nbId, step.fulfil);
+    const p = await SPG.progress(nbId);
+    let satisfied = false;
+    try { satisfied = !!step.done(p); } catch { satisfied = false; }
+    if (!satisfied) stranded.push(`${step.id} (fulfil: ${step.fulfil})`);
+  }
+  ok(stranded.length === 0,
+     `every fulfillable step reports done after being fulfilled${stranded.length ? ` — stranded: ${stranded.join(", ")}` : ""}`);
+
+  const end = await SPG.progress(nbId);
+  ok(end.sources === end.sourcesTotal, `sources fully revealed (${end.sources}/${end.sourcesTotal})`);
+  ok(end.overview, "overview revealed");
+  ok(end.turns >= 1, `${end.turns} turn(s) revealed`);
+  ok(!!end.podcast, "podcast revealed");
+}
+
 console.log("\nplayground chrome stays interactive during the tour:");
 {
   const CSS = readFileSync(join(DIST, "chrome.css"), "utf8");

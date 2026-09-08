@@ -93,6 +93,21 @@
   };
   PG.scenarios = async () => (await fixtures()).scenarios;
 
+  //: Skipping a step must FULFIL it, not step over it. The stage is what every later step reads, so
+  //: a skip that only advanced the script left the notebook empty and stranded everything
+  //: downstream: with no sources, `renderChatOverview` returns early, `#chat-overview` stays hidden,
+  //: and step 2 hunts for a button that was never built. The reader was told to press something
+  //: that did not exist because of a button they had pressed one step earlier.
+  PG.fulfil = async (id, what) => {
+    const nb = await full(id);
+    const st = stageOf(id);
+    if (what === "sources") st.sources = nb.sources.length;
+    else if (what === "overview") st.overview = true;
+    else if (what === "turn1") st.turns = Math.max(st.turns, 1);
+    else if (what === "turn2") st.turns = Math.max(st.turns, Math.min(2, nb.turns.length));
+    else if (what === "podcast") st.podcast = st.podcast || "default";
+  };
+
   //: What the director reads to know whether a step is finished, and how much is left to reveal.
   PG.progress = async (id) => {
     const nb = await full(id);

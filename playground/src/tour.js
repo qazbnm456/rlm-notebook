@@ -280,6 +280,7 @@
     {
       id: "sources",
       key: "sources",
+      fulfil: "sources",
       target: '#add-source-form button[type="submit"]',
       repeat: true,
       done: (p) => p.sources >= p.sourcesTotal,
@@ -288,25 +289,26 @@
     {
       id: "overview",
       key: "overview",
+      fulfil: "overview",
       // Built at runtime by `renderChatOverview` (`.chat-starter` wrapping a `.btn`), so the
       // selector has to match what app.js CREATES, not the static markup.
       target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button, #chat-overview",
       done: (p) => p.overview,
     },
     { id: "ask1", key: "ask1", target: "#ask-submit", fill: (p) => p.questions[0],
-      done: (p) => p.turns >= 1 },
+      fulfil: "turn1", done: (p) => p.turns >= 1 },
     { id: "trace", key: "trace",
       target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
       done: () => !document.getElementById("traj-drawer").hidden },
     { id: "ask2", key: "ask2", target: "#ask-submit", fill: (p) => p.questions[1],
-      skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
+      fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
     { id: "podcast-tab", key: "podcastTab",
       target: '.studio-views [data-view="podcast"], .studio-views button',
       done: () => !!document.querySelector("#podcast-generate:not([hidden])") },
     { id: "podcast-length", key: "podcastLength", target: ".podcast-length",
       done: () => true, manual: true },
     { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate",
-      done: (p) => !!p.podcast },
+      fulfil: "podcast", done: (p) => !!p.podcast },
     { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio",
       done: () => {
         const a = document.querySelector("#podcast-body audio");
