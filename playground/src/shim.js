@@ -92,9 +92,33 @@
     return live.get(id);
   }
 
+  //: One place both languages are reachable from. `uiLang` is `i18n.js`'s global and this file
+  //: loads before it, so the guard is not optional.
+  const uiText = (en, zh) => ((typeof uiLang === "function" ? uiLang() : "en") === "zh-Hant" ? zh : en);
+
   async function notebook(id) {
     const nb = await full(id);
     return nb && view(nb, stageOf(id));
+  }
+
+  //: A MUTATING handler gets the live notebook and answers with the view. `notebook()` returns what
+  //: `view` built — a NEW object with `sources`/`turns` sliced — so a handler that took it and
+  //: spliced an array changed a copy that was thrown away with the response. Every mutation except
+  //: notes was lost on the next read (notes survived only because `view` spreads them by reference,
+  //: which is what hid the whole class): a deleted source came back, a rename showed in the header
+  //: and then reverted the moment `refreshNotebookList` re-fetched, a cleared conversation
+  //: reappeared. `openNotebook` runs on the tour's own Next button, so the reader saw it happen.
+  //:
+  //: Mutate LIVE, respond with the VIEW. The stage's counts stay as they are: they are a reveal
+  //: ceiling, and `slice(0, n)` past a shortened array is still the whole array.
+  async function mutate(id, apply) {
+    const nb = await full(id);
+    // A 404, never `null`. Returning nothing made the route resolve to no Response at all, which
+    // is not a status a caller can read — the smoke suite hit it as `Cannot read properties of
+    // null (reading 'status')` while probing route shapes with a placeholder id.
+    if (!nb) return notFound("no such notebook in this playground");
+    const refused = apply(nb);
+    return refused || json(view(nb, stageOf(id)));
   }
 
   //: THE DEMO STARTS FROM SCRATCH ON EVERY LOAD. Resetting the shim's stage is not enough: the
@@ -263,6 +287,23 @@
   //: so the control never appears broken.
   async function addSource(id) {
     const nb = await full(id);
+    // AN ID THIS PAGE HAS NEVER HEARD OF, which the product's own "＋ New notebook" mints in two
+    // clicks (`app.js` generates `nb-<uuid8>` and the workspace opens empty). `full` returns null
+    // for it and every handler here dereferenced that, so adding a source answered
+    // `500 playground shim error: Cannot read properties of null` and `app.js` put it in an alert.
+    // A refusal that says why is the honest answer: this page replays recorded notebooks and has
+    // nothing to ingest with.
+    if (!nb) {
+      return json({
+        detail: uiText(
+          "This is a playground: it replays six recorded notebooks and has no ingestion behind it, "
+          + "so a new notebook has nothing to add. Pick one from the notebook menu, or install "
+          + "rlm-notebook to use your own sources.",
+          "這是展示頁：它重播六本錄好的筆記本，背後沒有真的擷取功能，所以新的筆記本沒有東西可以加。"
+          + "從上方的筆記本選單挑一本，或是裝起 rlm-notebook 用你自己的來源。",
+        ),
+      }, 422);
+    }
     const st = stageOf(id);
     if (st.sources < nb.sources.length) st.sources += 1;
     else nb.sources.push(simulatedSource(nb, "added-in-the-playground", "text"));
@@ -272,8 +313,7 @@
   route("POST", `${NB}/sources`, async (m) => addSource(decodeURIComponent(m[1])));
   route("POST", `${NB}/sources/upload`, async (m) => addSource(decodeURIComponent(m[1])));
 
-  route("DELETE", `${NB}/sources/([^/]+)`, async (m) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+  route("DELETE", `${NB}/sources/([^/]+)`, async (m) => mutate(decodeURIComponent(m[1]), (nb) => {
     const sid = decodeURIComponent(m[2]);
     const i = nb.sources.findIndex((s) => s.id === sid);
     if (i < 0) return notFound("source not found");
@@ -287,48 +327,45 @@
     }
     if (nb.overview) nb.overview.stale = true;
     if (nb.podcast) nb.podcast.stale = true;
-    return json(nb);
-  });
+  }));
 
   route("POST", `${NB}/notes`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
     const { text } = await req.json();
+    return mutate(decodeURIComponent(m[1]), (nb) => {
     // `n{max live numeric suffix + 1}`, never `n{length + 1}` — invariant 32: with length-based
     // ids, deleting a non-last note lets TWO live notes share one, and `delete`/`promote` both act
     // BY id, so either one would silently act on both.
     const max = nb.notes.reduce((mx, n) => Math.max(mx, parseInt(String(n.id).slice(1), 10) || 0), 0);
     nb.notes.push({ id: `n${max + 1}`, text });
-    return json(nb);
+    });
   });
 
-  route("DELETE", `${NB}/notes/([^/]+)`, async (m) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+  route("DELETE", `${NB}/notes/([^/]+)`, async (m) => mutate(decodeURIComponent(m[1]), (nb) => {
     const i = nb.notes.findIndex((n) => String(n.id) === decodeURIComponent(m[2]));
     if (i < 0) return notFound("note not found");
     nb.notes.splice(i, 1);
-    return json(nb);
-  });
+  }));
 
-  route("POST", `${NB}/notes/([^/]+)/promote`, async (m) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+  route("POST", `${NB}/notes/([^/]+)/promote`, async (m) => mutate(decodeURIComponent(m[1]), (nb) => {
     const i = nb.notes.findIndex((n) => String(n.id) === decodeURIComponent(m[2]));
     if (i < 0) return notFound("note not found");
     const [note] = nb.notes.splice(i, 1);
     nb.sources.push(simulatedSource(nb, `note: ${note.text.slice(0, 48)}`, "text"));
-    return json(nb);
-  });
+    // A promoted source is REVEALED: the stage's ceiling has to rise with it, or the source the
+    // reader just created is sliced straight back off the response.
+    stageOf(decodeURIComponent(m[1])).sources = nb.sources.length;
+  }));
 
-  route("DELETE", `${NB}/turns`, async (m) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+  route("DELETE", `${NB}/turns`, async (m) => mutate(decodeURIComponent(m[1]), (nb) => {
     nb.turns = [];
-    return json(nb);
-  });
+  }));
 
   route("PUT", `${NB}/title`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
-    nb.title = (await req.json()).title;
-    nb.derived_title = nb.title;
-    return json(nb);
+    const title = (await req.json()).title;
+    return mutate(decodeURIComponent(m[1]), (nb) => {
+      nb.title = title;
+      nb.derived_title = title;
+    });
   });
 
   route("POST", `${NB}/title`, async (m) => json(await notebook(decodeURIComponent(m[1]))));
@@ -342,14 +379,30 @@
     return json(settings);
   });
   route("GET", "/settings/choices", async () =>
+    // `output_languages`, NOT `languages`. `app.js` declares `choicesKey: "output_languages"`, so
+    // the wrong name made the Output language row fall back to a free-text input while the two
+    // voice rows rendered as dropdowns — a settings page visibly different from the product's, on
+    // the page whose whole claim is that this IS the product. `provider` is required too.
     json({
-      languages: ["Traditional Chinese", "Simplified Chinese", "English", "Japanese", "Korean"],
+      output_languages: ["Traditional Chinese", "Simplified Chinese", "English", "Japanese", "Korean"],
       voices: ["zh-TW-YunJheNeural", "zh-TW-HsiaoChenNeural", "en-US-AndrewNeural",
                "en-US-AvaNeural", "ja-JP-KeitaNeural", "ja-JP-NanamiNeural"],
+      provider: "edge-tts",
     })
   );
 
-  route("POST", `${NB}/runs/([^/]+)/cancel`, async () => json({ cancelled: true }));
+  //: STOP HAS TO STOP. This answered `{cancelled: true}` and never touched `during()`, so the run
+  //: kept its full seven seconds: `PG.isRunning` stayed true and held the reader on a dwell step
+  //: they had just cancelled, and the handler still recorded the artifact in the stage — the shim
+  //: remembering something the reader stopped and `app.js` discarded. The tour's own copy says
+  //: "Stop is real", and it is the control invariant 47 exists for.
+  //:
+  //: The real endpoint answers with the run ID, not a boolean.
+  route("POST", `${NB}/runs/([^/]+)/cancel`, async (m) => {
+    const runId = decodeURIComponent(m[2]);
+    if (PG.finishRun) PG.finishRun(null, { cancelled: true });
+    return json({ cancelled: runId });
+  });
 
   route("GET", `${NB}/runs/([^/]+)/trajectory`, async (m) => {
     const f = await fixtures();
@@ -388,22 +441,27 @@
   //: `finishRun` resolves the pending wait instead of cancelling the request, so the response still
   //: arrives and the notebook still reaches the state it would have — the reader skipped the WAIT,
   //: not the outcome.
+  //:
+  //: CANCELLING IS THE OTHER CASE, and it is the opposite one: the reader wants the outcome NOT to
+  //: happen. So the resolver carries WHY the wait ended, `during` returns it, and every handler
+  //: that records something into the stage checks before recording. Without it, Stop ended nothing:
+  //: the run kept its full seven seconds and the shim stored an artifact `app.js` had discarded.
   const pending = new Map();
-  PG.finishRun = (kind) => {
+  PG.finishRun = (kind, outcome) => {
     for (const [k, done] of [...pending]) {
-      if (!kind || k === kind) done();
+      if (!kind || k === kind) done(outcome || {});
     }
   };
 
   const during = async (kind, ms) => {
     inFlight.set(kind, (inFlight.get(kind) || 0) + 1);
     try {
-      await new Promise((resolve) => {
-        const timer = setTimeout(resolve, ms);
-        pending.set(kind, () => {
+      return await new Promise((resolve) => {
+        const timer = setTimeout(() => resolve({}), ms);
+        pending.set(kind, (outcome) => {
           clearTimeout(timer);
           pending.delete(kind);
-          resolve();
+          resolve(outcome || {});
         });
       });
     } finally {
@@ -418,7 +476,7 @@
     const st = stageOf(id);
     const body = await req.json();
     PG.announce(body.run_id, id, "ask");
-    await during("ask", RUN_MS);
+    if ((await during("ask", RUN_MS)).cancelled) return json(view(nb, st));
     // The reader is guided to send the question this notebook really asked, so the turn revealed is
     // the NEXT recorded one. A question typed freehand still lands on it — with the recorded
     // question kept, because the recorded ANSWER is the one thing here that cannot be improvised.
@@ -427,7 +485,10 @@
     if (!pick) return json({ detail: "no recorded answer" }, 422);
     if (!body.regenerate) st.turns = Math.min(st.turns + 1, nb.turns.length);
     return json({
-      answer: pick.answer,
+      // `text`, matching `AskResponse`. `app.js` happens to `void` this reply and rebuild from the
+      // notebook, so the wrong name was inert — and would stop being inert the first time anyone
+      // read it, which is exactly the shape of the `/audio` bug that reached a reader.
+      text: pick.answer,
       citations: pick.citations,
       follow_ups: pick.follow_ups,
       run_id: pick.run_id || body.run_id,
@@ -440,7 +501,7 @@
     const st = stageOf(id);
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, id, "overview");
-    await during("overview", RUN_MS);
+    if ((await during("overview", RUN_MS)).cancelled) return json(view(nb, st));
     st.overview = true;
     return json(view(nb, st));
   });
@@ -449,7 +510,7 @@
     const nb = await notebook(decodeURIComponent(m[1]));
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, nb.id, `guide:${m[2]}`);
-    await during("guide", RUN_MS);
+    if ((await during("guide", RUN_MS)).cancelled) return json({ cancelled: true });
     return json(PG.guide(nb, m[2]));
   });
 
@@ -462,7 +523,7 @@
     // Synthesis is the slow half in the real product (invariant 43: chatterbox measured 33x
     // edge-tts), so generating an episode waits noticeably longer than a chat turn. The wait is
     // part of what the demo is honest about.
-    await during("audio", RUN_MS * 1.6);
+    if ((await during("audio", RUN_MS * 1.6)).cancelled) return json(view(nb, st));
     // This notebook holds ONE recorded episode at ONE tier (invariant 42). Whichever length button
     // was pressed, the episode returned is the recorded one — and the page names its real tier
     // rather than implying the button re-generated it.
@@ -558,6 +619,19 @@
   // --- 3. <audio> -------------------------------------------------------------------------------
   // `player.src = "/notebooks/…/audio/file"` is a browser-issued request, invisible to `fetch`. The
   // property setter is the only seam, and rewriting there keeps `app.js` untouched.
+  //: THE DOWNLOAD LINK IS A FOURTH INTERCEPTION POINT. `app.js` sets `download.href = audioSrc`,
+  //: an ANCHOR, which the media-element hook below never sees — so `↓ Download` resolved
+  //: `/notebooks/{id}/audio/file` against the site root and 404'd, while the tour's own copy says
+  //: it gives you the file. A capture-phase listener rewrites the href on the way to the click,
+  //: which is late enough that `renderPodcast` has already set it and early enough that the
+  //: navigation uses the new value.
+  document.addEventListener("click", (event) => {
+    const a = event.target && event.target.closest && event.target.closest("a[download][href]");
+    if (!a) return;
+    const m = a.getAttribute("href").match(/\/notebooks\/([^/]+)\/audio\/file/);
+    if (m) a.href = asset(`audio/${decodeURIComponent(m[1])}.mp3`);
+  }, true);
+
   const media = Object.getOwnPropertyDescriptor(HTMLMediaElement.prototype, "src");
   Object.defineProperty(HTMLMediaElement.prototype, "src", {
     configurable: true,

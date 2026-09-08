@@ -75,7 +75,7 @@ const sandbox = {
   Array,
   Error,
   location: { href: `file://${DIST}/index.html`, hash: "" },
-  document: { currentScript: { src: `file://${DIST}/shim.js` } },
+  document: { currentScript: { src: `file://${DIST}/shim.js` }, addEventListener() {} },
   HTMLMediaElement: function () {},
   sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
   addEventListener: (k, f) => listeners.set(k, f),
@@ -121,13 +121,18 @@ const REQUESTS = [
   ["GET", "/settings/choices"],
   ["GET", `/notebooks/${nb}/sources/s1`],
   ["POST", `/notebooks/${nb}/sources`, { sources: ["https://example.com/x"] }],
-  ["DELETE", `/notebooks/${nb}/turns`],
   ["PUT", `/notebooks/${nb}/title`, { title: "renamed" }],
   ["POST", `/notebooks/${nb}/ask`, { question: "test?", run_id: `${nb}-smoke` }],
   ["POST", `/notebooks/${nb}/overview`, { run_id: `${nb}-smoke2` }],
   ["POST", `/notebooks/${nb}/guide/summary`, { run_id: `${nb}-smoke3` }],
   ["POST", `/notebooks/${nb}/audio`, { run_id: `${nb}-smoke4`, length: "long" }],
   ["POST", `/notebooks/${nb}/runs/${nb}-smoke/cancel`, {}],
+  // DESTRUCTIVE, so it runs against a DIFFERENT notebook. This list shares one shim context with
+  // every block after it, and clearing a conversation used to be a no-op whose result was thrown
+  // away — so it sat above `ask` and above six later assertions that all read the same notebook.
+  // Making the shim persist its mutations broke all of them at once, which is the suite finding an
+  // order dependency in itself that was invisible while the operation did nothing.
+  ["DELETE", `/notebooks/${fixtures.scenarios[fixtures.scenarios.length - 1].id}/turns`],
 ];
 
 console.log("routes:");
@@ -267,7 +272,7 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
     EventTarget, structuredClone: clone, setTimeout, clearTimeout, JSON, Math, Object, Number,
     Map, Set, Promise, String, Array, Error,
     location: { href: `file://${DIST}/index.html`, hash: "" },
-    document: { currentScript: { src: `file://${DIST}/shim.js` } },
+    document: { currentScript: { src: `file://${DIST}/shim.js` }, addEventListener() {} },
     HTMLMediaElement: function () {}, addEventListener() {},
     fetch: async (input) => {
       const path = String(input && input.url ? input.url : input).replace(/^file:\/\//, "").split("?")[0];
@@ -418,6 +423,88 @@ console.log("\nnothing local or private reaches the published fixture:");
 // button. A vacuous check is worse than none, because the name promises otherwise.
 // Four findings from an independent review, each of them live on every notebook, each invisible to
 // the ~190 assertions that were already here.
+// Every mutating route was writing to a COPY. `notebook()` returns what `view` built — a new
+// object with sliced arrays — so a handler that spliced one changed something thrown away with the
+// response: a deleted source came back on the next read, a rename reverted the moment
+// `refreshNotebookList` re-fetched, a cleared conversation reappeared. Notes were the exception,
+// because `view` spreads them by reference, and that one exception is what hid the whole class from
+// the notes-lifecycle assertions that already existed.
+console.log("\nwhat the shim changes, it keeps:");
+{
+  const sh = { console: { log() {}, warn() {} }, URL, Request: Q, Response: R, MessageEvent: ME,
+    EventTarget, structuredClone: clone, setTimeout, clearTimeout, JSON, Math, Object, Number,
+    Map, Set, Promise, String, Array, Error,
+    location: { href: `file://${DIST}/index.html`, hash: "" },
+    document: { currentScript: { src: `file://${DIST}/shim.js` }, addEventListener() {} },
+    HTMLMediaElement: function () {}, addEventListener() {},
+    fetch: async (input) => {
+      const path = String(input && input.url ? input.url : input).replace(/^file:\/\//, "").split("?")[0];
+      return new R(readFileSync(path, "utf8"), { headers: { "Content-Type": "application/json" } });
+    } };
+  sh.window = sh;
+  sh.HTMLMediaElement.prototype = {};
+  Object.defineProperty(sh.HTMLMediaElement.prototype, "src", {
+    configurable: true, get() { return this._src; }, set(v) { this._src = v; },
+  });
+  const shc = vm.createContext(sh);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), shc, { filename: "tour.js" });
+  vm.runInContext(readFileSync(join(DIST, "shim.js"), "utf8"), shc, { filename: "shim.js" });
+
+  const call = async (method, path, body) => {
+    const res = await sh.fetch(new Q("http://x" + path, {
+      method, body: body === undefined ? undefined : JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+    }));
+    return { status: res.status, body: await res.json() };
+  };
+  const id = fixtures.scenarios[0].id;
+  for (let i = 0; i < 3; i += 1) await call("POST", `/notebooks/${id}/sources`);
+
+  const before = (await call("GET", `/notebooks/${id}`)).body;
+  const removed = before.sources[0].id;
+  const afterDelete = (await call("DELETE", `/notebooks/${id}/sources/${removed}`)).body;
+  const reread = (await call("GET", `/notebooks/${id}`)).body;
+  ok(afterDelete.sources.length === reread.sources.length,
+     `a deleted source stays deleted (${afterDelete.sources.length} in the reply, ${reread.sources.length} on re-read)`);
+  ok(!reread.sources.some((s) => s.id === removed), "and it is the one that was asked for");
+
+  await call("PUT", `/notebooks/${id}/title`, { title: "RENAMED-BY-SMOKE" });
+  ok((await call("GET", `/notebooks/${id}`)).body.title === "RENAMED-BY-SMOKE",
+     "a rename survives the re-fetch app.js does immediately after it");
+
+  const noted = (await call("POST", `/notebooks/${id}/notes`, { text: "smoke" })).body;
+  const noteId = noted.notes[noted.notes.length - 1].id;
+  const promoted = (await call("POST", `/notebooks/${id}/notes/${noteId}/promote`)).body;
+  const afterPromote = (await call("GET", `/notebooks/${id}`)).body;
+  ok(promoted.sources.length === afterPromote.sources.length,
+     `a promoted note stays a source (${promoted.sources.length} vs ${afterPromote.sources.length} on re-read)`);
+
+
+  // Shapes the route-coverage loop cannot see: it asks whether a path is routed, and a wrong body
+  // is routed just as well as a right one.
+  const choices = (await call("GET", "/settings/choices")).body;
+  const APPJS = readFileSync(join(DIST, "app.js"), "utf8");
+  const key = (APPJS.match(/choicesKey:\s*"([\w]+)"/) || [])[1];
+  ok(key && key in choices, `/settings/choices carries ${key}, the key app.js declares`);
+  ok("provider" in choices, "and the provider field SettingsChoices requires");
+
+  const cancelled = (await call("POST", `/notebooks/${id}/runs/some-run/cancel`)).body;
+  ok(cancelled.cancelled === "some-run",
+     `cancel answers with the run id like the real endpoint, not ${JSON.stringify(cancelled.cancelled)}`);
+
+  const asked = (await call("POST", `/notebooks/${id}/ask`, { question: "?" })).body;
+  ok(typeof asked.text === "string", "ask answers with `text`, the field AskResponse declares");
+
+  // LAST, because it empties the conversation everything above reads.
+  await call("DELETE", `/notebooks/${id}/turns`);
+  ok((await call("GET", `/notebooks/${id}`)).body.turns.length === 0, "a cleared conversation stays cleared");
+
+  // The product's own "＋ New notebook" mints an id this page has never heard of, in two clicks.
+  const unknown = await call("POST", "/notebooks/nb-deadbeef/sources");
+  ok(unknown.status === 422, `an unknown notebook is refused (${unknown.status}), not a 500`);
+  ok(/playground|展示頁/.test(String(unknown.body.detail)), "and the refusal says why");
+}
+
 console.log("\nthe shim speaks the renderer's language, per tab:");
 {
   const w = { rlmPlayground: {} };
@@ -664,7 +751,7 @@ console.log("\nskipping a wait ends the run and still lands its result:");
     EventTarget, structuredClone: clone, setTimeout, clearTimeout, JSON, Math, Object, Number,
     Map, Set, Promise, String, Array, Error,
     location: { href: `file://${DIST}/index.html`, hash: "" },
-    document: { currentScript: { src: `file://${DIST}/shim.js` } },
+    document: { currentScript: { src: `file://${DIST}/shim.js` }, addEventListener() {} },
     HTMLMediaElement: function () {}, addEventListener() {},
     fetch: async (input) => {
       const path = String(input && input.url ? input.url : input).replace(/^file:\/\//, "").split("?")[0];
