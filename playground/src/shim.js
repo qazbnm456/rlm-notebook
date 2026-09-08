@@ -319,14 +319,18 @@
 
   //: In-flight runs, so the guided script can hold a step open for exactly as long as the run lasts
   //: instead of guessing at a duration.
-  let inFlight = 0;
-  PG.isRunning = () => inFlight > 0;
-  const during = async (ms) => {
-    inFlight += 1;
+  //: Counted PER KIND. A single global counter meant any run made every "is my run going?" check
+  //: true at once: while the overview was generating, the ask step reported itself done and the
+  //: script fell through it, so one press of Skip jumped two steps.
+  const inFlight = new Map();
+  PG.isRunning = (kind) =>
+    kind ? (inFlight.get(kind) || 0) > 0 : [...inFlight.values()].some((n) => n > 0);
+  const during = async (kind, ms) => {
+    inFlight.set(kind, (inFlight.get(kind) || 0) + 1);
     try {
       await sleep(ms);
     } finally {
-      inFlight -= 1;
+      inFlight.set(kind, (inFlight.get(kind) || 0) - 1);
     }
   };
 
@@ -336,7 +340,7 @@
     const st = stageOf(id);
     const body = await req.json();
     PG.announce(body.run_id, id, "ask");
-    await during(RUN_MS);
+    await during("ask", RUN_MS);
     // The reader is guided to send the question this notebook really asked, so the turn revealed is
     // the NEXT recorded one. A question typed freehand still lands on it — with the recorded
     // question kept, because the recorded ANSWER is the one thing here that cannot be improvised.
@@ -358,7 +362,7 @@
     const st = stageOf(id);
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, id, "overview");
-    await during(RUN_MS);
+    await during("overview", RUN_MS);
     st.overview = true;
     return json(view(nb, st));
   });
@@ -367,7 +371,7 @@
     const nb = await notebook(decodeURIComponent(m[1]));
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, nb.id, `guide:${m[2]}`);
-    await during(RUN_MS);
+    await during("guide", RUN_MS);
     return json(PG.guide(nb, m[2]));
   });
 
@@ -380,7 +384,7 @@
     // Synthesis is the slow half in the real product (invariant 43: chatterbox measured 33x
     // edge-tts), so generating an episode waits noticeably longer than a chat turn. The wait is
     // part of what the demo is honest about.
-    await during(RUN_MS * 1.6);
+    await during("audio", RUN_MS * 1.6);
     // This notebook holds ONE recorded episode at ONE tier (invariant 42). Whichever length button
     // was pressed, the episode returned is the recorded one — and the page names its real tier
     // rather than implying the button re-generated it.

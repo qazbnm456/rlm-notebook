@@ -165,14 +165,35 @@
 .driver-popover.pg-pop .driver-popover-description {
   color: var(--text-dim); font-size: 12.5px; line-height: 1.6;
 }
-/* driver's arrow is `border: 5px solid`, which against a bordered popover reads as a small bump
-   rather than a pointer. Bigger, and each side re-declares the three transparent edges because
-   changing `border-width` resets them. */
+/* THE ARROW NEEDS A BORDER TOO. driver draws one bare triangle (`border: 5px solid`), and against a
+   popover that HAS a 1px border that reads as a naked triangle stuck to the side of the box rather
+   than part of it. A bordered bubble needs two triangles: an outer one in the border colour, and an
+   inner one in the surface colour nudged 1.5px back toward the popover so only a rim of the outer
+   shows. `::after` is free here — driver puts no content in the arrow. */
 .driver-popover.pg-pop .driver-popover-arrow { border-width: 9px; }
-.driver-popover.pg-pop .driver-popover-arrow-side-left { border-left-color: var(--surface-1); }
-.driver-popover.pg-pop .driver-popover-arrow-side-right { border-right-color: var(--surface-1); }
-.driver-popover.pg-pop .driver-popover-arrow-side-top { border-top-color: var(--surface-1); }
-.driver-popover.pg-pop .driver-popover-arrow-side-bottom { border-bottom-color: var(--surface-1); }
+.driver-popover.pg-pop .driver-popover-arrow::after {
+  content: "";
+  position: absolute;
+  border: 9px solid transparent;
+}
+/* Each side names the ONE edge that is visible (the other three are transparent, set by driver) and
+   places the inner triangle against it. */
+.driver-popover.pg-pop .driver-popover-arrow-side-top { border-top-color: var(--border-strong); }
+.driver-popover.pg-pop .driver-popover-arrow-side-top::after {
+  border-top-color: var(--surface-1); left: -9px; top: -10.5px;
+}
+.driver-popover.pg-pop .driver-popover-arrow-side-bottom { border-bottom-color: var(--border-strong); }
+.driver-popover.pg-pop .driver-popover-arrow-side-bottom::after {
+  border-bottom-color: var(--surface-1); left: -9px; bottom: -10.5px;
+}
+.driver-popover.pg-pop .driver-popover-arrow-side-left { border-left-color: var(--border-strong); }
+.driver-popover.pg-pop .driver-popover-arrow-side-left::after {
+  border-left-color: var(--surface-1); top: -9px; left: -10.5px;
+}
+.driver-popover.pg-pop .driver-popover-arrow-side-right { border-right-color: var(--border-strong); }
+.driver-popover.pg-pop .driver-popover-arrow-side-right::after {
+  border-right-color: var(--surface-1); top: -9px; right: -10.5px;
+}
 /* The spotlit control MUST stay clickable: the reader is being asked to press it. driver.js cuts a
  * hole in its own overlay; this only makes sure nothing of ours is stacked over that hole. */
 .driver-active-element { z-index: 10000; }

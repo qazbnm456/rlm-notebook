@@ -264,9 +264,26 @@
       return null;
     }
 
+    //: `tick` awaits, and the poll fires every 350ms, so two can overlap. When "Do it for me"
+    //: advanced mid-await, the older tick resumed afterwards and re-armed and re-highlighted the
+    //: step it had captured BEFORE the advance — the spotlight flashed and came straight back to
+    //: the step the reader had just left. A generation counter makes a stale tick discard itself,
+    //: and the re-entry guard stops two running at once in the first place.
     async tick() {
+      if (this.stopped || this.ticking) return;
+      this.ticking = true;
+      try {
+        await this.run();
+      } finally {
+        this.ticking = false;
+      }
+    }
+
+    async run() {
       if (this.stopped) return;
+      const gen = this.gen || 0;
       const now = await this.current();
+      if (gen !== (this.gen || 0)) return; // advanced while awaiting: this result is stale
       if (!now) {
         this.clearSpotlight();
         this.paint(null);
@@ -305,7 +322,7 @@
       // already "done" on arrival — no run is in flight yet — and skips past the very thing it
       // exists to hold the reader on.
       if (step.dwell) {
-        if (PG.isRunning()) this.sawRun = true;
+        if (PG.isRunning(step.kind)) this.sawRun = true;
         // Hold for a run, but not forever. "Do it for me" fulfils the previous step with no run at
         // all, and a dwell that waits unconditionally would strand the reader on a step whose whole
         // job is to show something that is never going to happen.
@@ -386,6 +403,7 @@
     }
 
     advance(manual) {
+      this.gen = (this.gen || 0) + 1;
       this.index += 1;
       this.started = false;
       this.armed = null;

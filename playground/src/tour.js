@@ -314,24 +314,27 @@
       target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button, #chat-overview",
       // Hands over when the run STARTS, not when it finishes. If this waited for the result, the
       // dwell step after it would arrive with the run already over and nothing left to watch.
-      done: (p) => p.overview || PG.isRunning(),
+      done: (p) => p.overview || PG.isRunning("overview"),
     },
     // A step of its OWN, held open for exactly as long as the run lasts. Telling someone to watch
     // the reasoning and then advancing the moment the result lands gives them nothing to watch;
     // `done` reads the shim's in-flight count, so this ends when the run ends rather than after a
     // guessed number of seconds. "Do it for me" still skips it.
     { id: "watch", key: "watch", target: ".run-status, .run-log, #chat-overview",
-      side: "right", align: "start", dwell: true,
-      done: () => !PG.isRunning() },
+      side: "right", align: "start", dwell: true, kind: "overview",
+      done: () => !PG.isRunning("overview") },
     { id: "ask1", key: "ask1", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[0],
-      fulfil: "turn1", done: (p) => p.turns >= 1 || PG.isRunning() },
+      fulfil: "turn1", done: (p) => p.turns >= 1 || PG.isRunning("ask") },
     { id: "watch-ask", key: "watchAsk", target: ".run-status, .run-log, .chat-history",
-      side: "top", align: "start", dwell: true, done: () => !PG.isRunning() },
+      side: "top", align: "start", dwell: true, kind: "ask",
+      done: () => !PG.isRunning("ask") },
     { id: "trace", key: "trace", side: "top", align: "start",
       // The ANSWER's pill, not the overview's. `.ticker-affordance` alone matched whichever
       // rendered first, which is the overview's, so the spotlight landed on a block the step is not
       // talking about.
-      target: ".turn:last-of-type .ticker-affordance, .turn .ticker-affordance, .ticker-affordance",
+      // `.ticker-affordance` is a DIV, so it is full-column-width and the spotlight cut a wide
+      // strip across the answer instead of ringing the pill. The button inside it is the control.
+      target: ".turn:last-of-type .ticker-toggle, .turn .ticker-toggle, .ticker-toggle",
       done: () => !document.getElementById("traj-drawer").hidden },
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
       fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },

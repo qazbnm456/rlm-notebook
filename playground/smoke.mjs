@@ -321,6 +321,41 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // The product records this twice — invariant 60 ("a repaint may not delete a RUN") and invariant 71
 // — and the playground reintroduced it: "Do it for me" called `openNotebook`, a full repaint, while
 // a run was still in flight, and the answer and the overview vanished off the screen.
+// One global "is a run going" flag made every step's own check true at once: while the overview was
+// generating, the ask step reported itself done and the script fell through it, so one press of
+// Skip jumped two steps. Each step has to ask about ITS OWN kind.
+console.log("\nrun checks are per kind, so a step cannot fall through another's run:");
+{
+  const s = { console: { log() {}, warn() {} }, JSON, Math, Object,
+              document: { querySelector: () => null, getElementById: () => null } };
+  s.window = s;
+  vm.createContext(s);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), s);
+  const SCRIPT = s.rlmPlayground.SCRIPT;
+
+  // Pretend ONLY the overview is running. Nothing downstream of the overview may report done.
+  s.rlmPlayground.isRunning = (kind) => kind === "overview";
+  s.rlmPlayground.lengthTouched = false;
+  // Nothing else done yet, so any step reporting done is reacting to the OVERVIEW's run.
+  const fresh = { sources: 0, sourcesTotal: 3, overview: false, turns: 0, turnsTotal: 2,
+                  podcast: null, questions: ["q1", "q2"] };
+  const bled = [];
+  for (const step of SCRIPT) {
+    // Dwell steps are held open by the director's own guard, and `overview` is the run's own step.
+    if (step.id === "overview" || step.dwell || step.last) continue;
+    let done;
+    try { done = !!step.done(fresh); } catch { done = false; }
+    if (done) bled.push(step.id);
+  }
+  ok(bled.length === 0,
+     `an overview run completes only overview steps${bled.length ? ` — also completed: ${bled.join(", ")}` : ""}`);
+
+  // Every dwell step must name the kind it is waiting on, or it waits on all of them.
+  const unkinded = SCRIPT.filter((st) => st.dwell && !st.kind).map((st) => st.id);
+  ok(unkinded.length === 0,
+     `every dwell step names its kind${unkinded.length ? ` — missing: ${unkinded.join(", ")}` : ""}`);
+}
+
 console.log("\nnothing repaints while a run is in flight:");
 {
   const DIR = readFileSync(join(DIST, "director.js"), "utf8");
@@ -601,6 +636,7 @@ console.log("\ndirector selectors still match the shipped UI:");
     "#chat-overview": 'id="chat-overview"',
     "chat-starter": '"chat-starter"',
     "ticker-affordance": '"ticker-affordance"',
+    "ticker-toggle": '"ticker-toggle',
     "#ask-submit": 'id="ask-submit"',
     "studio-views": 'id="studio-views"',
     "podcast-length": '"podcast-length"',
