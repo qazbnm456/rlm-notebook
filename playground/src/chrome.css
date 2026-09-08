@@ -22,9 +22,9 @@
 }
 .pg-sim {
   /* NOT `margin-left: auto` — `.header-actions` already sets that on itself, and a second one here
-     fought it. */
+     fought it. Height matched to `.header-btn` so the whole row shares one baseline. */
   display: inline-flex; align-items: center; gap: 6px; flex: 0 0 auto;
-  padding: 3px 9px;
+  height: 32px; padding: 0 11px;
   border: 1px solid var(--border-strong); border-radius: 999px;
   background: var(--surface-2); color: var(--text-dim);
   font-size: 11px; letter-spacing: 0.09em; font-weight: 600; white-space: nowrap;
@@ -36,12 +36,17 @@
 /* `.header-btn` is a 32x32 SQUARE built for single-glyph icons. Text buttons inherit that and
    collapse on top of each other — the header rendered as "SIMULATEDNoteBestartInsta GitHu".
    Anything with a word in it has to opt back out of the fixed box. */
+/* Matches `.header-btn` in every dimension that shows: same 32px height, same radius, border,
+   background and transition. ONLY the fixed 32px WIDTH is opted out of, because these carry words.
+   At 28px they sat a few pixels short of the ⚙ and ◐ beside them and the row read as two designs. */
 .pg-btn {
-  width: auto; height: 28px;
-  padding: 0 10px;
+  width: auto;
+  height: 32px;
+  padding: 0 11px;
   flex: 0 0 auto;
   white-space: nowrap;
-  font-size: 12px;
+  font-size: 0.8125rem;
+  gap: 5px;
 }
 /* Hover owns `background`; focus owns `border-color`. Disjoint properties, so hovering one control
  * can never wipe the focus ring on another — the same fix invariant 58 records. */

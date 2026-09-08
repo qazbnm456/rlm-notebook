@@ -283,6 +283,119 @@ def trim_audio(nb_id: str, dest: Path, seconds: int) -> dict | None:
     return {"seconds": round(full, 1), "trimmed": False}
 
 
+#: Text that could only have come from this repository's own documentation. The model READS this
+#: project's skill files mid-run (invariant 65 wires them in with `discovery="inject"`), so its
+#: reasoning quotes them back: internal notes, invariant numbers and measurement history, on a page
+#: meant to show a reader what the product does.
+#:
+#: DELIBERATELY NARROW. A first pass also listed `rlm_notebook` and `rlm_harness`, which redacted 339
+#: strings — every `task` field among them — and would have gutted the drawer it was protecting.
+#: Those are package names that ship in the wheel; they are not private. What is private is the
+#: PROSE of the internal docs.
+_INTERNAL_MARKERS = (
+    "TraceRecorder",
+    "corpus-navigation",
+    "podcast-craft",
+    "AGENTS.md",
+    "CHANGELOG.md",
+    "read_skill",
+)
+
+#: Only long strings are candidates. A short field can contain a marker incidentally; a paragraph
+#: containing one is the model quoting a document back.
+_REDACT_MIN_CHARS = 180
+
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}")
+
+
+def redact_traces(fixtures: dict) -> int:
+    """Strip anything from the recorded runs that is about THIS MACHINE rather than the demo.
+
+    A trace is the one artifact here that can carry text nobody chose to publish: the planner's own
+    reasoning, the code it wrote, and whatever it read. The audit that prompted this found no local
+    paths, no username, no hostnames and no credentials — but it did find a run quoting this repo's
+    internal skill files at length, because the model had read them.
+
+    Redaction happens at the STRING level across the runs, so it reaches reasoning, code cells and
+    tool verdicts alike without needing to know which field a given event uses.
+    """
+    redacted = 0
+
+    def clean(value):
+        nonlocal redacted
+        if isinstance(value, str):
+            if len(value) >= _REDACT_MIN_CHARS and any(m in value for m in _INTERNAL_MARKERS):
+                redacted += 1
+                return "[internal project notes the model read during this run, omitted here]"
+            new = _EMAIL.sub("[email omitted]", value)
+            if new != value:
+                redacted += 1
+            return new
+        if isinstance(value, dict):
+            return {k: clean(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [clean(v) for v in value]
+        return value
+
+    # Internal-doc prose can only appear in a RUN — a source is somebody else's article.
+    fixtures["runs"] = clean(fixtures["runs"])
+
+    # Contact details, though, arrive in the ingested SOURCES: a press release prints its press
+    # officer's address, and republishing it on another domain hands a scraper a fresh copy. The
+    # sources are the reader-facing text, so this covers the whole fixture rather than the runs.
+    def scrub_emails(value):
+        nonlocal redacted
+        if isinstance(value, str):
+            new_value = _EMAIL.sub("[email omitted]", value)
+            if new_value != value:
+                redacted += 1
+            return new_value
+        if isinstance(value, dict):
+            return {k: scrub_emails(v) for k, v in value.items()}
+        if isinstance(value, list):
+            return [scrub_emails(v) for v in value]
+        return value
+
+    for key in ("notebooks", "sources", "scenarios"):
+        fixtures[key] = scrub_emails(fixtures[key])
+
+    print(f"  redacted {redacted} string(s) carrying internal notes or contact detail")
+    return redacted
+
+
+def anonymise_models(fixtures: dict) -> None:
+    """Replace every model identifier with a neutral label, everywhere in the fixture.
+
+    Which models this project runs against is nobody's business on a public product page, and the
+    names reach further than the one field that holds them: `run_start.meta` carries `main_model`
+    and `sub_model`, and the planner's own reasoning quotes them too. So the names are COLLECTED
+    from the meta fields (never hardcoded, so a future model is covered without anyone remembering
+    this function) and then substituted across the serialised fixture — prose included.
+
+    Labels are stable and ordered, so the same model reads as the same model across every run and a
+    reader can still see that two different ones were involved.
+    """
+    names: list[str] = []
+    for run in fixtures["runs"].values():
+        meta = ((run.get("trajectory") or {}).get("initial") or {}).get("meta") or {}
+        for key in ("main_model", "sub_model"):
+            value = meta.get(key)
+            if isinstance(value, str) and value and value not in names:
+                names.append(value)
+    if not names:
+        return
+
+    # Longest first: a bare name can be a substring of a prefixed one (`gpt-5.6-luna` inside
+    # `openai/gpt-5.6-luna`), and replacing the short one first would leave `openai/model-b`.
+    mapping = {n: f"model-{chr(ord('a') + i)}" for i, n in enumerate(names)}
+    blob = json.dumps(fixtures, ensure_ascii=False)
+    for name in sorted(mapping, key=len, reverse=True):
+        blob = blob.replace(name, mapping[name])
+    fixtures.clear()
+    fixtures.update(json.loads(blob))
+    print(f"  anonymised {len(mapping)} model name(s): {', '.join(mapping.values())}")
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "dist"))
@@ -320,12 +433,30 @@ def main() -> int:
         fixtures["runs"].update(precompute_runs(nb_id))
         audio = trim_audio(nb_id, out / "audio" / f"{nb_id}.mp3", args.audio_seconds)
         pod = response.get("podcast") or {}
+        # A ⌁ pill is rendered from a persisted `run_id`, and the drawer 404s if the trace behind it
+        # was pruned (`RN_TRACE_RETENTION_DAYS`) or the run predates the API path. In the product
+        # that degrades one affordance and nothing else (invariant 29); on a product PAGE it is a
+        # reader pressing the headline feature and getting an error. So an artifact whose trace is
+        # gone simply does not advertise one here. Honest by subtraction: the demo never offers an
+        # affordance it cannot fulfil, and never shows somebody else's trace in its place.
+        have = set(fixtures["runs"])
+        dropped = 0
+        for art in [response.get("overview"), response.get("podcast"), *response.get("turns", [])]:
+            if art and art.get("run_id") and art["run_id"] not in have:
+                art["run_id"] = None
+                dropped += 1
+        if dropped:
+            print(f"  {nb_id}: {dropped} artifact(s) had no surviving trace; ⌁ pill withheld")
+
         fixtures["scenarios"].append({
             **scenario,
             "title": response.get("title"),
             "audio": audio,
             "utterances": len(pod.get("utterances") or []),
         })
+
+    anonymise_models(fixtures)
+    redact_traces(fixtures)
 
     (out / "fixtures.json").write_text(
         json.dumps(fixtures, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"

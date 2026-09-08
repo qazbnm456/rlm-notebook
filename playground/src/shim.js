@@ -301,8 +301,11 @@
 
   route("GET", `${NB}/runs/([^/]+)/trajectory`, async (m) => {
     const f = await fixtures();
-    const events = f.traces[decodeURIComponent(m[2])];
-    return events ? json(PG.trajectory(events)) : notFound("no trace for this run");
+    // `f.runs`, not `f.traces`. The fixture key was renamed when the build started precomputing the
+    // decomposition, and this route was left reading the old one — so it dereferenced `undefined`
+    // and every ⌁ pill answered with a 500 instead of the drawer.
+    const run = f.runs[decodeURIComponent(m[2])];
+    return run ? json(PG.trajectory(run)) : notFound("no trace for this run");
   });
 
   // --- the run-taking endpoints -----------------------------------------------------------------

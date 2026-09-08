@@ -330,6 +330,44 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // The product sets `scrollTop` by hand rather than calling `scrollIntoView`, because that walks
 // EVERY scrollable ancestor and drags the whole page (invariant 44). The director brings its target
 // into view the same way, and must not reach for the easy call.
+// A trace is the one artifact here that can carry text nobody chose to publish: the planner's own
+// reasoning, the code it wrote, and whatever it read. This page goes on the open web, so the audit
+// that found a run quoting this repo's internal skill files has to run every build, not once.
+console.log("\nnothing local or private reaches the published fixture:");
+{
+  const blob = readFileSync(join(DIST, "fixtures.json"), "utf8");
+  const FORBIDDEN = {
+    "absolute home paths": /\/Users\/[\w.-]+|\/home\/[\w.-]+|C:\\\\Users/,
+    "credentials": /sk-[A-Za-z0-9]{8,}|Bearer\s+\S{12,}|RN_API_KEY|RN_BASE_URL/,
+    "email addresses": /[\w.+-]+@[\w-]+\.[\w.]{2,}/,
+    "loopback or hostnames": /127\.0\.0\.1|localhost:\d+|\.local\b/,
+    "internal doc prose": /TraceRecorder|AGENTS\.md|CHANGELOG\.md/,
+    "python tracebacks": /File "[^"]+", line \d+/,
+  };
+  for (const [what, re_] of Object.entries(FORBIDDEN)) {
+    const hit = blob.match(re_);
+    ok(!hit, `no ${what}${hit ? ` — found ${JSON.stringify(hit[0]).slice(0, 50)}` : ""}`);
+  }
+
+  // Model identifiers are replaced with neutral labels: which models this runs against is nobody's
+  // business on a public page, and the names reach past the one field that holds them.
+  const fx = JSON.parse(blob);
+  const metas = Object.values(fx.runs)
+    .map((r) => ((r.trajectory || {}).initial || {}).meta || {})
+    .filter((m) => m.main_model);
+  ok(metas.length > 0, `${metas.length} runs report a model`);
+  ok(metas.every((m) => /^model-[a-z]$/.test(m.main_model)),
+     "every main_model is an anonymous label");
+  ok(metas.every((m) => !m.sub_model || /^model-[a-z]$/.test(m.sub_model)),
+     "every sub_model is an anonymous label");
+
+  // Redaction must not have gutted what the drawer exists to show.
+  const richest = Object.values(fx.runs)
+    .map((r) => (r.trajectory || {}).iterations || [])
+    .sort((a, b) => b.length - a.length)[0] || [];
+  ok(richest.length >= 5, `the richest run still has ${richest.length} planner turns`);
+}
+
 console.log("\nthe director scrolls without dragging the page:");
 {
   const DIR = readFileSync(join(DIST, "director.js"), "utf8")
