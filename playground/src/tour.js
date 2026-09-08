@@ -79,8 +79,8 @@
         items: ov.starter_questions.map((q) => ({
           question: q,
           answer:
-            "Ask this in the Chat panel to see it answered with verifiable citations — the " +
-            "playground replays the questions this notebook really produced.",
+            "Ask this in the Chat panel and you will see it answered with citations you can check. " +
+            "The playground replays the questions this notebook really produced.",
           citations: [],
         })),
         run_id: ov.run_id,
@@ -92,7 +92,7 @@
       note:
         "This Studio tab runs a live model call, and the playground only replays artifacts this " +
         "notebook actually produced. Install rlm-notebook and run it against your own sources to " +
-        "generate one — nothing here is fabricated.",
+        "generate one. Nothing here is fabricated.",
       citations: [],
       run_id: null,
     };
@@ -103,128 +103,153 @@
   //: what to try is a screenshot you can click. Each step names one action and what to look for.
   // --- the guided script ------------------------------------------------------------------------
   //: Each step SPOTLIGHTS one real control, says what it is about to do, and then WAITS for the
-  //: reader to press it. Nothing advances on a timer, because the point is not to play a video at
-  //: someone — it is that they did it, on the product's own controls, and can therefore believe the
-  //: thing they just watched.
+  //: reader to press it. Nothing advances on a timer: the point is not to play a video at somebody,
+  //: it is that they did it, on the product's own controls, and can therefore believe it.
   //:
-  //: `target` is a selector into the SHIPPED markup. `done(p)` reads `PG.progress()` — the stage the
-  //: shim has actually reached — rather than a click, so a reader who explores ahead is never told
-  //: to press something they already pressed.
+  //: `done(p)` reads `PG.progress()` — the stage the shim actually reached — rather than a click, so
+  //: a reader who explores ahead is never told to press something they already pressed.
+  //:
+  //: **The instruction lives in ONE place: the popover anchored to the control.** It was in both the
+  //: popover and the side panel, and a reader could not tell which one to act on, or whether "Skip
+  //: step" was the thing being asked of them. The panel now carries only position and controls.
+  //:
+  //: Text is bilingual and follows `uiLang()` — the same interface language the product itself uses
+  //: (invariant 48), so the page is never half-translated. A language the table has no entry for
+  //: falls back to English rather than showing a key.
+  const TEXT = {
+    sources: {
+      en: ["Add the sources",
+           "Press Add source. This notebook's real sources arrive one after another.\n\n" +
+           "You cannot add your own here. Fetching, parsing and OCR all run on a machine, not in " +
+           "a browser tab."],
+      "zh-Hant": ["加入來源",
+           "按下「加入來源」，這本筆記本真正用的來源會一則一則進來。\n\n" +
+           "這裡不能放你自己的來源。抓取、解析、OCR 都得在機器上跑，瀏覽器分頁做不到。"],
+    },
+    overview: {
+      en: ["Generate the overview",
+           "Press the button. This is a real model run: a summary of the whole corpus, plus the " +
+           "questions worth asking first.\n\nWatch the status line. The reasoning going past was " +
+           "recorded from the run that produced this overview."],
+      "zh-Hant": ["產生概覽",
+           "按下按鈕。這是一次真實的模型執行，會給你整份語料的摘要，還有幾個值得先問的問題。\n\n" +
+           "過程中看一下狀態列。跑過去的那些推理，是當初產出這份概覽時錄下來的。"],
+    },
+    ask1: {
+      en: ["Ask the first question",
+           "The question is already typed. Press Enter to send it.\n\nEvery claim in the answer " +
+           "gets a numbered mark that points at the passage it came from."],
+      "zh-Hant": ["問第一個問題",
+           "問題已經填好了，按 Enter 送出。\n\n答案裡每一句話都會帶編號，指向它的出處。"],
+    },
+    trace: {
+      en: ["Open the reasoning trajectory",
+           "Press the ⌁ mark under the answer.\n\nInside: every planner turn in the model's own " +
+           "words, a tool timeline scaled to real elapsed time, the token budget, and what the " +
+           "validator rejected before it accepted the answer. Esc closes it."],
+      "zh-Hant": ["打開推理軌跡",
+           "按答案下面的 ⌁ 標記。\n\n裡面看得到：模型每一輪規劃的原話、照實際耗時縮放的工具時間軸、" +
+           "token 用量，還有驗證器在放行之前退回過什麼。按 Esc 關掉。"],
+    },
+    ask2: {
+      en: ["Ask a follow-up",
+           "Press Enter again.\n\nEarlier turns are context, not evidence. This question can work " +
+           "out what \u201cit\u201d refers to from the conversation, but its citations get checked " +
+           "against the sources from scratch."],
+      "zh-Hant": ["再問一題",
+           "一樣按 Enter。\n\n前面的對話只是脈絡，不算證據。這一題可以從對話推出「它」指的是什麼，" +
+           "但引用會重新對著來源查一次。"],
+    },
+    podcastTab: {
+      en: ["Open the Podcast tab",
+           "Studio is where the artifacts live. Podcast turns the same sources into a two-host " +
+           "episode: it writes the script, then speaks it."],
+      "zh-Hant": ["切到 Podcast 頁籤",
+           "工作室放的是產出物。Podcast 會把同一批來源變成雙主持人的節目，先寫稿，再合成語音。"],
+    },
+    podcastLength: {
+      en: ["Choose a length",
+           "Three lengths, counted in turns rather than described with adjectives. Short is 12 to " +
+           "18, Default 30 to 45, Long 60 to 90.\n\nYou pick it here, at generation time, because " +
+           "this is when you have an opinion about how long you want to listen."],
+      "zh-Hant": ["挑一個長度",
+           "三種長度，用輪數算，不用形容詞。短是 12 到 18 輪，預設 30 到 45，長 60 到 90。\n\n" +
+           "在要產生的時候才問你，是因為這時候你才會對「想聽多久」有意見。"],
+    },
+    podcastGenerate: {
+      en: ["Generate the episode",
+           "Press it. This writes the script, then synthesizes the speech.\n\nOnly the script half " +
+           "can be stopped. Synthesis runs afterwards, on the host."],
+      "zh-Hant": ["產生節目",
+           "按下去。會先寫稿，再合成語音。\n\n只有寫稿那段可以中止，合成是之後在主機上跑的。"],
+    },
+    podcastPlay: {
+      en: ["Play it, and watch the transcript",
+           "Press play. The transcript works like subtitles: it follows the playhead, highlights " +
+           "the line being spoken, and jumps to any line you click.\n\nEach line carries its own " +
+           "citations, and ↓ Download gives you the file."],
+      "zh-Hant": ["播放，順便看逐字稿",
+           "按播放。逐字稿的行為跟字幕一樣：跟著播放頭走、標出正在唸的那一行、點哪一行就跳到哪裡。\n\n" +
+           "每一行都有自己的引用，「↓ 下載」可以直接把檔案帶走。"],
+    },
+    compare: {
+      en: ["Compare the two languages",
+           "Open Notebooks in the header. The English and Chinese sets use the same sources. Only " +
+           "the output language differs.\n\nThe writing follows the reader. Every quoted passage " +
+           "stays in the words of its source."],
+      "zh-Hant": ["比一下兩種語言",
+           "打開上面的 Notebooks。英文和中文兩組用的是同一批來源，差別只在輸出語言。\n\n" +
+           "文字跟著讀者走，引文則留在來源自己的用字。"],
+    },
+  };
+
+
+  //: English is the fallback, not a "default translation": `zh-Hant` is a complete table and a
+  //: missing key would be a bug, not a language choice.
+  PG.text = (key) => {
+    const lang = typeof uiLang === "function" ? uiLang() : "en";
+    const entry = TEXT[key] || {};
+    return entry[lang] || entry.en || ["", ""];
+  };
+
   PG.SCRIPT = [
     {
       id: "sources",
-      title: "Add the sources",
-      body:
-        "A notebook is nothing without a corpus. Press Add — the playground will stream in this " +
-        "notebook's real sources one at a time. (You cannot add your own here: ingestion fetches, " +
-        "parses and OCRs host-side, which needs a machine, not a browser tab.)",
+      key: "sources",
       target: '#add-source-form button[type="submit"]',
       repeat: true,
       done: (p) => p.sources >= p.sourcesTotal,
-      progress: (p) => `${p.sources} / ${p.sourcesTotal} sources`,
+      progress: (p) => `${p.sources} / ${p.sourcesTotal}`,
     },
     {
       id: "overview",
-      title: "Generate the overview",
-      body:
-        "This is a real model run in the product: two tasks, a summary and the starter questions. " +
-        "Press it and watch the status line — the reasoning ticking past is a recorded trace from " +
-        "the run that actually produced this overview.",
-      // Built by `renderChatOverview` at runtime (`.chat-starter` wrapping a `.btn`), not present
-      // in the static markup — so the selector has to match what app.js CREATES, and a fallback
-      // outside `#chat-overview` covers the case where the panel has not been filled yet.
+      key: "overview",
+      // Built at runtime by `renderChatOverview` (`.chat-starter` wrapping a `.btn`), so the
+      // selector has to match what app.js CREATES, not the static markup.
       target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button",
       done: (p) => p.overview,
     },
-    {
-      id: "ask1",
-      title: "Ask the first question",
-      body:
-        "The question is already in the box. Press Enter (or the send button) — Shift+Enter would " +
-        "just add a line. Every claim in the answer comes back with a numbered stroke pointing at " +
-        "the passage it came from.",
-      target: "#ask-submit",
-      fill: (p) => p.questions[0],
-      done: (p) => p.turns >= 1,
-    },
-    {
-      id: "trace",
-      title: "Open the Trajectory drawer",
-      body:
-        "Press the ⌁ pill under the answer. Inside: every planner turn with the model's own " +
-        "reasoning, a tool timeline sized by real elapsed time, the token budget, and what the " +
-        "pre-SUBMIT validator rejected. Try the nav rail, the replay transport and a timeline " +
-        "segment — Esc closes it.",
+    { id: "ask1", key: "ask1", target: "#ask-submit", fill: (p) => p.questions[0],
+      done: (p) => p.turns >= 1 },
+    { id: "trace", key: "trace",
       target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
-      done: () => !document.getElementById("traj-drawer").hidden,
-      afterBody:
-        "That drawer is the answer to \u201cwhy did it say that\u201d — and it is why a run keeps " +
-        "the id of the trace that produced it.",
-    },
-    {
-      id: "ask2",
-      title: "Ask a follow-up",
-      body:
-        "History is context, never a source: the follow-up can resolve \u201cit\u201d from the " +
-        "conversation, but its citations are verified fresh against the corpus every time.",
-      target: "#ask-submit",
-      fill: (p) => p.questions[1],
-      skipIf: (p) => p.turnsTotal < 2,
-      done: (p) => p.turns >= 2,
-    },
-    {
-      id: "podcast-tab",
-      title: "Open the Podcast tab",
-      body:
-        "Studio holds the artifacts. The Podcast tab generates a two-host Audio Overview from the " +
-        "same sources — script first, then speech synthesis.",
+      done: () => !document.getElementById("traj-drawer").hidden },
+    { id: "ask2", key: "ask2", target: "#ask-submit", fill: (p) => p.questions[1],
+      skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
+    { id: "podcast-tab", key: "podcastTab",
       target: '.studio-views [data-view="podcast"], .studio-views button',
-      done: () => !!document.querySelector("#podcast-generate:not([hidden])"),
-    },
-    {
-      id: "podcast-length",
-      title: "Pick a length",
-      body:
-        "Three tiers, and they are numbers rather than adjectives: Short is 12-18 turns, Default " +
-        "30-45, Long 60-90. It is asked here, at generation time, because that is the moment you " +
-        "have an opinion about how long you want to listen.",
-      target: ".podcast-length",
-      done: () => true,
-      manual: true,
-    },
-    {
-      id: "podcast-generate",
-      title: "Generate the episode",
-      body:
-        "This runs the script task and then synthesizes speech. Only the script half is cancellable " +
-        "— synthesis runs host-side after the subprocess returns.",
-      target: "#podcast-generate",
-      done: (p) => !!p.podcast,
-    },
-    {
-      id: "podcast-play",
-      title: "Play it, and watch the transcript",
-      body:
-        "Press play. The transcript is subtitles: it scrolls with the playhead and highlights the " +
-        "line being spoken, and clicking any line seeks to it. Each line carries its own citations. " +
-        "The ↓ Download button hands you the file.",
-      target: "#podcast-body audio",
+      done: () => !!document.querySelector("#podcast-generate:not([hidden])") },
+    { id: "podcast-length", key: "podcastLength", target: ".podcast-length",
+      done: () => true, manual: true },
+    { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate",
+      done: (p) => !!p.podcast },
+    { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio",
       done: () => {
         const a = document.querySelector("#podcast-body audio");
         return !!a && a.currentTime > 1.5;
-      },
-    },
-    {
-      id: "compare",
-      title: "Now compare the languages",
-      body:
-        "Open Notebooks in the header. The English and Chinese sets are built from the SAME " +
-        "sources — only the output language differs. The prose follows the reader; every citation " +
-        "quote stays in the source's own words.",
-      target: ".pg-btn, .header-btn",
-      done: () => false,
-      last: true,
-    },
+      } },
+    { id: "compare", key: "compare", target: ".pg-btn, .header-btn",
+      done: () => false, last: true },
   ];
 
   PG.INSTALL = [

@@ -44,6 +44,21 @@
 
   const notebookId = () => decodeURIComponent(location.hash.replace(/^#/, ""));
 
+  //: The panel's own chrome follows the interface language too — a Chinese page with an English
+  //: "Skip step" is the half-translated state this whole change exists to remove.
+  const LABEL = {
+    en: { head: "Guided demo", skip: "Skip", exit: "Exit", waiting: "Waiting for you…",
+          finding: "Looking for the control…",
+          done: "That is the whole product. The Install button has what you need." },
+    "zh-Hant": { head: "導覽", skip: "略過", exit: "結束", waiting: "等你操作…",
+                 finding: "正在尋找控制項…",
+                 done: "這就是產品的全貌。安裝方式在上面的「↓ Install」。" },
+  };
+  const L = (k) => {
+    const lang = typeof uiLang === "function" ? uiLang() : "en";
+    return (LABEL[lang] || LABEL.en)[k] || LABEL.en[k];
+  };
+
   class Director {
     constructor() {
       this.index = 0;
@@ -60,7 +75,8 @@
     buildPanel() {
       const panel = el("aside", "pg-tour");
       const head = el("div", "pg-tour-head");
-      head.appendChild(el("span", "pg-tour-title", "Guided demo"));
+      this.headLabel = el("span", "pg-tour-title", L("head"));
+      head.appendChild(this.headLabel);
       this.count = el("span", "pg-tour-count");
       head.appendChild(this.count);
       const collapse = el("button", "pg-tour-collapse", "–");
@@ -81,32 +97,37 @@
       panel.appendChild(this.body);
 
       const foot = el("div", "pg-tour-foot");
-      this.skip = el("button", "btn pg-step-btn", "Skip step");
+      this.skip = el("button", "btn pg-step-btn", L("skip"));
       this.skip.type = "button";
       this.skip.addEventListener("click", () => this.advance(true));
       foot.appendChild(this.skip);
-      const stop = el("button", "btn pg-step-btn", "Exit demo");
-      stop.type = "button";
-      stop.addEventListener("click", () => this.stop());
-      foot.appendChild(stop);
+      this.exit = el("button", "btn pg-step-btn", L("exit"));
+      this.exit.type = "button";
+      this.exit.addEventListener("click", () => this.stop());
+      foot.appendChild(this.exit);
       panel.appendChild(foot);
 
       document.body.appendChild(panel);
       this.panel = panel;
     }
 
+    //: Position and controls ONLY. The instruction is in the popover, anchored to the control it is
+    //: talking about — repeating it here produced two blocks of identical text and a reader with no
+    //: way to tell which one was asking something of them.
     paint(step) {
       const n = PG.SCRIPT.length;
+      this.headLabel.textContent = L("head");
+      this.skip.textContent = L("skip");
+      this.exit.textContent = L("exit");
       this.count.textContent = `${Math.min(this.index + 1, n)} / ${n}`;
       this.barFill.style.width = `${(this.index / n) * 100}%`;
       this.body.replaceChildren();
       if (!step) {
-        this.body.appendChild(el("p", "pg-done", "That is the whole product. Install it below."));
+        this.body.appendChild(el("p", "pg-done", L("done")));
         this.skip.hidden = true;
         return;
       }
-      this.body.appendChild(el("div", "pg-step-title", step.title));
-      this.body.appendChild(el("p", null, step.body));
+      this.body.appendChild(el("div", "pg-step-title", PG.text(step.key)[0]));
       this.hint = el("div", "pg-step-hint");
       this.body.appendChild(this.hint);
     }
@@ -133,10 +154,8 @@
         stagePadding: 6,
         popoverClass: "pg-pop",
       });
-      this.driver.highlight({
-        element: target,
-        popover: { title: step.title, description: step.body },
-      });
+      const [title, body] = PG.text(step.key);
+      this.driver.highlight({ element: target, popover: { title, description: body } });
     }
 
     clearSpotlight() {
@@ -208,10 +227,10 @@
       const target = firstMatch(step.target);
       if (target) {
         this.highlight(step, target);
-        this.setHint(step.progress ? step.progress(progress) : "Waiting for you…");
+        this.setHint(step.progress ? step.progress(progress) : L("waiting"));
         if (step.repeat && this.started) this.maybeRepeat(target);
       } else {
-        this.setHint("Looking for the control…");
+        this.setHint(L("finding"));
       }
       if (step.repeat && !this.started && target) {
         target.addEventListener("click", () => (this.started = true), { once: true });
@@ -239,6 +258,13 @@
 
     start() {
       this.buildPanel();
+      // The product re-renders on `ui-lang-changed` rather than threading a language argument
+      // through every renderer (invariant 48); the director subscribes for the same reason.
+      window.addEventListener("ui-lang-changed", () => {
+        this.armed = null;
+        this.lastTarget = null;
+        this.tick();
+      });
       this.timer = setInterval(() => this.tick(), POLL_MS);
       this.tick();
     }

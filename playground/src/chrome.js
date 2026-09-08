@@ -67,7 +67,7 @@
   // --- scenario picker --------------------------------------------------------------------------
   const scenarioModal = modal(
     "Pick a notebook",
-    "Every scenario is a real notebook from the author's own machine — real sources, real answers, " +
+    "Every scenario is a real notebook from the author's own machine: real sources, real answers, " +
       "real reasoning traces. Switching reloads the workspace.",
     async (body, close) => {
       //: Grouped by OUTPUT language, because the two groups are built from the same source sets and
@@ -116,7 +116,7 @@
       }
       const note = el("p", "pg-modal-sub");
       note.textContent =
-        "Both groups are built from the same sources. Only RN_OUTPUT_LANGUAGE differs — the prose " +
+        "Both groups are built from the same sources. Only RN_OUTPUT_LANGUAGE differs. The prose " +
         "follows the reader, while every citation quote stays in the source's own words.";
       body.appendChild(note);
     }
@@ -230,10 +230,23 @@
   //: the playground always has a notebook open. `openNotebook` is a top-level function in `app.js`
   //: and therefore global — this calls the product's own entry point rather than reproducing what
   //: it does.
+  //: `uiLang()` already resolves the interface language from localStorage, then
+  //: `navigator.languages`, then English (invariant 48). The notebook opened should AGREE with it:
+  //: landing on an English notebook inside a Chinese interface is the half-translated state, and it
+  //: also hides the thing worth noticing, which is that both language sets come from one corpus.
+  //:
+  //: An explicit `#notebook-id` still wins, because a shared link names a specific notebook and
+  //: guessing over it would break the link.
+  const LANG_FOR_UI = { "zh-Hant": "Traditional Chinese", en: "English" };
+
   async function openInitial() {
     const scenarios = await PG.scenarios();
     const wanted = decodeURIComponent(location.hash.replace(/^#/, ""));
-    const pick = scenarios.find((s) => s.id === wanted) || scenarios[0];
+    const preferred = LANG_FOR_UI[typeof uiLang === "function" ? uiLang() : "en"];
+    const pick =
+      scenarios.find((s) => s.id === wanted) ||
+      scenarios.find((s) => s.lang === preferred) ||
+      scenarios[0];
     if (!pick) return;
     location.hash = `#${pick.id}`;
     if (typeof window.openNotebook === "function") await window.openNotebook(pick.id);
