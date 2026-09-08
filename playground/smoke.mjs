@@ -390,6 +390,32 @@ console.log("\nnothing local or private reaches the published fixture:");
 // This is a teaching page: nothing a reader changed last visit may decide what they see this
 // visit. `rlmnb-studio-view` surviving a reload is what made the "open the Podcast tab" step
 // vanish, and the podcast length is the same shape one step later.
+// A `pg-` class exists to be styled: the playground's chrome adds nodes the product's own
+// stylesheet knows nothing about. So one created in JS with no rule in chrome.css is either a typo
+// or a rule that has been deleted, and deletion is how it happened: replacing the picker's card
+// grid took the two heading rules sitting inside the replaced range with it, and a bare <h3> then
+// rendered the language name larger than the notebook titles under it. Nothing else here can see
+// that, since the Python suite never renders and there is no JS test runner (invariant 36's
+// reasoning, applied to the playground's own chrome).
+console.log("\nevery class the chrome creates has a rule:");
+{
+  const JS = readFileSync(join(DIST, "chrome.js"), "utf8");
+  const CSS = readFileSync(join(DIST, "chrome.css"), "utf8");
+  const created = new Set();
+  for (const m of JS.matchAll(/el\(\s*"[a-z0-9]+"\s*,\s*"([^"]+)"/g)) {
+    for (const cls of m[1].split(/\s+/)) if (cls.startsWith("pg-")) created.add(cls);
+  }
+  ok(created.size >= 10, `${created.size} pg- classes created in chrome.js`);
+  const unstyled = [...created].filter((c) => !new RegExp(`\\.${c}\\b`).test(CSS));
+  ok(unstyled.length === 0, `every one has a rule${unstyled.length ? ` — missing: ${unstyled}` : ""}`);
+
+  // The group heading must stay quieter than the titles it files, which is the thing that broke.
+  const head = CSS.slice(CSS.indexOf(".pg-scenario-group h3"), CSS.indexOf(".pg-group-note"));
+  const title = CSS.slice(CSS.indexOf(".pg-pickrow-title"), CSS.indexOf(".pg-pickrow-blurb"));
+  const px = (s) => Number((s.match(/font-size:\s*([\d.]+)px/) || [])[1] || NaN);
+  ok(px(head) < px(title), `heading ${px(head)}px is smaller than a title at ${px(title)}px`);
+}
+
 console.log("\nthe demo starts from scratch on every load:");
 {
   const SHIM = readFileSync(join(DIST, "shim.js"), "utf8");

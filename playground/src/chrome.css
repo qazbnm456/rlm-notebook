@@ -59,7 +59,25 @@
 .pg-modal { max-width: 720px; width: min(720px, calc(100vw - 48px)); }
 .pg-modal-sub { margin: 6px 0 14px; color: var(--text-dim); font-size: 13px; line-height: 1.55; }
 .pg-modal-body { display: grid; gap: 18px; max-height: 68vh; overflow-y: auto; }
-.pg-modal-foot { display: flex; justify-content: flex-end; margin-top: 16px; }
+/* The body is a scroller, so the foot needs a rule between them: without one the last row runs
+   under the Close button and reads as clipped rather than scrolled. */
+.pg-modal-foot {
+  display: flex; justify-content: flex-end;
+  margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
+}
+
+/* The group heading is a QUIET LABEL, not a document heading. These two rules were collateral from
+   replacing the card grid: they sat between `.pg-grid` and `.pg-card-warn` and went out with it,
+   which left a bare `<h3>` at the browser's default 1.17em bold and made the language name the
+   loudest thing in the modal, above the notebook titles it is only filing. */
+.pg-scenario-group h3 {
+  display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px;
+  font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-faint);
+}
+/* The count is subordinate to the name it follows, so it drops the tracking and the caps that make
+   the name read as a label. */
+.pg-group-note { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; }
 
 /* A LIST, matching the product's own notebook picker (`.notebook-row`): a column of rows separated
    by a hairline, each a title line over a quiet line, with the hover on the whole row. The grid of
