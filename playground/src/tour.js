@@ -328,7 +328,10 @@
     { id: "watch-ask", key: "watchAsk", target: ".run-status, .run-log, .chat-history",
       side: "top", align: "start", dwell: true, done: () => !PG.isRunning() },
     { id: "trace", key: "trace", side: "top", align: "start",
-      target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
+      // The ANSWER's pill, not the overview's. `.ticker-affordance` alone matched whichever
+      // rendered first, which is the overview's, so the spotlight landed on a block the step is not
+      // talking about.
+      target: ".turn:last-of-type .ticker-affordance, .turn .ticker-affordance, .ticker-affordance",
       done: () => !document.getElementById("traj-drawer").hidden },
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
       fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },

@@ -9,7 +9,7 @@ share an origin.
 ```
 uv run --extra api python playground/build.py     # -> playground/dist/
 node playground/smoke.mjs                          # headless check, no browser needed
-python3 -m http.server -d playground/dist 8899     # then open http://127.0.0.1:8899/
+python3 playground/serve.py                        # then open http://127.0.0.1:8899/
 ```
 
 ## Why this shape
@@ -72,6 +72,11 @@ trimmed (`--audio-seconds`) so the page is not 14MB.
 **Pick the default scenario deliberately.** `SCENARIOS[0]` is what a first-time visitor lands on. One
 notebook here predates `instructions.NATURAL_REGISTER` and carries thirteen instances of the calque
 that rule prevents; it still ships, but it does not greet anybody.
+
+**Use `serve.py`, not `python -m http.server`.** The latter sends no `Cache-Control` at all, so the
+browser is free to reuse a stale copy without revalidating, and with no content hash in the
+filenames there is nothing to bust. Half an hour went into a guided-tour step that had already been
+fixed on disk. This is invariant 72's reasoning applied to the playground's own dev server.
 
 ## What the build needs, and what it cannot reproduce
 
