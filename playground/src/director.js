@@ -390,6 +390,13 @@
       //
       // There is nothing to fulfil in that case anyway: the run already underway produces exactly
       // the state this would have forced, so the script just moves on and lets it land.
+      // Skipping a step that is WAITING on a run ends the run first. Advancing while it continues
+      // leaves the reader on the next step with the previous step's screen still in front of them.
+      if (step && PG.finishRun && PG.isRunning(step.kind)) {
+        PG.finishRun(step.kind);
+        // Let the response land and the app re-render before the tour moves on.
+        await new Promise((r) => setTimeout(r, 120));
+      }
       if (step && step.fulfil && !PG.isRunning()) {
         this.setHint(L("doing"));
         try {

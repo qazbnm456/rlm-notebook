@@ -324,6 +324,54 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // One global "is a run going" flag made every step's own check true at once: while the overview was
 // generating, the ask step reported itself done and the script fell through it, so one press of
 // Skip jumped two steps. Each step has to ask about ITS OWN kind.
+// Skipping a step that WAITS on a run has to end the run, or the tour advances while the previous
+// step's screen is still up: a status strip counting, and the result the next step needs missing.
+// The outcome must still land, though — the reader skipped the wait, not the result.
+console.log("\nskipping a wait ends the run and still lands its result:");
+{
+  const sh = { console: { log() {}, warn() {} }, URL, Request: Q, Response: R, MessageEvent: ME,
+    EventTarget, structuredClone: clone, setTimeout, clearTimeout, JSON, Math, Object, Number,
+    Map, Set, Promise, String, Array, Error,
+    location: { href: `file://${DIST}/index.html`, hash: "" },
+    document: { currentScript: { src: `file://${DIST}/shim.js` } },
+    HTMLMediaElement: function () {}, addEventListener() {},
+    fetch: async (input) => {
+      const path = String(input && input.url ? input.url : input).replace(/^file:\/\//, "").split("?")[0];
+      return new R(readFileSync(path, "utf8"), { headers: { "Content-Type": "application/json" } });
+    } };
+  sh.window = sh;
+  sh.HTMLMediaElement.prototype = {};
+  Object.defineProperty(sh.HTMLMediaElement.prototype, "src", {
+    configurable: true, get() { return this._src; }, set(v) { this._src = v; },
+  });
+  const c2 = vm.createContext(sh);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), c2, { filename: "tour.js" });
+  vm.runInContext(readFileSync(join(DIST, "shim.js"), "utf8"), c2, { filename: "shim.js" });
+  const SPG = sh.rlmPlayground;
+  ok(typeof SPG.finishRun === "function", "the shim can finish a run early");
+
+  const nb = fixtures.scenarios[0].id;
+  await SPG.progress(nb);
+  const started = Date.now();
+  const inflight = sh.fetch(new Q(`http://x/notebooks/${nb}/overview`, { method: "POST", body: "{}" }));
+  await new Promise((r) => setTimeout(r, 120));
+  ok(SPG.isRunning("overview"), "the overview run is in flight");
+  SPG.finishRun("overview");
+  const resp = await inflight;
+  const took = Date.now() - started;
+  const after = await SPG.progress(nb);
+  ok(took < 2000, `it ended early (${took}ms, against a 7000ms wait)`);
+  ok(resp.status === 200, "the response still arrives");
+  ok(after.overview, "and the overview still lands: the WAIT was skipped, not the result");
+  ok(!SPG.isRunning("overview"), "nothing is left running");
+
+  // The director must reach for it before advancing.
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8");
+  const fn = DIR.slice(DIR.indexOf("async fulfilAndAdvance"), DIR.indexOf("\n    advance("))
+    .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  ok(/finishRun\(/.test(fn), "Skip finishes the run before it advances");
+}
+
 console.log("\nrun checks are per kind, so a step cannot fall through another's run:");
 {
   const s = { console: { log() {}, warn() {} }, JSON, Math, Object,

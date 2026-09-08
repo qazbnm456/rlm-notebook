@@ -325,11 +325,34 @@
   const inFlight = new Map();
   PG.isRunning = (kind) =>
     kind ? (inFlight.get(kind) || 0) > 0 : [...inFlight.values()].some((n) => n > 0);
+
+  //: A run can be FINISHED EARLY. Skipping the step that watches a run has to end the run too,
+  //: or the tour moves on while the screen is still showing the previous step: a status strip
+  //: counting up, and the result the next step needs nowhere in sight.
+  //:
+  //: `finishRun` resolves the pending wait instead of cancelling the request, so the response still
+  //: arrives and the notebook still reaches the state it would have — the reader skipped the WAIT,
+  //: not the outcome.
+  const pending = new Map();
+  PG.finishRun = (kind) => {
+    for (const [k, done] of [...pending]) {
+      if (!kind || k === kind) done();
+    }
+  };
+
   const during = async (kind, ms) => {
     inFlight.set(kind, (inFlight.get(kind) || 0) + 1);
     try {
-      await sleep(ms);
+      await new Promise((resolve) => {
+        const timer = setTimeout(resolve, ms);
+        pending.set(kind, () => {
+          clearTimeout(timer);
+          pending.delete(kind);
+          resolve();
+        });
+      });
     } finally {
+      pending.delete(kind);
       inFlight.set(kind, (inFlight.get(kind) || 0) - 1);
     }
   };
@@ -454,6 +477,9 @@
       const gap = Math.max(90, Math.floor(RUN_MS / Math.max(events.length, 1)));
       for (const raw of events) {
         if (this._closed) return;
+        // The stream belongs to a run; when that run is finished early the remaining events are
+        // history nobody is waiting for. Without this the ticker kept spooling into the next step.
+        if (meta && !PG.isRunning(meta.kind === "ask" ? "ask" : meta.kind)) break;
         await sleep(gap);
         this._emit(PG.tickerEvent(raw));
       }
