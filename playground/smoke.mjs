@@ -327,6 +327,18 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // Skipping a step that WAITS on a run has to end the run, or the tour advances while the previous
 // step's screen is still up: a status strip counting, and the result the next step needs missing.
 // The outcome must still land, though — the reader skipped the wait, not the result.
+// The product sets `scrollTop` by hand rather than calling `scrollIntoView`, because that walks
+// EVERY scrollable ancestor and drags the whole page (invariant 44). The director brings its target
+// into view the same way, and must not reach for the easy call.
+console.log("\nthe director scrolls without dragging the page:");
+{
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8")
+    .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  ok(!/\.scrollIntoView\s*\(/.test(DIR), "no DOM scrollIntoView call");
+  ok(/revealTarget\(/.test(DIR), "it has its own reveal that sets scrollTop");
+  ok(/Math\.max\(0,/.test(DIR), "the computed offset is clamped");
+}
+
 console.log("\nskipping a wait ends the run and still lands its result:");
 {
   const sh = { console: { log() {}, warn() {} }, URL, Request: Q, Response: R, MessageEvent: ME,

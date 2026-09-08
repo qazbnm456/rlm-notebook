@@ -199,6 +199,36 @@
       });
     }
 
+    //: Bring the target into view inside ITS OWN scroller before spotlighting it. driver.js scrolls
+    //: too, but the chat is a nested scroller (`.chat-history`) and the control it points at often
+    //: sits below the fold, behind the composer — the spotlight then rings something the reader
+    //: cannot see and the popover points at nothing.
+    //:
+    //: `scrollTop` directly, never the DOM's `scrollIntoView`: that walks EVERY scrollable ancestor
+    //: and drags the whole page around, which is the reason the product sets `scrollTop` by hand for
+    //: its own transcript follower (invariant 44). Named `revealTarget` rather than `scrollIntoView`
+    //: so the name it must not use stays searchable.
+    revealTarget(el) {
+      let box = el.parentElement;
+      while (box && box !== document.body) {
+        const style = getComputedStyle(box);
+        const scrolls = /(auto|scroll)/.test(style.overflowY) && box.scrollHeight > box.clientHeight;
+        if (scrolls) break;
+        box = box.parentElement;
+      }
+      if (!box || box === document.body) return;
+      const a = el.getBoundingClientRect();
+      const b = box.getBoundingClientRect();
+      // A generous margin: the popover needs room too, and the composer overlaps the bottom of the
+      // chat scroller.
+      const MARGIN = 120;
+      if (a.top >= b.top + MARGIN && a.bottom <= b.bottom - MARGIN) return; // already comfortable
+      const want = box.scrollTop + a.top - b.top - (box.clientHeight - a.height) / 2;
+      // Clamped: centring a target near the top computes a negative offset, which the browser would
+      // silently pin to 0 anyway. Saying so is cheaper than wondering later.
+      box.scrollTop = Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight));
+    }
+
     //: The popover follows its target; the panel is pinned bottom-right. On any step whose control
     //: sits low and right they land on each other. Measured after each highlight rather than
     //: guessed per step, because where the popover ends up depends on the viewport.
@@ -340,6 +370,7 @@
       if (target) {
         this.missed = 0;
         this.showBodyInPanel(false);
+        if (target === this.lastTarget) this.revealTarget(target);
         this.highlight(step, target);
         // AFTER highlighting: driver creates and positions the popover there, so measuring first
         // sized up either nothing or the previous step's popover. It also PLACES the popover
