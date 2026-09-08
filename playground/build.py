@@ -262,15 +262,25 @@ def trim_audio(nb_id: str, dest: Path, seconds: int) -> dict | None:
     if not src.exists():
         return None
     full = _duration_s(src)
-    if seconds <= 0 or not shutil.which("ffmpeg") or (full and full <= seconds):
+    # NO CAP is the default, and an uncapped episode is COPIED BYTE-FOR-BYTE. edge-tts already ships
+    # 48 kbps / 24 kHz mono, which is where speech should be — re-encoding at "64k for the web" was
+    # UPSCALING: it made the files bigger (9.8MB of capped audio against 17.6MB of complete originals
+    # where the estimate said 7.9MB) and added a generation of loss for nothing. Measured, after
+    # guessing wrong twice.
+    #
+    # Page weight is not the constraint it looks like: `preload="none"` (invariant 42) means a
+    # browser fetches an episode only when somebody presses play.
+    if seconds <= 0 or not shutil.which("ffmpeg") or not full or full <= seconds:
         shutil.copy2(src, dest)
         return {"seconds": round(full, 1), "trimmed": False}
+    # A cap re-encodes at the SOURCE's own bitrate, so trimming never doubles as a quality change.
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", str(seconds),
-         "-b:a", "64k", "-ac", "1", str(dest)],
+         "-b:a", "48k", "-ac", "1", "-ar", "24000", str(dest)],
         check=True,
     )
     return {"seconds": float(seconds), "trimmed": True, "full_seconds": round(full, 1)}
+    return {"seconds": round(full, 1), "trimmed": False}
 
 
 def main() -> int:
@@ -279,7 +289,10 @@ def main() -> int:
     ap.add_argument("--deploy", metavar="DIR",
                     help="also mirror the build into DIR (e.g. a GitHub Pages checkout). Replaces "
                          "DIR's contents; DIR is created if absent.")
-    ap.add_argument("--audio-seconds", type=int, default=240,
+    # 0 by default: the episodes are the product's real output and a capped one cannot demonstrate
+    # the transcript following the playhead to the end. `preload="none"` (invariant 42) means none of
+    # it is fetched until somebody presses play.
+    ap.add_argument("--audio-seconds", type=int, default=0,
                     help="cap per episode in seconds; 0 keeps every episode whole. A shorter "
                          "episode is never padded or cut, so `short` tiers usually arrive intact.")
     args = ap.parse_args()
