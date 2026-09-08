@@ -3,6 +3,14 @@ name = "rlm-notebook"
 version = "0.1.0"
 description = "An RLM-driven notebook: paste in sources of any kind, ask grounded questions with verifiable citations, and get a distilled research artifact."
 readme = "README.md"
+# NO UPPER BOUND, and that is a decision rather than an omission. `rapidocr-onnxruntime` declares
+# `Requires-Python <3.13` for every release since 1.3, so `pip install` cannot resolve this project
+# on 3.13 and the error names rapidocr rather than rlm-notebook. Capping this to `<3.13` would make
+# that refusal legible, and was tried: it breaks the development environment outright, because uv
+# resolves past rapidocr's bound and every venv here is 3.13, so `uv run` stops working entirely
+# and the `chatterbox` extra (marked `python_full_version >= '3.13'`, invariant 43) becomes
+# unsatisfiable. So the limit is stated in README.md's install section instead, where the reader
+# who would hit it is already looking. Revisit when rapidocr ships 3.13 wheels.
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE"]

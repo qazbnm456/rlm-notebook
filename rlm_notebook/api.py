@@ -60,8 +60,16 @@ which re-reads the file under a per-notebook lock and applies only this request'
 a snapshot read before a long-running step — a model run, an ingestion — silently destroyed
 whatever else was written meanwhile; see AGENTS.md invariant 34.
 
-Run it with: `uvicorn rlm_notebook.api:app` (needs the `api` extra: `uv sync --extra api`).
+Run it with: `rlm-notebook serve` (needs the `api` extra). It binds 127.0.0.1 by default,
+which given the paragraph above is the whole access-control story; `--host` opts out of that
+and says so when it does.
 """
+
+#: THIS DOCSTRING IS SERVED. `FastAPI(description=__doc__)` below puts it on `/docs`, so it is
+#: read by API consumers and not only by whoever opens this file. It used to end by naming the raw
+#: uvicorn invocation, which routed every one of those readers around `serve`'s loopback default —
+#: the one thing standing between an unauthenticated API and the network. Explanations for a code
+#: reader belong in a comment like this one, which `__doc__` does not carry.
 
 from __future__ import annotations
 

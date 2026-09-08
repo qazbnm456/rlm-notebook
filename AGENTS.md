@@ -209,8 +209,9 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     is the invariant, NOT the current list of places it applies.
     ([why](docs/invariants/24-systemexit-never-escapes-a-handler.md))
 
-25. **This API has NO authentication or authorization of any kind.** Any caller can rename or irreversibly
-    delete from any notebook, and `GET /notebooks` makes every id enumerable without knowing it.
+25. **This API has NO authentication or authorization of any kind, so `rlm-notebook serve` binds
+    127.0.0.1 and a non-loopback `--host` warns.** Which interface it binds is the whole access-control
+    story, which is why that default is in code rather than only in a warning in `README.md`.
     ([why](docs/invariants/25-the-api-has-no-authentication.md))
 
 26. **`add_sources` accepts ONLY http(s) URLs, never a local file path — unlike `cli.py`'s `--source`.** The
@@ -261,9 +262,9 @@ indexed section held steady at ~5,100 tokens while an un-indexed section beside 
     ([why](docs/invariants/34-every-write-goes-through-mutate-notebook.md))
 
 35. **A model string prefixed `claude-agent-sdk/` routes that role onto the user's Claude Pro/Max
-    SUBSCRIPTION, and it works ONLY because `config.setup` injects the LM — `rlm_harness.configure` does not
-    route on the prefix itself.** `rlm_harness.configure` does not route on the prefix; it works only
-    because `config.setup` injects the LM.
+    SUBSCRIPTION, through an LM `config.setup` injects into `configure`'s `main_lm=`/`sub_lm=` seam.**
+    `rlm-harness` 1.10.0 routes on the same prefix itself, so the injection is what WINS rather than what
+    makes it work — and the old "`configure` does not route on the prefix" must not be restored.
     ([why](docs/invariants/35-the-subscription-path-needs-an-injected-lm.md))
 
 36. **`rlm_notebook/web/`'s `hidden`-toggled elements must never be given an author `display` rule without a

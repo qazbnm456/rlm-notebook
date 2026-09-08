@@ -74,11 +74,17 @@ def test_mixed_auth_is_allowed(monkeypatch):
 
 
 def test_setup_injects_the_subscription_lm_for_a_sentinel_role(monkeypatch):
-    """`rlm_harness.configure` does NOT route on the prefix — it calls `dspy.LM(cfg.main_model)`
-    for any seat left unsupplied, which for `claude-agent-sdk/...` means litellm resolving a
-    provider that doesn't exist. The sentinel works ONLY because `setup` injects through the
-    `main_lm=`/`sub_lm=` seam, so that is what this asserts: the seat is supplied, and the seat
-    left on the proxy is not."""
+    """`setup` supplies the sentinel role through `configure`'s `main_lm=`/`sub_lm=` seam, and
+    leaves every other role for `configure` to build from the `RN_*` config.
+
+    The ASSERTIONS are unchanged and still the right ones; this docstring used to justify them with
+    a premise that has since expired. It said `rlm_harness.configure` does not route on the prefix,
+    so the injection was the only thing making the sentinel work. `rlm-harness==1.10.0` routes on
+    the identical prefix itself (`runtime.configure` calls its own `_maybe_subscription_lm` for any
+    role left `None`), so what the injection does now is WIN: an explicit `main_lm=` is used
+    verbatim and upstream's branch is never reached. That is still worth pinning, because it is
+    what keeps subscription runs on the construction this project has actually tested. See
+    `docs/invariants/35-the-subscription-path-needs-an-injected-lm.md`."""
     pytest.importorskip("dspy")
     pytest.importorskip("claude_agent_sdk")
     monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)  # ClaudeAgentLM refuses to build with it set
@@ -104,7 +110,10 @@ def test_setup_injects_the_subscription_lm_for_a_sentinel_role(monkeypatch):
         )
     )
 
-    assert captured["main_lm"] is not None, "the sentinel role was left for configure to build"
+    assert captured["main_lm"] is not None, (
+        "the sentinel role reached configure unsupplied, so upstream's auto-routing would build it "
+        "instead of ours"
+    )
     assert type(captured["main_lm"]).__name__ == "ClaudeAgentLM"
     assert captured["sub_lm"] is None, "the proxy role must stay un-supplied, built from config"
     # The sentinel STRING still reaches RLMConfig — it is what labels the trace and the log, even

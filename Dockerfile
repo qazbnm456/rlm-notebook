@@ -49,7 +49,7 @@ RUN set -eux; \
     deno --version
 
 WORKDIR /src
-COPY pyproject.toml README.md ./
+COPY pyproject.toml README.md LICENSE ./
 COPY rlm_notebook ./rlm_notebook
 
 # The `api` extra only. `chatterbox` is deliberately absent: it is marked `python_full_version >=
@@ -62,6 +62,20 @@ RUN pip install --no-cache-dir '.[api]'
 # its filesystem loses their notebooks.
 WORKDIR /data
 VOLUME /data
+
+# THE SANDBOX NEEDS ONE NETWORK FETCH BEFORE IT CAN RUN OFFLINE. dspy's Deno runner imports
+# `npm:pyodide@0.29.4`, which deno downloads on first use into `DENO_DIR` (~15MB). That defaults to
+# `/root/.cache/deno`, OUTSIDE the mounted volume, so with the documented `-v ...:/data` it was
+# discarded and re-fetched on every container, and a host with no npm-registry egress could not run
+# a single query — for a sandbox whose whole point is not needing the network.
+#
+# Pointing DENO_DIR into the volume makes the download happen once per data directory. Warming it
+# at BUILD time was the alternative and is worse: it would bake a cache into the image that the
+# volume then shadows.
+ENV DENO_DIR=/data/.deno
+# stdout is block-buffered off a TTY, so without this `docker logs` shows uvicorn's stderr and
+# swallows anything the app prints on stdout.
+ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 # 0.0.0.0 inside the container, because the container boundary is what makes that safe. Which

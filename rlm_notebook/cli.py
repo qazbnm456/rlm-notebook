@@ -456,19 +456,46 @@ def build_parser() -> argparse.ArgumentParser:
              "deliberate decision to let everyone who can reach that interface read, rewrite and "
              "delete every notebook on this machine",
     )
-    s.add_argument("--port", type=int, default=8000, help="port to bind (default: 8000)")
+    s.add_argument(
+        "--port", type=_port, default=8000,
+        help="port to bind (default: 8000)",
+    )
     s.add_argument(
         "--reload", action="store_true",
-        help="restart on source changes (development only; needs uvicorn's watchfiles)",
+        help="restart when the files under the CURRENT DIRECTORY change. Only useful from a source "
+             "checkout: uvicorn watches the working directory, never the installed package, so on "
+             "a `uv tool install`/`pipx`/container install this watches your notebooks and never "
+             "the code. Without `uvicorn[standard]`'s watchfiles it also degrades to polling every "
+             "file under that directory",
     )
     s.set_defaults(func=_cmd_serve)
 
     return p
 
 
-#: Every address that is NOT a promise to stay on this machine. Kept as a set of network objects
-#: rather than a string compare, so `--host ::1`, `--host 127.0.0.2` and an IPv4-mapped loopback all
-#: read as loopback without anyone enumerating spellings.
+#: Whether a host is a promise to stay on this machine. Parsed as an ADDRESS rather than compared
+#: as a string, so `::1`, `127.0.0.2` and an IPv4-mapped loopback all read as loopback without
+#: anyone enumerating spellings.
+#:
+#: It decides whether to PRINT A WARNING, so it is allowed to be wrong in one direction only. It
+#: over-warns on forms getaddrinfo accepts and `ipaddress` does not (`[::1]`, `127.1`, `LOCALHOST`,
+#: `0177.0.0.1`): a spurious warning on a genuinely local bind costs a line. It under-warns in
+#: exactly ONE case, stated rather than hidden: `"localhost"` is trusted unconditionally, so an
+#: `/etc/hosts` entry pointing it at a LAN address binds non-loopback in silence. Resolving it here
+#: would make the warning depend on the resolver, which is the worse trade.
+def _port(value: str) -> int:
+    """A port argparse rejects cleanly rather than letting `bind()` raise.
+
+    `type=int` alone accepts 99999, and `socket.bind` then raises `OverflowError` — which is NOT an
+    `OSError`, so uvicorn's own `except OSError: sys.exit(STARTUP_FAILURE)` never catches it and the
+    user gets a twelve-line traceback for a typo.
+    """
+    port = int(value)
+    if not 0 <= port <= 65535:
+        raise argparse.ArgumentTypeError(f"port must be 0-65535, not {port}")
+    return port
+
+
 def _is_loopback(host: str) -> bool:
     # NOT the empty string, which is the trap: `bind("")` is `INADDR_ANY`, so `--host ""` is the
     # most exposed value there is. An earlier draft of this function listed it beside "localhost"
@@ -507,8 +534,11 @@ def _cmd_serve(args: argparse.Namespace) -> int:
         import uvicorn
     except ImportError:
         print(
-            "rlm-notebook serve needs the `api` extra:\n"
-            "    uv tool install 'rlm-notebook[api]'      # or: uv sync --extra api",
+            "rlm-notebook serve needs the `api` extra (fastapi + uvicorn).\n"
+            "  from a source checkout:  uv sync --extra api\n"
+            "  otherwise, reinstall with the extra, e.g.\n"
+            "      uv tool install 'rlm-notebook[api] @ git+"
+            "https://github.com/qazbnm456/rlm-notebook'",
             file=sys.stderr,
         )
         return 2
@@ -522,8 +552,15 @@ def _cmd_serve(args: argparse.Namespace) -> int:
             file=sys.stderr,
         )
     # `notebooks/`, `traces/` and `audio/` are relative paths resolved against the working
-    # directory (invariant 34), so where you START this decides where your notebooks live.
-    print(f"rlm-notebook serving http://{args.host}:{args.port}/  (data in {Path.cwd()})")
+    # directory (invariant 34), so where you START this decides where your notebooks live. That is
+    # the one fact worth printing, and it is printed to STDERR: stdout is block-buffered off a TTY,
+    # so on the containerised path this line never reached `docker logs` at all — the path a
+    # reader most needs when their notebooks are inside a container that is about to be removed.
+    #
+    # The URL is NOT printed here. It used to be, one line BEFORE the bind, so an occupied port
+    # announced an address it then failed to serve. uvicorn prints it after binding, which is the
+    # only point at which it is true.
+    print(f"rlm-notebook: notebooks, traces and audio under {Path.cwd()}", file=sys.stderr)
     uvicorn.run("rlm_notebook.api:app", host=args.host, port=args.port, reload=args.reload)
     return 0
 

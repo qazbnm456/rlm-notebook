@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import inspect
 from pathlib import Path
 
 import pytest
@@ -764,7 +763,11 @@ def test_a_model_failure_is_not_reported_as_a_bad_trace_path(monkeypatch, tmp_pa
         ("localhost", True),
         ("::1", True),
         ("127.0.0.2", True),
-        ("::ffff:127.0.0.1", True),   # IPv4-mapped: still this machine
+        # `::ffff:127.0.0.1` is deliberately ABSENT. `IPv6Address.is_loopback` only began following
+        # `ipv4_mapped` in a patch release: measured False on 3.11.9 and 3.12.0, True on 3.11.13 and
+        # 3.12.5. Both of the former satisfy `requires-python`, so asserting it here would fail CI on
+        # a claim about the standard library rather than about this project. Whichever way it goes,
+        # the answer is safe: True is correct, False over-warns on a local bind.
         ("0.0.0.0", False),
         ("", False),                  # bind("") is INADDR_ANY, the MOST exposed value
         ("192.168.1.5", False),
@@ -804,19 +807,95 @@ def test_serve_reports_a_missing_api_extra_instead_of_an_import_traceback(monkey
     assert "api" in err and "rlm-notebook[api]" in err
 
 
-def test_serve_never_reads_the_model_config():
-    """A server with no model configured must still start.
+def test_serve_starts_and_serves_with_no_model_configured(monkeypatch, tmp_path):
+    """A server with no model configured must still start, and its settings page must answer.
 
-    `NotebookConfig.from_env` raises `SystemExit` whenever `RN_MAIN_MODEL` is unset, which is
-    correct for `ask`/`guide`/`audio` and wrong here: the settings page invariant 41 built for
-    exactly that operator is served BY this process, so refusing to start would make it
-    unreachable. Same reasoning as `config.max_upload_bytes` in invariant 30.
+    `NotebookConfig.from_env` raises `SystemExit` whenever `RN_MAIN_MODEL` is unset, which is right
+    for `ask`/`guide`/`audio` and wrong here: the settings page invariant 41 built for exactly that
+    operator is served BY this process, so refusing to start would make it unreachable.
+
+    This asserts the BEHAVIOUR. It replaces a test that scanned `_cmd_serve`'s source for the
+    strings `from_env` and `NotebookConfig`, which a mutation walked straight past: move the call
+    into a module-level helper and the forbidden words leave the scanned body while the defect
+    stays. A source scan cannot see through one function call; a request can.
     """
-    # The CODE, with the docstring cut away: the docstring has to be free to explain WHY it must
-    # not call `from_env`, and a substring check over the whole source makes saying so a failure.
-    # The same collision caught `renderChatOverview`'s regenerate-count tripwire one file over.
-    source = inspect.getsource(cli._cmd_serve)
-    body = source.split('"""', 2)[2]
-    assert "uvicorn.run" in body, "the extraction broke; this would pass vacuously"
-    assert "from_env" not in body
-    assert "NotebookConfig" not in body
+    fastapi_testclient = pytest.importorskip("fastapi.testclient")
+    monkeypatch.delenv("RN_MAIN_MODEL", raising=False)
+    monkeypatch.delenv("RN_API_KEY", raising=False)
+    monkeypatch.chdir(tmp_path)
+
+    from rlm_notebook import api
+
+    with fastapi_testclient.TestClient(api.app) as client:
+        assert client.get("/settings").status_code == 200
+        assert client.get("/notebooks").status_code == 200
+        assert client.get("/").status_code == 200
+
+
+def _serve_with_stub_uvicorn(monkeypatch, argv):
+    """Drive the real `serve` argument parsing and `_cmd_serve` body with uvicorn stubbed out.
+
+    Everything below this line exists because three mutations survived all 51 tests: flipping the
+    default host to `0.0.0.0`, deleting the ENTIRE warning block, and sending the warning to stdout.
+    The only test of this area exercised the pure `_is_loopback` predicate, so nothing asserted it
+    was wired to anything. The commit's whole thesis was the part with no test behind it.
+    """
+    import sys as _sys
+    import types
+
+    calls = {}
+    stub = types.ModuleType("uvicorn")
+    stub.run = lambda app, **kw: calls.update(app=app, **kw)
+    monkeypatch.setitem(_sys.modules, "uvicorn", stub)
+    rc = cli.main(argv)
+    return rc, calls
+
+
+def test_serve_binds_loopback_by_default(monkeypatch, capsys):
+    """The DEFAULT, not just the predicate. With no authentication (invariant 25), which interface
+    this binds is the entire access-control story."""
+    rc, calls = _serve_with_stub_uvicorn(monkeypatch, ["serve"])
+    assert rc == 0
+    assert calls["host"] == "127.0.0.1", "the default bind must stay loopback"
+    assert calls["port"] == 8000
+    assert calls["app"] == "rlm_notebook.api:app"
+    assert "WARNING" not in capsys.readouterr().err, "a loopback bind must not warn"
+
+
+@pytest.mark.parametrize("host", ["0.0.0.0", "", "192.168.1.5", "::"])
+def test_serve_warns_on_stderr_when_it_binds_beyond_this_machine(monkeypatch, capsys, host):
+    """A non-loopback bind is ALLOWED and is not allowed to be QUIET.
+
+    On stderr specifically: the warning has to survive `rlm-notebook serve > log`, and it has to
+    reach `docker logs` from a container whose stdout is block-buffered.
+    """
+    rc, calls = _serve_with_stub_uvicorn(monkeypatch, ["serve", "--host", host])
+    assert rc == 0
+    assert calls["host"] == host, "the host the operator asked for is the host uvicorn gets"
+    captured = capsys.readouterr()
+    assert "WARNING" in captured.err
+    assert "NO AUTHENTICATION" in captured.err
+    assert "WARNING" not in captured.out, "the warning must not go to stdout"
+
+
+def test_serve_says_where_the_notebooks_will_be_written(monkeypatch, capsys, tmp_path):
+    """`notebooks/`, `traces/` and `audio/` are relative to the working directory (invariant 34),
+    so where you start this decides where your data lives. On stderr, because stdout is
+    block-buffered off a TTY and this line never reached `docker logs` at all."""
+    monkeypatch.chdir(tmp_path)
+    _serve_with_stub_uvicorn(monkeypatch, ["serve"])
+    captured = capsys.readouterr()
+    assert str(tmp_path) in captured.err
+    assert "http://" not in captured.err, (
+        "the URL is uvicorn's to print AFTER it binds; printing it here announced an address an "
+        "occupied port then failed to serve"
+    )
+
+
+@pytest.mark.parametrize("bad", ["99999", "-1", "70000"])
+def test_serve_refuses_an_out_of_range_port_instead_of_raising(bad):
+    """`type=int` alone let `bind()` raise `OverflowError`, which is not an `OSError`, so uvicorn's
+    own startup guard never caught it and a typo produced a traceback."""
+    with pytest.raises(SystemExit) as exc:
+        build_parser().parse_args(["serve", "--port", bad])
+    assert exc.value.code == 2

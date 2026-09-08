@@ -664,9 +664,15 @@ def setup(config: NotebookConfig) -> NotebookConfig:
 
     **A role whose model is `claude-agent-sdk/<id>` runs on the user's Claude Pro/Max SUBSCRIPTION**
     (`ClaudeAgentLM`, injected through `configure`'s public `main_lm=`/`sub_lm=` seam); every other
-    role is built from the `RN_*` proxy config, byte-identical to before. `configure` does NOT route
-    on the prefix itself — it calls `dspy.LM(cfg.main_model)` unconditionally for any seat left
-    unsupplied — so the sentinel only works because it is injected HERE. Mixed auth (a subscription
+    role is built from the `RN_*` proxy config, byte-identical to before. **`configure` NOW ROUTES ON
+    THE PREFIX TOO**, as of `rlm-harness` 1.10.0 (`runtime.configure` calls its own
+    `_maybe_subscription_lm` for any seat left `None`), on the identical prefix string. So this
+    injection is no longer what MAKES the sentinel work — an explicit `main_lm=` simply still wins,
+    and the seat never reaches upstream's branch. Two consequences a later reader needs: the
+    sentence that used to justify this function ("`configure` does not route on the prefix") is
+    false and must not be restored, and `SUBSCRIPTION_PREFIX` here is now a SECOND copy of
+    `claude_agent_lm.SUBSCRIPTION_PREFIX`, kept only because `config.py` stays free of
+    `dspy`/`rlm_harness` at import time. Mixed auth (a subscription
     planner with a proxy sub-LM, or the reverse) is supported by construction, since each role is
     tested independently.
 

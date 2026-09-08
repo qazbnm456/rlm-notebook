@@ -86,16 +86,32 @@
         run_id: ov.run_id,
       };
     }
-    return {
-      kind,
-      unavailable: true,
-      note:
-        "This Studio tab runs a live model call, and the playground only replays artifacts this " +
+    // SHAPED FOR THE REAL RENDERER, one shape per kind. `app.js` is copied verbatim, so the shim
+    // has to speak its language rather than the other way round, and its language is different for
+    // each tab: `renderGuideContent` reads `data.text` for summary and insight, `data.items` for
+    // faq, `data.events` for timeline.
+    //
+    // The old payload carried a `note` field that `app.js` reads NOWHERE. Two consequences, both
+    // live on every notebook: summary and insight reached `renderAnswerWithCitations(undefined)`
+    // and died in `mdLines` with "Cannot read properties of undefined (reading 'split')", after a
+    // seven-second fake run; and faq and timeline fell to the product's own empty state, which says
+    // the sources "didn't produce enough" — a false claim about the reader's own sources, on the
+    // one page whose entire premise is that nothing here is fabricated.
+    const lang = typeof uiLang === "function" ? uiLang() : "en";
+    const note = lang === "zh-Hant"
+      ? "這個工作室頁籤會發動一次真實的模型執行，而這個展示頁只重播這本筆記本真正產出過的東西。" +
+        "裝起 rlm-notebook、對著你自己的來源跑一次就會有。這裡沒有任何東西是編造的。"
+      : "This Studio tab runs a live model call, and the playground only replays artifacts this " +
         "notebook actually produced. Install rlm-notebook and run it against your own sources to " +
-        "generate one. Nothing here is fabricated.",
-      citations: [],
-      run_id: null,
-    };
+        "generate one. Nothing here is fabricated.";
+    const heading = lang === "zh-Hant" ? "這本筆記本沒有這一項" : "Not recorded for this notebook";
+    if (kind === "faq") {
+      return { kind, items: [{ question: heading, answer: note, citations: [] }], run_id: null };
+    }
+    if (kind === "timeline") {
+      return { kind, events: [{ when: heading, description: note, citations: [] }], run_id: null };
+    }
+    return { kind, text: note, citations: [], run_id: null };
   };
 
   // --- guided tour ------------------------------------------------------------------------------
@@ -342,22 +358,6 @@
     // nothing to scroll and there is no room above it; driver fell back to overlaying the popover,
     // which is the placement that draws no arrow at all. The pill is at the LEFT of a wide column,
     // so the room is sideways, which is what `overview` and `watch` already use.
-    { id: "trace", key: "trace", side: "right", align: "start",
-      // The ANSWER's pill, not the overview's. `.ticker-affordance` alone matched whichever
-      // rendered first, which is the overview's, so the spotlight landed on a block the step is not
-      // talking about.
-      // `.ticker-affordance` is a DIV, so it is full-column-width and the spotlight cut a wide
-      // strip across the answer instead of ringing the pill. The button inside it is the control.
-      target: ".turn:last-of-type .ticker-toggle, .turn .ticker-toggle, .ticker-toggle",
-      done: () => !document.getElementById("traj-drawer").hidden },
-    // The drawer is 80vh of fixed-position panel over the whole workspace, so leaving it open does
-    // not merely look untidy: the NEXT step points at the composer's send button, which is behind
-    // it. A tour that opens something has to close it again before it asks for anything else.
-    // Targets `#traj-close` rather than the drawer, because `.driver-active *` kills pointer events
-    // on everything but the spotlit element and its descendants — spotlighting the whole drawer
-    // would work too, but the reader is being asked to press ONE control.
-    { id: "trace-close", key: "traceClose", target: "#traj-close, .traj-head", side: "bottom",
-      align: "end", done: () => document.getElementById("traj-drawer").hidden },
     // `|| PG.isRunning("ask")` like `ask1`, not `p.turns >= 2` alone. Waiting for the finished turn
     // left "press Enter" on screen for the whole run, next to a composer that had already sent it.
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
@@ -369,6 +369,41 @@
     { id: "watch-ask2", key: "watchAsk2", target: ".run-status, .run-log, .chat-history",
       side: "top", align: "start", dwell: true, kind: "ask",
       skipIf: (p) => p.turnsTotal < 2, done: () => !PG.isRunning("ask") },
+    // AFTER the second question, and that ordering is load-bearing. This step points at the ⌁ pill,
+    // which `app.js` renders only `if (turn.run_id)`. The tour reveals turn 0 first, and the three
+    // English notebooks have no run id on turn 0 (their trace was collected), so at the old
+    // position there was no pill to ring on the DEFAULT English landing scenario. All six have a
+    // traced turn 1.
+    { id: "trace", key: "trace", side: "right", align: "start",
+      // The ANSWER's pill, not the overview's. `.ticker-affordance` alone matched whichever
+      // rendered first, which is the overview's, so the spotlight landed on a block the step is not
+      // talking about.
+      // `.ticker-affordance` is a DIV, so it is full-column-width and the spotlight cut a wide
+      // strip across the answer instead of ringing the pill. The button inside it is the control.
+      // `.ticker-affordance` IS THE DISAMBIGUATOR. `regenerateTurnButton` carries the identical
+      // `ticker-toggle trace-face` class ("one row, one weight", app.js:2110), and only the trace
+      // pill is wrapped in `.ticker-affordance`. Without it `firstMatch` ringed ↻ Regenerate and
+      // the copy said to press ⌁, so pressing the ringed control started another run instead of
+      // opening the drawer, and the step could never complete.
+      target: ".turn:last-of-type .ticker-affordance .ticker-toggle, .turn .ticker-affordance .ticker-toggle",
+      // SKIPS WHEN THERE IS NO PILL, and two of the six demo notebooks are that case: their traces
+      // aged out under retention (invariant 34), so `build.py` withholds the run id and `app.js`
+      // renders the pill only `if (turn.run_id)`. `nb-d22c2a9a` has no traced turn AND no traced
+      // overview, so there is no ⌁ anywhere on its page. Without this the step waits on a control
+      // that cannot appear, forever. Read from the DOM rather than from progress, because what
+      // decides it is whether the revealed turns happen to carry a run id.
+      skipIf: () => !document.querySelector(".turn .ticker-affordance .ticker-toggle"),
+      done: () => !document.getElementById("traj-drawer").hidden },
+    // The drawer is 80vh of fixed-position panel over the whole workspace, so leaving it open does
+    // not merely look untidy: the NEXT step points at the composer's send button, which is behind
+    // it. A tour that opens something has to close it again before it asks for anything else.
+    // Targets `#traj-close` rather than the drawer, because `.driver-active *` kills pointer events
+    // on everything but the spotlit element and its descendants — spotlighting the whole drawer
+    // would work too, but the reader is being asked to press ONE control.
+    // Skips on the same condition: there is nothing to close if the step that opens it was skipped.
+    { id: "trace-close", key: "traceClose", target: "#traj-close, .traj-head", side: "bottom",
+      align: "end", skipIf: () => !document.querySelector(".turn .ticker-affordance .ticker-toggle"),
+      done: () => document.getElementById("traj-drawer").hidden },
     { id: "podcast-tab", key: "podcastTab", side: "left", align: "start",
       target: '.studio-views [data-view="podcast"], .studio-views button',
       // The BODY, not the button. `#podcast-generate:not([hidden])` matched from the start: the

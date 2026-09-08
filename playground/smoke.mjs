@@ -416,6 +416,84 @@ console.log("\nnothing local or private reaches the published fixture:");
 // asked `app.js + i18n.js` whether it contained the words anywhere, and a mutation walked straight
 // past it: the stale "產生概覽" is still a substring of "↻ 重新產生概覽", which is a different
 // button. A vacuous check is worse than none, because the name promises otherwise.
+// Four findings from an independent review, each of them live on every notebook, each invisible to
+// the ~190 assertions that were already here.
+console.log("\nthe shim speaks the renderer's language, per tab:");
+{
+  const w = { rlmPlayground: {} };
+  new Function("window", readFileSync(join(DIST, "tour.js"), "utf8"))(w);
+  const PG = w.rlmPlayground;
+  const fx = JSON.parse(readFileSync(join(DIST, "fixtures.json"), "utf8"));
+  const APP = readFileSync(join(DIST, "app.js"), "utf8");
+
+  // `renderGuideContent` reads a DIFFERENT field per kind, and `app.js` is copied verbatim, so the
+  // shim has to speak its language. The old fallback returned a `note` field app.js reads nowhere:
+  // summary and insight reached `renderAnswerWithCitations(undefined)` and died in `mdLines`, and
+  // faq and timeline fell to the product's "the sources didn't produce enough" empty state, which
+  // is a false claim about the reader's own sources on a page whose premise is that nothing is
+  // fabricated.
+  const NEEDS = { summary: "text", insight: "text", faq: "items", timeline: "events" };
+  for (const [kind, field] of Object.entries(NEEDS)) {
+    ok(new RegExp(`data\\.${field}\\b`).test(APP), `app.js really reads data.${field} for ${kind}`);
+  }
+  for (const id of Object.keys(fx.notebooks)) {
+    const bare = { ...fx.notebooks[id], overview: null };   // the unavailable branch
+    for (const [kind, field] of Object.entries(NEEDS)) {
+      const value = PG.guide(bare, kind)[field];
+      const usable = field === "text"
+        ? typeof value === "string" && value.length > 0
+        : Array.isArray(value) && value.length > 0;
+      ok(usable, `${id} ${kind} -> a usable ${field}`);
+    }
+  }
+}
+
+console.log("\nthe tour's script is well formed and lands on real controls:");
+{
+  const w = { rlmPlayground: {} };
+  new Function("window", readFileSync(join(DIST, "tour.js"), "utf8"))(w);
+  const SCRIPT = w.rlmPlayground.SCRIPT;
+  // A stray comma makes a SPARSE array, and `forEach` skips holes silently: a step can disappear
+  // from the tour while `SCRIPT.length` still counts it. One was introduced while fixing this file.
+  const holes = [...SCRIPT.keys()].filter((i) => !(i in SCRIPT));
+  ok(holes.length === 0, `no holes in SCRIPT${holes.length ? ` — at ${holes}` : ` (${SCRIPT.length} steps)`}`);
+  ok(SCRIPT.every(Boolean), "every step is an object");
+
+  // `regenerateTurnButton` carries the IDENTICAL `ticker-toggle trace-face` class as the trace
+  // pill, and only the pill is wrapped in `.ticker-affordance`. Without that ancestor the trace
+  // step ringed ↻ Regenerate, whose click starts a run instead of opening the drawer, so the step
+  // could never complete.
+  const APP = readFileSync(join(DIST, "app.js"), "utf8");
+  ok((APP.match(/"ticker-toggle trace-face"/g) || []).length === 2,
+     "two controls share the ticker-toggle class, which is why the ancestor is needed");
+  const trace = SCRIPT.find((s) => s.id === "trace");
+  ok(/\.ticker-affordance\s+\.ticker-toggle/.test(trace.target),
+     "the trace step selects through .ticker-affordance");
+  ok(!/(^|,)\s*\.ticker-toggle\s*(,|$)/.test(trace.target),
+     "and has no bare .ticker-toggle fallback that would match Regenerate");
+
+  // The pill exists only `if (turn.run_id)`, so the trace step has to run when a TRACED turn is on
+  // screen. Three notebooks have no run id on turn 0, including the default English one.
+  const fx = JSON.parse(readFileSync(join(DIST, "fixtures.json"), "utf8"));
+  const ids = SCRIPT.map((s) => s.id);
+  const revealed = ids.indexOf("trace") > ids.indexOf("watch-ask2") ? 2 : 1;
+  const withPill = Object.entries(fx.notebooks)
+    .filter(([, nb]) => nb.turns.slice(0, revealed).some((turn) => turn.run_id));
+  ok(withPill.length >= 1,
+     `${withPill.length}/${Object.keys(fx.notebooks).length} notebooks can show the drawer by then`);
+  ok(withPill.some(([id]) => id.startsWith("nb-en-")) &&
+     withPill.some(([id]) => !id.startsWith("nb-en-")),
+     "at least one notebook per language reaches it, so neither tour ends without the drawer");
+  // The others must SKIP, not wait: two notebooks' traces aged out under retention, and one of them
+  // has no ⌁ anywhere on its page.
+  for (const step of ["trace", "trace-close"]) {
+    const s = SCRIPT.find((x) => x.id === step);
+    ok(typeof s.skipIf === "function", `${step} has a skipIf`);
+    ok(/ticker-affordance/.test(String(s.skipIf)),
+       `${step} skips on the pill's absence, not on a count`);
+  }
+}
+
 console.log("\nthe tour names controls the product actually renders:");
 {
   const TOUR = readFileSync(join(DIST, "tour.js"), "utf8");
@@ -859,6 +937,9 @@ console.log("\nheader chrome actually mounts:");
   ok(!threw, threw || "tour.js + chrome.js evaluate cleanly");
   await new Promise((r) => setTimeout(r, 40));
   const added = actions.children.filter((n) => (n.className || "").includes("pg-"));
+  // Every needle below must be a real label. When the Notebooks button was deleted its copy key
+  // went with it, `PG.ui("notebooks")` became "", and `labels.includes("")` passed for a control
+  // that no longer existed — and would pass for one whose label had been emptied by a typo.
   // Four, not five: the Notebooks button was deleted. The product's own title dropdown is the
   // notebook picker, and a second one in the header was a second modal to keep working.
   ok(added.length >= 4, `${added.length} chrome controls inserted into .header-actions`);
