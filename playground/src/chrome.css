@@ -14,6 +14,12 @@
 .modal-overlay.pg-overlay[hidden] { display: none !important; }
 
 /* --- header ------------------------------------------------------------------------------------ */
+.pg-wordmark-tag {
+  margin-left: 7px; padding: 2px 6px;
+  border: 1px solid var(--accent); border-radius: 999px;
+  color: var(--accent); font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
+  vertical-align: 2px;
+}
 .pg-sim {
   display: inline-flex; align-items: center; gap: 6px;
   margin-left: auto; padding: 3px 9px;
@@ -153,5 +159,11 @@
 
 @media (max-width: 900px) {
   .pg-tour { right: 8px; bottom: 8px; width: calc(100vw - 16px); max-height: 44vh; }
-  .pg-sim { display: none; }
+  .pg-wordmark-tag {
+  margin-left: 7px; padding: 2px 6px;
+  border: 1px solid var(--accent); border-radius: 999px;
+  color: var(--accent); font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
+  vertical-align: 2px;
+}
+.pg-sim { display: none; }
 }

@@ -164,9 +164,26 @@
 
   // --- header ------------------------------------------------------------------------------------
   function mount() {
-    const header = document.querySelector("header.header");
     const settings = document.getElementById("settings-open");
-    if (!header || !settings) return;
+    if (!settings) return;
+    // INSERT INTO THE SETTINGS BUTTON'S OWN PARENT, not into `<header>`. `#settings-open` sits
+    // inside `<div class="header-actions">`, so `header.insertBefore(node, settings)` throws
+    // NotFoundError — the reference node must be a direct child. That one throw took down mount(),
+    // and with it `openInitial()` and the director: the page rendered as the bare product with no
+    // badge, no buttons and no guidance, which is exactly what the first screenshot showed.
+    // Reading the parent instead of naming a container keeps this working if the markup nests
+    // differently later.
+    const bar = settings.parentElement;
+    if (!bar) return;
+    const put = (node) => bar.insertBefore(node, settings);
+
+    // The wordmark says what this is, the way witr's does. Someone who lands here from a link has
+    // to be told in the first glance that they are looking at a demo, not a running install.
+    const wordmark = document.getElementById("new-notebook");
+    if (wordmark && !wordmark.querySelector(".pg-wordmark-tag")) {
+      wordmark.appendChild(el("span", "pg-wordmark-tag", "PLAYGROUND"));
+      wordmark.title = "This is a simulated playground, not a running install.";
+    }
 
     const badge = el("span", "pg-sim");
     badge.appendChild(el("span", "pg-sim-dot"));
@@ -174,26 +191,25 @@
     badge.title =
       "No server, no model, no network. Real notebooks and real recorded reasoning traces, " +
       "replayed in your browser.";
-    header.insertBefore(badge, settings);
+    put(badge);
 
-    header.insertBefore(button("Notebooks", "Switch demo notebook", () => scenarioModal.open()), settings);
-    header.insertBefore(
+    put(button("Notebooks", "Switch demo notebook", () => scenarioModal.open()));
+    put(
       button("↺ Restart demo", "Start the guided walkthrough from an empty notebook", async () => {
         await PG.reset();
         location.reload();
-      }),
-      settings
+      })
     );
-    header.insertBefore(
-      button("↓ Install", "How to install and run it for real", () => installModal.open(), "pg-btn-primary"),
-      settings
+    put(
+      button("↓ Install", "How to install and run it for real", () => installModal.open(),
+             "pg-btn-primary")
     );
     const star = el("a", "header-btn pg-btn pg-btn-star", "★ GitHub");
     star.href = REPO;
     star.target = "_blank";
     star.rel = "noopener";
     star.title = "Source, documentation and invariants";
-    header.insertBefore(star, settings);
+    put(star);
 
     const foot = el("div", "pg-foot");
     foot.appendChild(
@@ -243,7 +259,14 @@
   }
 
   async function start() {
-    mount();
+    // mount() is guarded SEPARATELY: it used to sit outside the try, so one DOM mistake in the
+    // header took down `openInitial()` and the director with it and the page rendered as the bare
+    // product. Chrome and guidance are independent features; one failing must not remove the other.
+    try {
+      mount();
+    } catch (err) {
+      console.warn("playground: header chrome failed to mount", err);
+    }
     try {
       await openInitial();
       // The Podcast panel renders lazily, so re-check when Studio tabs change rather than once.

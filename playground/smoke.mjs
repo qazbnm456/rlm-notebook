@@ -240,6 +240,87 @@ console.log("\nheadline demos are present in every scenario:");
 // approach risks: `app.js` is copied verbatim and can rename a class at any time, and a selector
 // that stops matching produces NO error — the spotlight just never appears and the demo stalls on a
 // step the reader cannot complete. So every anchor is checked against the shipped source.
+// The chrome is DOM code, and DOM code fails in ways no string check can see. This mounts it
+// against a mini-DOM that reproduces the one browser contract it got wrong: `insertBefore` throws
+// when the reference node is not a child of the node you called it on. `#settings-open` lives
+// inside `<div class="header-actions">`, so inserting into `<header>` threw NotFoundError, mount()
+// died, and `openInitial()` and the director never ran — the page rendered as the bare product.
+console.log("\nheader chrome actually mounts:");
+{
+  const nodes = [];
+  function makeEl(tag) {
+    const n = {
+      tagName: tag, className: "", children: [], parentElement: null, style: {}, dataset: {},
+      hidden: false, type: "", textContent: "", title: "",
+      appendChild(c) { c.parentElement = this; this.children.push(c); return c; },
+      prepend(c) { c.parentElement = this; this.children.unshift(c); },
+      insertBefore(c, ref) {
+        // The real contract. Getting this wrong is the bug this block exists to catch.
+        const at = this.children.indexOf(ref);
+        if (at < 0) throw new Error("NotFoundError: reference node is not a child of this node");
+        c.parentElement = this;
+        this.children.splice(at, 0, c);
+        return c;
+      },
+      addEventListener() {}, remove() {}, replaceChildren() { this.children = []; },
+      querySelector() { return null; }, querySelectorAll() { return []; },
+      setAttribute() {}, classList: { add() {}, remove() {}, toggle: () => false },
+      get offsetParent() { return {}; },
+    };
+    nodes.push(n);
+    return n;
+  }
+  // The real nesting from index.html: header > .header-actions > #settings-open
+  const header = makeEl("header");
+  const actions = makeEl("div");
+  const settingsBtn = makeEl("button");
+  const wordmark = makeEl("button");
+  header.appendChild(wordmark);
+  header.appendChild(actions);
+  actions.appendChild(settingsBtn);
+
+  const byId = { "settings-open": settingsBtn, "new-notebook": wordmark };
+  const sandbox = {
+    console: { warn() {}, log() {} }, setTimeout, clearTimeout, setInterval: () => 0,
+    JSON, Math, Object, Number, Map, Set, Promise, String, Array, Error, Boolean,
+    location: { href: "http://x/", hash: "", reload() {} },
+    sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} },
+    document: {
+      readyState: "complete", body: makeEl("body"),
+      currentScript: { src: "http://x/chrome.js" },
+      createElement: makeEl,
+      getElementById: (id) => byId[id] || null,
+      querySelector: (s) => (s.includes("header") ? header : null),
+      addEventListener() {},
+    },
+    addEventListener() {}, fetch: async () => ({ json: async () => ({}) }),
+  };
+  sandbox.window = sandbox;
+  sandbox.rlmPlayground = {
+    scenarios: async () => [],
+    progress: async () => null,
+    reset: async () => {},
+  };
+  const c = vm.createContext(sandbox);
+  let threw = null;
+  for (const f of ["tour.js", "chrome.js"]) {
+    try { vm.runInContext(readFileSync(join(DIST, f), "utf8"), c, { filename: f }); }
+    catch (err) { threw = `${f}: ${err.message}`; }
+  }
+  ok(!threw, threw || "tour.js + chrome.js evaluate cleanly");
+  await new Promise((r) => setTimeout(r, 40));
+  const added = actions.children.filter((n) => (n.className || "").includes("pg-"));
+  ok(added.length >= 5, `${added.length} chrome controls inserted into .header-actions`);
+  const labels = added.map((n) => n.textContent || n.className).join(" ");
+  for (const want of ["pg-sim", "Notebooks", "Restart demo", "Install", "GitHub"]) {
+    ok(labels.includes(want), `header has: ${want}`);
+  }
+  ok(
+    wordmark.children.some((n) => n.className === "pg-wordmark-tag"),
+    "wordmark is tagged PLAYGROUND"
+  );
+}
+
 console.log("\ndirector selectors still match the shipped UI:");
 {
   const TOUR = readFileSync(join(DIST, "tour.js"), "utf8");
