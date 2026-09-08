@@ -311,6 +311,33 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // A dwell step holds the reader on a run while it happens. Two ways it can go wrong and both are
 // silent: handing over too late (the run is already finished, so there is nothing to watch) and
 // holding unconditionally (no run is coming, so it never releases).
+// The interface language is detected from the browser; the DEMO has to follow it, or a Chinese
+// reader gets Chinese buttons around English answers. And the rule has one exception that must not
+// be lost: a hash the reader ARRIVED with is a shared link naming a specific notebook.
+console.log("\nthe demo notebook follows the interface language:");
+{
+  const CHROME = readFileSync(join(DIST, "chrome.js"), "utf8");
+  const LANG = { "zh-Hant": "Traditional Chinese", en: "English" };
+  for (const [ui, want] of Object.entries(LANG)) {
+    const match = fixtures.scenarios.find((s) => s.lang === want);
+    ok(!!match, `${ui} has a notebook to open (${match ? match.id : "none"})`);
+  }
+  // Both directions have to exist or the preference silently falls through to scenarios[0].
+  const langs = new Set(fixtures.scenarios.map((s) => s.lang));
+  ok(Object.values(LANG).every((l) => langs.has(l)),
+     `every interface language maps to a real notebook language (${[...langs].join(", ")})`);
+
+  // The arriving hash is captured ONCE, before anything writes it. Reading `location.hash` at call
+  // time meant the hash we had just written won on every reload after the first, so the language
+  // preference only ever applied on a reader's very first visit.
+  ok(/ARRIVED_WITH\s*=/.test(CHROME), "the arriving hash is captured once, at load");
+  const openInitial = CHROME.slice(CHROME.indexOf("async function openInitial"),
+                                   CHROME.indexOf("async function noteTrimmedAudio"));
+  ok(!/location\.hash\.replace/.test(openInitial),
+     "openInitial does not re-read location.hash (it writes it)");
+  ok(/ui-lang-changed/.test(CHROME), "changing the interface language re-picks the notebook");
+}
+
 console.log("\nthe dwell step cannot strand the reader:");
 {
   const s = { console: { log() {}, warn() {} }, JSON, Math, Object };

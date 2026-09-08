@@ -235,13 +235,19 @@
   //: An explicit `#notebook-id` still wins, because a shared link names a specific notebook and
   //: guessing over it would break the link.
   const LANG_FOR_UI = { "zh-Hant": "Traditional Chinese", en: "English" };
+  const preferredLang = () => LANG_FOR_UI[typeof uiLang === "function" ? uiLang() : "en"];
+
+  //: Captured ONCE, before anything writes it. `openInitial` sets `location.hash` itself, so reading
+  //: it at call time meant the hash always won from the second visit onward and the language
+  //: preference only ever applied on somebody's very first load. An ARRIVING hash is a shared link
+  //: and must be honoured; one we wrote ourselves is not a choice the reader made.
+  const ARRIVED_WITH = decodeURIComponent(location.hash.replace(/^#/, ""));
 
   async function openInitial() {
     const scenarios = await PG.scenarios();
-    const wanted = decodeURIComponent(location.hash.replace(/^#/, ""));
-    const preferred = LANG_FOR_UI[typeof uiLang === "function" ? uiLang() : "en"];
+    const preferred = preferredLang();
     const pick =
-      scenarios.find((s) => s.id === wanted) ||
+      scenarios.find((s) => s.id === ARRIVED_WITH) ||
       scenarios.find((s) => s.lang === preferred) ||
       scenarios[0];
     if (!pick) return;
@@ -283,6 +289,22 @@
       document.addEventListener("click", () => setTimeout(noteTrimmedAudio, 60), true);
       await noteTrimmedAudio();
       if (PG.startDirector) PG.startDirector();
+
+      //: Changing the interface language should move the DEMO too. Reading English answers under a
+      //: Chinese interface is the half-translated state again, one level up: the interface is only
+      //: half the language the reader chose. A notebook whose language already matches is left
+      //: alone, so this never interrupts somebody who is simply mid-demo.
+      window.addEventListener("ui-lang-changed", async () => {
+        const scenarios = await PG.scenarios();
+        const want = preferredLang();
+        const current = scenarios.find((s) => s.id === decodeURIComponent(location.hash.slice(1)));
+        if (current && current.lang === want) return;
+        const next = scenarios.find((s) => s.lang === want);
+        if (!next) return;
+        await PG.reset();
+        location.hash = `#${next.id}`;
+        location.reload();
+      });
     } catch (err) {
       console.warn("playground: could not open the initial notebook", err);
     }
