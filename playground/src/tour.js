@@ -133,13 +133,15 @@
            "在你自己裝的版本裡，這個欄位可以貼網址、貼文字、上傳 PDF，掃描檔會自動做 OCR。"],
     },
     overview: {
+      // Name the button, do not say "press the button". If the spotlight fails to land the reader
+      // still knows what to look for, and the label is the same string the product renders.
       en: ["Generate the overview",
-           "Press the button. This is a real model run: a summary of the whole corpus, plus the " +
-           "questions worth asking first.\n\nWatch the status line. The reasoning going past was " +
-           "recorded from the run that produced this overview."],
+           "Press ✨ Generate overview in the middle column. This is a real model run: a summary of " +
+           "the whole corpus, plus the questions worth asking first.\n\nWatch the status line. The " +
+           "reasoning going past was recorded from the run that produced this overview."],
       "zh-Hant": ["產生概覽",
-           "按下按鈕。這是一次真實的模型執行，會給你整份語料的摘要，還有幾個值得先問的問題。\n\n" +
-           "過程中看一下狀態列。跑過去的那些推理，是當初產出這份概覽時錄下來的。"],
+           "按中間欄的「✨ 產生概覽」。這是一次真實的模型執行，會給你整份語料的摘要，還有幾個值得先問的問題。" +
+           "\n\n過程中看一下狀態列。跑過去的那些推理，是當初產出這份概覽時錄下來的。"],
     },
     ask1: {
       en: ["Ask the first question",
@@ -288,7 +290,7 @@
       key: "overview",
       // Built at runtime by `renderChatOverview` (`.chat-starter` wrapping a `.btn`), so the
       // selector has to match what app.js CREATES, not the static markup.
-      target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button",
+      target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button, #chat-overview",
       done: (p) => p.overview,
     },
     { id: "ask1", key: "ask1", target: "#ask-submit", fill: (p) => p.questions[0],

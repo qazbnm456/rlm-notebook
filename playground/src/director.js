@@ -34,10 +34,19 @@
     return n;
   };
 
+  //: Prefer a VISIBLE match, but fall back to one that merely exists. Requiring `offsetParent` was
+  //: too strict: a control the app has built but not yet laid out reads as missing, the step shows
+  //: no spotlight, and — because the instruction had moved into the popover — the reader was left
+  //: with a title and nothing to do. driver.js scrolls whatever it is given into view anyway.
   const firstMatch = (selector) => {
-    for (const part of selector.split(",")) {
-      const found = document.querySelector(part.trim());
+    const parts = selector.split(",").map((s) => s.trim());
+    for (const part of parts) {
+      const found = document.querySelector(part);
       if (found && found.offsetParent !== null) return found;
+    }
+    for (const part of parts) {
+      const found = document.querySelector(part);
+      if (found) return found;
     }
     return null;
   };
@@ -49,9 +58,11 @@
   const LABEL = {
     en: { head: "Guided demo", skip: "Skip", exit: "Exit", waiting: "Waiting for you…",
           finding: "Looking for the control…",
+          manual: "Do this yourself, then the tour continues.",
           done: "That is the whole product. The Install button has what you need." },
     "zh-Hant": { head: "導覽", skip: "略過", exit: "結束", waiting: "等你操作…",
                  finding: "正在尋找控制項…",
+                 manual: "請自己操作一次，導覽會接著走。",
                  done: "這就是產品的全貌。安裝方式在上面的「↓ Install」。" },
   };
   const L = (k) => {
@@ -127,9 +138,21 @@
         this.skip.hidden = true;
         return;
       }
-      this.body.appendChild(el("div", "pg-step-title", PG.text(step.key)[0]));
+      const [title, text] = PG.text(step.key);
+      this.body.appendChild(el("div", "pg-step-title", title));
+      // The instruction normally lives ONLY in the popover, anchored to the control it names. When
+      // there is no popover — the control has not appeared yet — the panel carries it instead, so a
+      // step can never present a heading with nothing to act on. `paintBody` is re-run by `tick`
+      // when the spotlight appears or disappears.
+      this.stepBody = el("p", "pg-step-body", text);
+      this.stepBody.hidden = true;
+      this.body.appendChild(this.stepBody);
       this.hint = el("div", "pg-step-hint");
       this.body.appendChild(this.hint);
+    }
+
+    showBodyInPanel(show) {
+      if (this.stepBody) this.stepBody.hidden = !show;
     }
 
     setHint(text) {
@@ -195,6 +218,7 @@
 
       if (step !== this.armed) {
         this.armed = step;
+        this.missed = 0;
         this.clearSpotlight();
         this.paint(step);
         // Pre-fill the composer so the reader presses send rather than typing a question the demo
@@ -226,11 +250,20 @@
 
       const target = firstMatch(step.target);
       if (target) {
+        this.missed = 0;
+        this.showBodyInPanel(false);
         this.highlight(step, target);
         this.setHint(step.progress ? step.progress(progress) : L("waiting"));
         if (step.repeat && this.started) this.maybeRepeat(target);
       } else {
-        this.setHint(L("finding"));
+        // Two ticks of grace before saying anything: a control that is one render away should not
+        // make the panel flicker a warning.
+        this.missed = (this.missed || 0) + 1;
+        if (this.missed > 2) {
+          this.clearSpotlight();
+          this.showBodyInPanel(true);
+          this.setHint(L("manual"));
+        }
       }
       if (step.repeat && !this.started && target) {
         target.addEventListener("click", () => (this.started = true), { once: true });
