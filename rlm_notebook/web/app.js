@@ -2929,6 +2929,7 @@ function initStudioPanel() {
       cache.set(kind, { result: data, runId });
       refreshReferenceView();
       body.classList.remove("is-pending");
+      showRegenerate(kind);
       renderCached(kind, cache.get(kind));
     } catch (err) {
       status.finish();
@@ -2942,8 +2943,21 @@ function initStudioPanel() {
   // immediately, so browsing the four kinds to see what they were cost four model runs and a user
   // could not tell which click had committed them to one. The offer is explicit now, matching the
   // chat overview's own "✨ Generate" affordance.
+  //: ↻ Regenerate is shown only where there is something to regenerate. It is static markup and
+  //: nothing ever toggled it, so on a tab that had generated nothing it sat above the primary
+  //: "Generate the Summary" button doing the identical thing under a label implying otherwise:
+  //: `cache.delete` on a key that is not there, then the same `fetchKind`. Two controls, one
+  //: action, and the quieter one claiming a result exists. This is invariant 71's rule for the
+  //: chat overview (the button's WEIGHT varies, its EXISTENCE follows the artifact) applied to the
+  //: panel that was missing it. Hiding is safe here: `.guide-regenerate` declares no `display` of
+  //: its own and `.btn` carries its own `[hidden]` guard (invariants 36 and 44).
+  function showRegenerate(kind) {
+    regenerateBtn.hidden = !cache.has(kind);
+  }
+
   function showKind(kind) {
     setActiveKind(kind);
+    showRegenerate(kind);
     if (cache.has(kind)) {
       renderCached(kind, cache.get(kind));
       return;
@@ -2977,6 +2991,9 @@ function initStudioPanel() {
 
   regenerateBtn.addEventListener("click", () => {
     cache.delete(activeKind);
+    // Hidden for the duration: the run has no cached result behind it any more, and `runStatus`
+    // owns the panel while it is in flight (invariant 47).
+    showRegenerate(activeKind);
     fetchKind(activeKind);
   });
 

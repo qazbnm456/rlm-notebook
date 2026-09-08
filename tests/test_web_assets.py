@@ -1859,3 +1859,49 @@ def test_the_replay_shows_its_progress_through_the_stop_it_is_dwelling_on():
     rules = dict(_rules(css))
     assert "display: flex" in rules.get(".traj-progress", "")
     assert "display: none" in rules.get(".traj-progress[hidden]", "")
+
+
+def test_studio_regenerate_is_shown_only_when_there_is_something_to_regenerate():
+    """`↻ Regenerate` must follow the artifact, not sit there unconditionally.
+
+    It is static markup, and nothing toggled it. On a tab that had generated nothing it sat above
+    the primary "Generate the Summary" button doing the identical thing: `cache.delete` on a key
+    that is not there, then the same `fetchKind`. Two controls, one action, and the quieter one
+    implying a result already existed. A user asked why the panel had two buttons for one job.
+
+    This is invariant 71's rule for the chat overview -- the button's WEIGHT varies, its EXISTENCE
+    follows the artifact -- applied to the Studio panel, which was missing it. Source-tree
+    assertion because this project has no JS test runner (invariant 36's known gap).
+    """
+    html = (WEB / "index.html").read_text(encoding="utf-8")
+    app = (WEB / "app.js").read_text(encoding="utf-8")
+
+    button = next(line for line in html.splitlines() if 'id="guide-regenerate"' in line)
+    assert " hidden" in button, "the button must start hidden, or it flashes before showKind decides"
+
+    panel = app[app.index("function initStudioPanel()") :]
+    panel = panel[: panel.index("\nfunction ")] if "\nfunction " in panel else panel
+
+    assert "function showRegenerate(" in panel, "one place decides it, not a condition per call site"
+    assert re.search(r"regenerateBtn\.hidden\s*=\s*!cache\.has\(", panel), (
+        "shown exactly when this kind has a cached result -- not on a flag somebody else maintains"
+    )
+
+    # Every path that changes what is cached has to re-decide it. `showKind` is the choke point:
+    # both invalidation handlers call it, so covering it covers them without a list to maintain.
+    show_kind = panel[panel.index("function showKind(") :]
+    show_kind = show_kind[: show_kind.index("\n  function ")]
+    assert "showRegenerate(kind)" in show_kind, "selecting a tab re-decides it"
+
+    for handler in ("notebook:switched", "sources:changed"):
+        arm = panel[panel.index(handler) : panel.index(handler) + 220]
+        assert "showKind(" in arm, f"{handler} must re-render through showKind, which re-decides it"
+
+    # A successful generation reveals it; pressing it hides it again for the duration of the run.
+    assert panel.index("showRegenerate(kind);") < panel.index("renderCached(kind, cache.get(kind));"), (
+        "a finished run reveals the button before rendering the result"
+    )
+    click = panel[panel.index('regenerateBtn.addEventListener("click"') :][:320]
+    assert click.index("cache.delete(activeKind)") < click.index("showRegenerate(activeKind)") < click.index(
+        "fetchKind(activeKind)"
+    ), "the click drops the cache, re-decides the button, then runs"
