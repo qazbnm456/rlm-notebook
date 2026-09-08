@@ -80,7 +80,7 @@ const STRINGS = {
     "chat.askNext": "接著問",
     "chat.noStarters": "這份概覽沒有附上建議問題，重新產生可以再試一次。",
     "chat.startWith": "可以先問",
-    "chat.generateOverview": "✨ 產生概覽",
+    "chat.generateOverview": "✨ 整理重點並建議問題",
     "chat.orJustAsk": "…或直接在下面提問。",
     "chat.regenerateOverview": "↻ 重新產生概覽",
     "chat.overview": "概覽",

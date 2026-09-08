@@ -2239,7 +2239,7 @@ function renderChatOverview() {
 
   const overview = state.overview;
   if (!overview) {
-    el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Generate overview"), t("chat.orJustAsk", "\u2026or just ask a question below.")));
+    el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Summarise and suggest questions"), t("chat.orJustAsk", "\u2026or just ask a question below.")));
     return;
   }
 
@@ -2316,6 +2316,20 @@ function renderChatOverview() {
 }
 
 function overviewStarter(labelText, hintText, quiet) {
+  //: The first-run label NAMES BOTH HALVES of what this produces, and it is deliberately not
+  //: "Generate overview". `/overview` runs two tasks: a summary AND the starter questions, and the
+  //: short label mentioned neither. Worse, it sat one column away from Studio's "Generate Summary",
+  //: which runs the SAME summary task while keeping nothing (invariant 38 persists the overview and
+  //: not the four Studio kinds), so the two read as one feature offered twice. A user asked which
+  //: was which. In Chinese the collision was sharper still: 概覽 and 摘要 are near synonyms.
+  //:
+  //: Only the FIRST-RUN button changed. The artifact keeps its own name in its heading, where it
+  //: sits in the chat thread with nothing to be confused with, and the regenerate label with it.
+  //:
+  //: This comment lives INSIDE the function on purpose. Above it, it fell within the slice
+  //: `test_a_message_naming_an_action_ships_with_that_action` takes of `renderChatOverview`, which
+  //: counts a key's occurrences to prove there is exactly one regenerate control. Naming the key in
+  //: prose made it two.
   const wrap = document.createElement("div");
   wrap.className = "chat-starter";
   const btn = document.createElement("button");
@@ -2482,7 +2496,7 @@ function supersededNote(el) {
   note.className = "empty-note";
   note.textContent = t("chat.overviewSuperseded", "That overview was superseded by a newer one.");
   el.appendChild(note);
-  el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Generate overview"), ""));
+  el.appendChild(overviewStarter(t("chat.generateOverview", "\u2728 Summarise and suggest questions"), ""));
 }
 
 function initChatPanel() {

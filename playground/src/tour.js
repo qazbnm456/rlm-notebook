@@ -135,13 +135,13 @@
     overview: {
       // Name the button, do not say "press the button". If the spotlight fails to land the reader
       // still knows what to look for, and the label is the same string the product renders.
-      en: ["Generate the overview",
-           "Press ✨ Generate overview in the middle column.\n\nIt is a real model run: a summary " +
-           "of the whole corpus plus the questions worth asking first. The reasoning in the status " +
-           "line was recorded from the run that produced it."],
-      "zh-Hant": ["產生概覽",
-           "按中間欄的「✨ 產生概覽」。\n\n這是真實的模型執行，會給你整份語料的摘要和幾個值得先問的問題。" +
-           "狀態列跑過去的推理，是當初產出它時錄下來的。"],
+      en: ["Open the notebook",
+           "Press ✨ Summarise and suggest questions in the middle column.\n\nIt is a real model " +
+           "run, and it does both: a summary of the whole corpus, and the questions worth asking " +
+           "first. The reasoning in the status line was recorded from the run that produced it."],
+      "zh-Hant": ["替筆記本開個場",
+           "按中間欄的「✨ 整理重點並建議問題」。\n\n這是真實的模型執行，兩件事一起做：整份語料的" +
+           "重點，加上幾個值得先問的問題。狀態列跑過去的推理，是當初產出它時錄下來的。"],
     },
     watch: {
       en: ["Watch it work",

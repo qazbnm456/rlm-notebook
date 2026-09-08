@@ -408,6 +408,51 @@ console.log("\nnothing local or private reaches the published fixture:");
 // A stylesheet edit that leaves a selector list ending in a comma silently swallows the rule that
 // follows it, and a brace count still balances. Two automated deletion passes here corrupted the
 // file that way, one of them dragging a rule inside a media query. Parse the structure instead.
+// The tour tells the reader to press a control BY NAME, deliberately, so a failed spotlight still
+// leaves them something to look for. That only works while the name is the product's. Renaming
+// "Generate overview" would otherwise leave step 2 pointing at a button that no longer says it.
+//
+// Compared against COMPLETE label values, never as a substring. The first version of this check
+// asked `app.js + i18n.js` whether it contained the words anywhere, and a mutation walked straight
+// past it: the stale "產生概覽" is still a substring of "↻ 重新產生概覽", which is a different
+// button. A vacuous check is worse than none, because the name promises otherwise.
+console.log("\nthe tour names controls the product actually renders:");
+{
+  const TOUR = readFileSync(join(DIST, "tour.js"), "utf8");
+  const unesc = (s) => s.replace(/\\u([0-9a-fA-F]{4})/g,
+                                 (_, h) => String.fromCharCode(parseInt(h, 16)));
+  const bare = (s) => unesc(s).replace(/^[\u2728\u21bb\u2942\u2715\u2942]\s*/, "").trim();
+
+  // Harvested from the two places a label actually lives, by the SHAPE of the declaration:
+  //   i18n.js  "key": "value"      (a translated table)
+  //   app.js   t("key", "English") (the fallback at its own call site, invariant 48)
+  //   index.html  >text<           (a label written straight into the markup)
+  //
+  // NOT by scanning for quoted strings across the file. That was tried and it silently DESYNCS:
+  // an apostrophe in a comment or a double quote inside a single-quoted string throws the pairing
+  // out of phase, and the scan then reports the code BETWEEN two strings as a label while missing
+  // the ones inside. It found 1569 "labels" and not the one being checked.
+  const labels = new Set();
+  const I18N = readFileSync(join(DIST, "i18n.js"), "utf8");
+  for (const m of I18N.matchAll(/^\s*"([\w.]+)":\s*"((?:[^"\\]|\\.)*)"/gm)) labels.add(bare(m[2]));
+  const APP = readFileSync(join(DIST, "app.js"), "utf8");
+  for (const m of APP.matchAll(/\bt\(\s*"[\w.]+"\s*,\s*"((?:[^"\\]|\\.)*)"/g)) labels.add(bare(m[1]));
+  const HTML = readFileSync(join(DIST, "index.html"), "utf8");
+  for (const m of HTML.matchAll(/>([^<>{}]{2,60})</g)) labels.add(bare(m[1]));
+  ok(labels.size > 100, `${labels.size} complete labels the product can render`);
+
+  // A control is quotable in the tour's prose because the product prefixes it with a glyph.
+  const named = new Set();
+  for (const m of TOUR.matchAll(/(?:\\u2728|\\u21bb|\\u2942|[\u2728\u21bb\u2942])\s?([^"「」\n]{2,44}?)(?=[「」"。,.]|\\n|\s+in\s)/g)) {
+    const label = bare(m[1]);
+    if (label.length > 2) named.add(label);
+  }
+  ok(named.size >= 2, `${named.size} control(s) named in the tour copy`);
+  for (const label of named) {
+    ok(labels.has(label), `"${label}" is a label the product renders, exactly`);
+  }
+}
+
 console.log("\nchrome.css still parses as a stylesheet:");
 {
   const CSS = readFileSync(join(DIST, "chrome.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
