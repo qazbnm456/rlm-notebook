@@ -283,51 +283,49 @@ def trim_audio(nb_id: str, dest: Path, seconds: int) -> dict | None:
     return {"seconds": round(full, 1), "trimmed": False}
 
 
-#: Text that could only have come from this repository's own documentation. The model READS this
-#: project's skill files mid-run (invariant 65 wires them in with `discovery="inject"`), so its
-#: reasoning quotes them back: internal notes, invariant numbers and measurement history, on a page
-#: meant to show a reader what the product does.
+#: What is actually private on this machine. The repository itself is going PUBLIC — internal
+#: notes, invariant numbers and measurement history are the product, not a leak — so the model
+#: quoting this project's own skill files back at itself is exactly what the Trajectory drawer
+#: exists to show. An earlier pass redacted 100 such strings on the theory that "internal" meant
+#: "private"; it does not. What must never ship is anything about THIS COMPUTER: a home directory
+#: naming its owner, a hostname, a credential, a contact address scraped out of a source.
 #:
-#: DELIBERATELY NARROW. A first pass also listed `rlm_notebook` and `rlm_harness`, which redacted 339
-#: strings — every `task` field among them — and would have gutted the drawer it was protecting.
-#: Those are package names that ship in the wheel; they are not private. What is private is the
-#: PROSE of the internal docs.
-_INTERNAL_MARKERS = (
-    "TraceRecorder",
-    "corpus-navigation",
-    "podcast-craft",
-    "AGENTS.md",
-    "CHANGELOG.md",
-    "read_skill",
+#: Model identifiers are private too, and are handled separately by `anonymise_models` — they need
+#: substituting with a stable label rather than blanking, so a reader can still see that two
+#: different models were involved.
+_PRIVATE = (
+    (re.compile(r"(/Users|/home)/[\w.-]+"), r"\1/[user]"),
+    (re.compile(r"C:\\Users\\[\w.-]+", re.I), r"C:\\Users\\[user]"),
+    (re.compile(r"\b[\w.+-]+@[\w-]+\.[\w.]{2,}\b"), "[email omitted]"),
+    (re.compile(r"\bsk-[A-Za-z0-9_-]{8,}"), "[key omitted]"),
+    (re.compile(r"\bBearer\s+\S{12,}"), "Bearer [token omitted]"),
+    (re.compile(r"\b[\w-]+\.local\b"), "[host omitted]"),
 )
-
-#: Only long strings are candidates. A short field can contain a marker incidentally; a paragraph
-#: containing one is the model quoting a document back.
-_REDACT_MIN_CHARS = 180
-
-_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.]{2,}")
 
 
 def redact_traces(fixtures: dict) -> int:
-    """Strip anything from the recorded runs that is about THIS MACHINE rather than the demo.
+    """Strip anything that is about THIS MACHINE rather than about the demo.
 
     A trace is the one artifact here that can carry text nobody chose to publish: the planner's own
-    reasoning, the code it wrote, and whatever it read. The audit that prompted this found no local
-    paths, no username, no hostnames and no credentials — but it did find a run quoting this repo's
-    internal skill files at length, because the model had read them.
+    reasoning, the code it wrote, and whatever it read. The line is drawn at the MACHINE, not at the
+    project: this repository is going public, so a run quoting its skill files, its invariant
+    numbers or its measurement history is publishing what was always going to be published — and it
+    is the most interesting thing in the drawer. A home directory, a hostname, a key or somebody's
+    email address is a different category and never becomes public by that decision.
 
-    Redaction happens at the STRING level across the runs, so it reaches reasoning, code cells and
-    tool verdicts alike without needing to know which field a given event uses.
+    Substitution happens at the STRING level across the whole fixture, so it reaches reasoning, code
+    cells, tool verdicts and ingested source text alike without needing to know which field a given
+    event uses. Contact details in particular arrive through the SOURCES — a press release prints
+    its press officer's address, and republishing it on another domain hands a scraper a fresh copy.
     """
     redacted = 0
 
     def clean(value):
         nonlocal redacted
         if isinstance(value, str):
-            if len(value) >= _REDACT_MIN_CHARS and any(m in value for m in _INTERNAL_MARKERS):
-                redacted += 1
-                return "[internal project notes the model read during this run, omitted here]"
-            new = _EMAIL.sub("[email omitted]", value)
+            new = value
+            for pattern, replacement in _PRIVATE:
+                new = pattern.sub(replacement, new)
             if new != value:
                 redacted += 1
             return new
@@ -337,29 +335,10 @@ def redact_traces(fixtures: dict) -> int:
             return [clean(v) for v in value]
         return value
 
-    # Internal-doc prose can only appear in a RUN — a source is somebody else's article.
-    fixtures["runs"] = clean(fixtures["runs"])
+    for key in ("runs", "notebooks", "sources", "scenarios"):
+        fixtures[key] = clean(fixtures[key])
 
-    # Contact details, though, arrive in the ingested SOURCES: a press release prints its press
-    # officer's address, and republishing it on another domain hands a scraper a fresh copy. The
-    # sources are the reader-facing text, so this covers the whole fixture rather than the runs.
-    def scrub_emails(value):
-        nonlocal redacted
-        if isinstance(value, str):
-            new_value = _EMAIL.sub("[email omitted]", value)
-            if new_value != value:
-                redacted += 1
-            return new_value
-        if isinstance(value, dict):
-            return {k: scrub_emails(v) for k, v in value.items()}
-        if isinstance(value, list):
-            return [scrub_emails(v) for v in value]
-        return value
-
-    for key in ("notebooks", "sources", "scenarios"):
-        fixtures[key] = scrub_emails(fixtures[key])
-
-    print(f"  redacted {redacted} string(s) carrying internal notes or contact detail")
+    print(f"  rewrote {redacted} string(s) carrying machine-local or contact detail")
     return redacted
 
 

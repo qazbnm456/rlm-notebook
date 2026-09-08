@@ -208,7 +208,11 @@
     //: and drags the whole page around, which is the reason the product sets `scrollTop` by hand for
     //: its own transcript follower (invariant 44). Named `revealTarget` rather than `scrollIntoView`
     //: so the name it must not use stays searchable.
-    revealTarget(el) {
+    //: `side` is where the POPOVER wants to go, so it decides where the target should sit. Centring
+    //: everything left a `side: "top"` step with its target near the top of the scroller, no room
+    //: above it, and driver flipping the popover underneath — onto the follow-up questions. Bias the
+    //: target away from the side the popover needs.
+    revealTarget(el, side) {
       let box = el.parentElement;
       while (box && box !== document.body) {
         const style = getComputedStyle(box);
@@ -221,9 +225,21 @@
       const b = box.getBoundingClientRect();
       // A generous margin: the popover needs room too, and the composer overlaps the bottom of the
       // chat scroller.
-      const MARGIN = 120;
-      if (a.top >= b.top + MARGIN && a.bottom <= b.bottom - MARGIN) return; // already comfortable
-      const want = box.scrollTop + a.top - b.top - (box.clientHeight - a.height) / 2;
+      // Roughly the popover's height: the room it needs on the side it is going to.
+      const POPOVER = 220;
+      // 0 puts the target at the top of the scroller, 1 at the bottom.
+      const bias = side === "top" ? 0.72 : side === "bottom" ? 0.28 : 0.5;
+      const MARGIN = 24;
+      const wantTop = b.top + (box.clientHeight - a.height) * bias;
+      const roomAbove = a.top - b.top;
+      const roomBelow = b.bottom - a.bottom;
+      const comfortable =
+        roomAbove > MARGIN &&
+        roomBelow > MARGIN &&
+        (side !== "top" || roomAbove > POPOVER) &&
+        (side !== "bottom" || roomBelow > POPOVER);
+      if (comfortable) return;
+      const want = box.scrollTop + a.top - wantTop;
       // Clamped: centring a target near the top computes a negative offset, which the browser would
       // silently pin to 0 anyway. Saying so is cheaper than wondering later.
       box.scrollTop = Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight));
@@ -370,7 +386,7 @@
       if (target) {
         this.missed = 0;
         this.showBodyInPanel(false);
-        if (target === this.lastTarget) this.revealTarget(target);
+        if (target === this.lastTarget) this.revealTarget(target, step.side);
         this.highlight(step, target);
         // AFTER highlighting: driver creates and positions the popover there, so measuring first
         // sized up either nothing or the previous step's popover. It also PLACES the popover

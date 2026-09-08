@@ -332,7 +332,8 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // into view the same way, and must not reach for the easy call.
 // A trace is the one artifact here that can carry text nobody chose to publish: the planner's own
 // reasoning, the code it wrote, and whatever it read. This page goes on the open web, so the audit
-// that found a run quoting this repo's internal skill files has to run every build, not once.
+// runs every build rather than once. The line is at the MACHINE, not at the project: this
+// repository is public, so the model quoting its own skill files is the drawer working.
 console.log("\nnothing local or private reaches the published fixture:");
 {
   const blob = readFileSync(join(DIST, "fixtures.json"), "utf8");
@@ -341,7 +342,6 @@ console.log("\nnothing local or private reaches the published fixture:");
     "credentials": /sk-[A-Za-z0-9]{8,}|Bearer\s+\S{12,}|RN_API_KEY|RN_BASE_URL/,
     "email addresses": /[\w.+-]+@[\w-]+\.[\w.]{2,}/,
     "loopback or hostnames": /127\.0\.0\.1|localhost:\d+|\.local\b/,
-    "internal doc prose": /TraceRecorder|AGENTS\.md|CHANGELOG\.md/,
     "python tracebacks": /File "[^"]+", line \d+/,
   };
   for (const [what, re_] of Object.entries(FORBIDDEN)) {
@@ -360,6 +360,13 @@ console.log("\nnothing local or private reaches the published fixture:");
      "every main_model is an anonymous label");
   ok(metas.every((m) => !m.sub_model || /^model-[a-z]$/.test(m.sub_model)),
      "every sub_model is an anonymous label");
+
+  // The other direction, and the one an over-eager scrub fails: the reasoning has to SURVIVE. A
+  // pass that blanked every string mentioning this project's own skill files removed 100 of them
+  // and left the drawer showing placeholders, which is the failure this assertion exists to catch.
+  ok(!/omitted here/.test(blob), "no blanket redaction placeholder survives");
+  const skillProse = (blob.match(/corpus-navigation|podcast-craft|read_skill/g) || []).length;
+  ok(skillProse > 20, `${skillProse} mentions of the run's own skill reads are intact`);
 
   // Redaction must not have gutted what the drawer exists to show.
   const richest = Object.values(fx.runs)
