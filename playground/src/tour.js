@@ -277,6 +277,8 @@
       restart: "↺ Restart", restartTip: "Start the walkthrough again from an empty notebook",
       install: "↓ Install", installTip: "How to install and run it for real",
       github: "★ GitHub", githubTip: "Source, documentation and design notes",
+      groupEn: "English", groupZh: "Traditional Chinese",
+      "badge.start": "START HERE",
       pickTitle: "Pick a notebook",
       pickSub: "Each one is a real notebook: real sources, real answers, real recorded reasoning. " +
         "Switching reloads the workspace.",
@@ -291,6 +293,7 @@
         "your browser. Nothing is sent anywhere and nothing is kept.",
       footerLink: "See how it is built",
       turnEpisode: (n) => `${n}-turn episode`,
+      groupCount: (n) => `${n} notebook${n === 1 ? "" : "s"}`,
     },
     "zh-Hant": {
       simulated: "示範模式",
@@ -299,6 +302,8 @@
       restart: "↺ 重新開始", restartTip: "從空的筆記本重跑一次導覽",
       install: "↓ 安裝", installTip: "怎麼實際裝起來用",
       github: "★ GitHub", githubTip: "原始碼、文件與設計紀錄",
+      groupEn: "英文", groupZh: "繁體中文",
+      "badge.start": "從這裡開始",
       pickTitle: "挑一本筆記本",
       pickSub: "每一本都是真的：真的來源、真的回答、真的推理紀錄。換一本會重新載入工作區。",
       pickNote: "兩組用的是同一批來源，差別只在輸出語言：文字跟著讀者走，引文則留在來源自己的用字。",
@@ -311,6 +316,7 @@
         "沒有任何東西被送出，也沒有留下任何東西。",
       footerLink: "看它是怎麼做的",
       turnEpisode: (n) => `${n} 輪的節目`,
+      groupCount: (n) => `${n} 本`,
     },
   };
 

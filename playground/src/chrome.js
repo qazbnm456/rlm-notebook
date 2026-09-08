@@ -87,21 +87,33 @@
       }
       for (const [lang, items] of groups) {
         const sec = el("section", "pg-scenario-group");
-        const head = el("h3", null, lang);
-        head.appendChild(el("span", "pg-group-note", `${items.length} notebooks`));
+        // The heading is the LANGUAGE, translated. `lang` stays English because it is the grouping
+        // KEY (and the fixture's own field); what a reader sees comes from the copy table.
+        const head = el("h3", null, PG.ui(lang === "English" ? "groupEn" : "groupZh"));
+        head.appendChild(el("span", "pg-group-note", PG.ui("groupCount", items.length)));
         sec.appendChild(head);
-        const grid = el("div", "pg-grid");
+        // A LIST, not a grid of cards. The product's own notebook picker (`.notebook-row`) is a
+        // dense column of rows: a title line, a quiet line under it, hover on the row. The grid this
+        // replaces stretched every card to its row's tallest sibling, left a lone card marooned
+        // beside empty space, and put the title and a badge on one line inside a 240px column so
+        // they fought for it.
+        const list = el("div", "pg-picklist");
         for (const s of items) {
-          const card = el("button", "pg-card");
-          card.type = "button";
-          const cardHead = el("div", "pg-card-head");
-          cardHead.appendChild(el("strong", null, s.title || s.label));
-          cardHead.appendChild(el("span", "pg-badge", s.badge));
-          card.appendChild(cardHead);
-          card.appendChild(el("p", null, s.blurb));
+          const row = el("button", "pg-pickrow");
+          row.type = "button";
+          const line = el("div", "pg-pickrow-line");
+          line.appendChild(el("strong", "pg-pickrow-title", s.title || s.label));
+          // Only a badge that SAYS something. Every row used to carry its own language, directly
+          // under a heading that had just said it.
+          if (s.badge) line.appendChild(el("span", "pg-badge", PG.ui(`badge.${s.badge}`)));
+          row.appendChild(line);
+          const blurb = s.blurb && typeof s.blurb === "object"
+            ? s.blurb[uiLang()] || s.blurb.en
+            : s.blurb;
+          if (blurb) row.appendChild(el("p", "pg-pickrow-blurb", blurb));
           if (s.utterances) {
-            const meta = el("div", "pg-card-meta");
-            meta.appendChild(el("span", null, `🎧 ${PG.ui("turnEpisode", s.utterances)}`));
+            const meta = el("div", "pg-pickrow-meta");
+            meta.appendChild(el("span", null, `\u266a ${PG.ui("turnEpisode", s.utterances)}`));
             if (s.audio && s.audio.trimmed) {
               meta.appendChild(
                 el("span", "pg-card-warn",
@@ -109,16 +121,16 @@
                      (s.audio.full_seconds || 0) / 60)}`)
               );
             }
-            card.appendChild(meta);
+            row.appendChild(meta);
           }
-          card.addEventListener("click", () => {
+          row.addEventListener("click", () => {
             close();
             location.hash = `#${s.id}`;
             location.reload();
           });
-          grid.appendChild(card);
+          list.appendChild(row);
         }
-        sec.appendChild(grid);
+        sec.appendChild(list);
         body.appendChild(sec);
       }
       const note = el("p", "pg-modal-sub");

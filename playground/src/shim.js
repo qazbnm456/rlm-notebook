@@ -82,23 +82,37 @@
     return nb && view(nb, stageOf(id));
   }
 
-  //: Resetting the STAGE is not resetting the demo. The workspace remembers which Studio tab was
-  //: last open (`rlmnb-studio-view`, restored on load), so once a reader has reached the Podcast
-  //: tab every later run starts with it already showing — and "open the Podcast tab" is done before
-  //: it is ever shown, which is how that step went missing. The tour stages this notebook from
-  //: empty, and the view the workspace remembers is part of the state it has to stage.
+  //: THE DEMO STARTS FROM SCRATCH ON EVERY LOAD. Resetting the shim's stage is not enough: the
+  //: workspace persists its own preferences, and this is a teaching page, so anything a reader
+  //: changed last visit must not decide what they see this visit. It went wrong exactly there.
+  //: `rlmnb-studio-view` survives a reload, so once anyone had reached the Podcast tab the tour's
+  //: "open the Podcast tab" step was already satisfied before it was ever shown, and it vanished.
+  //: `rlmnb-podcast-length` is the same shape one step later, and a collapsed or hand-narrowed
+  //: Studio column would strand both.
   //:
-  //: Both the stored value AND the live DOM: Restart does not reload the page, so clearing the key
-  //: alone would leave the panel exactly as it was.
-  const resetStudioView = () => {
-    try {
-      localStorage.removeItem("rlmnb-studio-view");
-    } catch {
-      /* a browser refusing storage is not a reason to fail the reset */
+  //: `rlmnb-ui-lang` and `rlmnb-theme` are deliberately NOT here. Those are how the reader is
+  //: LOOKING at the page rather than anything the tour teaches, and clearing them would undo the
+  //: reader's own toggle every time they refreshed.
+  const WORKSPACE_KEYS = [
+    "rlmnb-studio-view",
+    "rlmnb-studio-collapsed",
+    "rlmnb-studio-width",
+    "rlmnb-podcast-length",
+  ];
+  //: At MODULE SCOPE, and that is what makes it work without touching the DOM: `index.html` loads
+  //: `shim.js` before `app.js`, so the keys are already gone by the time the workspace reads them
+  //: and it initialises from its own defaults. Restart calls `location.reload()`, so it comes back
+  //: through here too.
+  const resetWorkspacePrefs = () => {
+    for (const key of WORKSPACE_KEYS) {
+      try {
+        localStorage.removeItem(key);
+      } catch {
+        /* a browser refusing storage is not a reason to fail the load */
+      }
     }
-    const first = document.querySelector(".studio-view-tab");
-    if (first && !first.classList.contains("is-active")) first.click();
   };
+  resetWorkspacePrefs();
 
   PG.reset = async (id) => {
     if (id) {
@@ -108,7 +122,7 @@
       live.clear();
       stages.clear();
     }
-    resetStudioView();
+    resetWorkspacePrefs();
   };
   PG.scenarios = async () => (await fixtures()).scenarios;
 

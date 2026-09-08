@@ -387,6 +387,32 @@ console.log("\nnothing local or private reaches the published fixture:");
 // The director has a label table of its own, separate from the chrome's. A string in one that
 // NAMES a control from the other has to reach for that control's current label, or a translated
 // interface ends up pointing at a button by its English name.
+// This is a teaching page: nothing a reader changed last visit may decide what they see this
+// visit. `rlmnb-studio-view` surviving a reload is what made the "open the Podcast tab" step
+// vanish, and the podcast length is the same shape one step later.
+console.log("\nthe demo starts from scratch on every load:");
+{
+  const SHIM = readFileSync(join(DIST, "shim.js"), "utf8");
+  const APP = readFileSync(join(DIST, "app.js"), "utf8");
+  const listed = [...SHIM.slice(SHIM.indexOf("const WORKSPACE_KEYS"),
+                                SHIM.indexOf("];", SHIM.indexOf("const WORKSPACE_KEYS")))
+                    .matchAll(/"(rlmnb-[a-z-]+)"/g)].map((m) => m[1]);
+  ok(listed.length >= 4, `${listed.length} workspace keys cleared on load`);
+  // Every key the workspace persists is either cleared or deliberately exempt. A key added later
+  // and forgotten is exactly how this bug arrives again.
+  const owned = [...new Set([...APP.matchAll(/"(rlmnb-[a-z-]+)"/g)].map((m) => m[1]))];
+  const EXEMPT = ["rlmnb-ui-lang", "rlmnb-theme"];  // how the reader LOOKS at it, not what is taught
+  for (const key of owned) {
+    ok(listed.includes(key) || EXEMPT.includes(key),
+       `${key} is ${EXEMPT.includes(key) ? "deliberately kept" : "cleared"}`);
+  }
+  // At module scope, or app.js reads the value before anything clears it.
+  const call = SHIM.indexOf("resetWorkspacePrefs();");
+  ok(call > 0 && call < SHIM.indexOf("PG.reset ="), "cleared at load, before PG.reset is defined");
+  const html = readFileSync(join(DIST, "index.html"), "utf8");
+  ok(html.indexOf("shim.js") < html.indexOf("app.js"), "and shim.js loads before app.js");
+}
+
 console.log("\nthe director never spells another table's label:");
 {
   const DIR = readFileSync(join(DIST, "director.js"), "utf8");
