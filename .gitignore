@@ -37,3 +37,6 @@ __pycache__/
 # Claude Code local overrides (never commit)
 .claude/settings.local.json
 .claude/scheduled_tasks.lock
+
+# Built by playground/build.py — regenerate rather than edit.
+/playground/dist/
