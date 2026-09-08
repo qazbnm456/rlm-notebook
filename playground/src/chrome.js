@@ -36,16 +36,21 @@
   //: `hidden` plus a `[hidden]` rule in `chrome.css` that OUTRANKS the author `display:flex`
   //: (invariant 36 — this project has shipped that exact bug twice, once leaving an invisible
   //: overlay swallowing every click on the page).
+  //: Title and subtitle are FUNCTIONS, read when the modal opens rather than when it is built, so a
+  //: language change between page load and opening it is picked up.
   function modal(titleText, subtitleText, buildBody) {
+    const asText = (v) => (typeof v === "function" ? v() : v);
     const overlay = el("div", "modal-overlay pg-overlay");
     overlay.hidden = true;
     const box = el("div", "modal pg-modal");
-    box.appendChild(el("div", "modal-title", titleText));
-    if (subtitleText) box.appendChild(el("p", "pg-modal-sub", subtitleText));
+    const titleEl = el("div", "modal-title");
+    box.appendChild(titleEl);
+    const subEl = el("p", "pg-modal-sub");
+    box.appendChild(subEl);
     const body = el("div", "pg-modal-body");
     box.appendChild(body);
     const foot = el("div", "pg-modal-foot");
-    const close = el("button", "btn", "Close");
+    const close = el("button", "btn", PG.ui("close"));
     close.type = "button";
     close.addEventListener("click", () => (overlay.hidden = true));
     foot.appendChild(close);
@@ -57,6 +62,9 @@
     document.body.appendChild(overlay);
     return {
       open() {
+        titleEl.textContent = asText(titleText);
+        subEl.textContent = asText(subtitleText);
+        close.textContent = PG.ui("close");
         body.replaceChildren();
         buildBody(body, () => (overlay.hidden = true));
         overlay.hidden = false;
@@ -66,9 +74,8 @@
 
   // --- scenario picker --------------------------------------------------------------------------
   const scenarioModal = modal(
-    "Pick a notebook",
-    "Every scenario is a real notebook from the author's own machine: real sources, real answers, " +
-      "real reasoning traces. Switching reloads the workspace.",
+    () => PG.ui("pickTitle"),
+    () => PG.ui("pickSub"),
     async (body, close) => {
       //: Grouped by OUTPUT language, because the two groups are built from the same source sets and
       //: the comparison between them is the thing worth noticing — a flat grid of six would hide it.
@@ -94,7 +101,7 @@
           card.appendChild(el("p", null, s.blurb));
           if (s.utterances) {
             const meta = el("div", "pg-card-meta");
-            meta.appendChild(el("span", null, `🎧 ${s.utterances}-turn episode`));
+            meta.appendChild(el("span", null, `🎧 ${PG.ui("turnEpisode", s.utterances)}`));
             if (s.audio && s.audio.trimmed) {
               meta.appendChild(
                 el("span", "pg-card-warn",
@@ -115,18 +122,15 @@
         body.appendChild(sec);
       }
       const note = el("p", "pg-modal-sub");
-      note.textContent =
-        "Both groups are built from the same sources. Only RN_OUTPUT_LANGUAGE differs. The prose " +
-        "follows the reader, while every citation quote stays in the source's own words.";
+      note.textContent = PG.ui("pickNote");
       body.appendChild(note);
     }
   );
 
   // --- install ----------------------------------------------------------------------------------
   const installModal = modal(
-    "Install rlm-notebook",
-    "Python 3.11+. Click a command to copy it. A live run additionally needs model credentials and " +
-      "a Deno sandbox (brew install deno).",
+    () => PG.ui("installTitle"),
+    () => PG.ui("installSub"),
     (body) => {
       for (const group of PG.INSTALL) {
         const sec = el("section", "pg-install-group");
@@ -151,7 +155,7 @@
         }
         body.appendChild(sec);
       }
-      const link = el("a", "pg-link", "Full documentation & source on GitHub →");
+      const link = el("a", "pg-link", `${PG.ui("installMore")} →`);
       link.href = REPO;
       link.rel = "noopener";
       link.target = "_blank";
@@ -187,37 +191,30 @@
 
     const badge = el("span", "pg-sim");
     badge.appendChild(el("span", "pg-sim-dot"));
-    badge.appendChild(el("span", null, "SIMULATED"));
-    badge.title =
-      "No server, no model, no network. Real notebooks and real recorded reasoning traces, " +
-      "replayed in your browser.";
+    badge.appendChild(el("span", null, PG.ui("simulated")));
+    badge.title = PG.ui("simulatedTip");
     put(badge);
 
-    put(button("Notebooks", "Switch demo notebook", () => scenarioModal.open()));
+    put(button(PG.ui("notebooks"), PG.ui("notebooksTip"), () => scenarioModal.open()));
     put(
-      button("↺ Restart demo", "Start the guided walkthrough from an empty notebook", async () => {
+      button(PG.ui("restart"), PG.ui("restartTip"), async () => {
         await PG.reset();
         location.reload();
       })
     );
     put(
-      button("↓ Install", "How to install and run it for real", () => installModal.open(),
-             "pg-btn-primary")
+      button(PG.ui("install"), PG.ui("installTip"), () => installModal.open(), "pg-btn-primary")
     );
-    const star = el("a", "header-btn pg-btn pg-btn-star", "★ GitHub");
+    const star = el("a", "header-btn pg-btn pg-btn-star", PG.ui("github"));
     star.href = REPO;
     star.target = "_blank";
     star.rel = "noopener";
-    star.title = "Source, documentation and invariants";
+    star.title = PG.ui("githubTip");
     put(star);
 
     const foot = el("div", "pg-foot");
-    foot.appendChild(
-      el("span", null,
-        "A playground: the real rlm-notebook web UI, running against recorded data in your browser. " +
-        "Nothing is sent anywhere and nothing is stored.")
-    );
-    const a = el("a", null, "See the source →");
+    foot.appendChild(el("span", null, PG.ui("footer")));
+    const a = el("a", null, `${PG.ui("footerLink")} →`);
     a.href = `${REPO}/tree/main/playground`;
     a.target = "_blank";
     a.rel = "noopener";

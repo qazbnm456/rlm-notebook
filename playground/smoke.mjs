@@ -311,14 +311,66 @@ console.log("\nheader chrome actually mounts:");
   await new Promise((r) => setTimeout(r, 40));
   const added = actions.children.filter((n) => (n.className || "").includes("pg-"));
   ok(added.length >= 5, `${added.length} chrome controls inserted into .header-actions`);
+  // Expected labels come from the copy table, not from strings pinned here: this asserts that the
+  // chrome MOUNTED, and rewording a button should not fail a DOM test.
   const labels = added.map((n) => n.textContent || n.className).join(" ");
-  for (const want of ["pg-sim", "Notebooks", "Restart demo", "Install", "GitHub"]) {
-    ok(labels.includes(want), `header has: ${want}`);
-  }
+  const wanted = ["notebooks", "restart", "install", "github"].map((k) => c.rlmPlayground.ui(k));
+  ok(labels.includes("pg-sim"), "header has the SIMULATED badge");
+  for (const want of wanted) ok(labels.includes(want), `header has: ${want}`);
   ok(
     wordmark.children.some((n) => n.className === "pg-wordmark-tag"),
     "wordmark is tagged PLAYGROUND"
   );
+}
+
+// A page that is Chinese in the product and English in the guidance is the state this was reported
+// for. Every user-facing string has to exist in both tables, and a key present in one and missing
+// from the other must fail here rather than surface as a stray English sentence mid-demo.
+console.log("\nno string is half-translated:");
+{
+  const s = { console: { log() {}, warn() {} }, JSON, Math, Object };
+  s.window = s;
+  vm.createContext(s);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), s);
+  const PG = s.rlmPlayground;
+  const SRC = readFileSync(join(DIST, "tour.js"), "utf8");
+
+  // Step copy: every step in SCRIPT must resolve to a non-empty title AND body in BOTH languages.
+  const langs = ["en", "zh-Hant"];
+  let holes = [];
+  for (const step of PG.SCRIPT) {
+    for (const lang of langs) {
+      s.uiLang = () => lang;
+      const [title, body] = PG.text(step.key);
+      if (!title || !body) holes.push(`${step.key}/${lang}`);
+    }
+  }
+  ok(holes.length === 0, `all ${PG.SCRIPT.length} steps have copy in both languages${holes.length ? ` — missing: ${holes.join(", ")}` : ""}`);
+
+  // Chrome copy: compare the two tables key for key.
+  const table = (lang) => {
+    const i = SRC.indexOf(lang === "en" ? "    en: {" : '    "zh-Hant": {');
+    const j = SRC.indexOf("\n    },", i);
+    return new Set([...SRC.slice(i, j).matchAll(/^\s{6}(\w+):/gm)].map((m) => m[1]));
+  };
+  const en = table("en");
+  const zh = table("zh-Hant");
+  const onlyEn = [...en].filter((k) => !zh.has(k));
+  const onlyZh = [...zh].filter((k) => !en.has(k));
+  ok(en.size > 10, `chrome copy table has ${en.size} keys`);
+  ok(onlyEn.length === 0 && onlyZh.length === 0,
+     `chrome keys match${onlyEn.length ? ` — only en: ${onlyEn.join(", ")}` : ""}${onlyZh.length ? ` — only zh: ${onlyZh.join(", ")}` : ""}`);
+
+  // The em-dash rule from /write: it is the strongest AI-tone marker in this register, and the
+  // draft shipped twelve of them.
+  const dashes = [];
+  for (const f of ["tour.js", "chrome.js", "director.js", "shim.js"]) {
+    const src = readFileSync(join(DIST, f), "utf8");
+    for (const m of src.matchAll(/"((?:[^"\\]|\\.)*)"/g)) {
+      if (m[1].includes("\u2014")) dashes.push(`${f}: ${m[1].slice(0, 40)}`);
+    }
+  }
+  ok(dashes.length === 0, `no em-dash in user-facing strings${dashes.length ? ` — ${dashes[0]}` : ""}`);
 }
 
 console.log("\ndirector selectors still match the shipped UI:");

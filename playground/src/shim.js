@@ -133,8 +133,8 @@
       preview: {
         title: origin,
         description:
-          "Added in the playground. Nothing was fetched or parsed — the demo runs entirely in " +
-          "your browser, so answers below still come from the notebook's original sources.",
+          "Added on this demo page, so there is nothing behind it to read. Answers below still " +
+          "come from the notebook's own sources.",
       },
     };
   }

@@ -117,14 +117,20 @@
   //: (invariant 48), so the page is never half-translated. A language the table has no entry for
   //: falls back to English rather than showing a key.
   const TEXT = {
+    // NEVER write a demo limitation in a way that reads as a PRODUCT limitation. This step used to
+    // say "you cannot add your own sources here", which on a product page tells a stranger the
+    // product cannot take their sources, and then explained itself with "fetching, parses and OCR
+    // run on a machine, not a browser tab" — an implementation detail with no referent for someone
+    // who does not yet know what they are looking at. It made the product sound worse than it is.
+    // Say what the product does; the demo boundary is a one-line aside, not an apology.
     sources: {
       en: ["Add the sources",
-           "Press Add source. This notebook's real sources arrive one after another.\n\n" +
-           "You cannot add your own here. Fetching, parsing and OCR all run on a machine, not in " +
-           "a browser tab."],
+           "Press Add source. This notebook's sources arrive one after another.\n\n" +
+           "In your own copy this box takes a URL, pasted text or a PDF, and scanned pages are " +
+           "read with OCR."],
       "zh-Hant": ["加入來源",
-           "按下「加入來源」，這本筆記本真正用的來源會一則一則進來。\n\n" +
-           "這裡不能放你自己的來源。抓取、解析、OCR 都得在機器上跑，瀏覽器分頁做不到。"],
+           "按下「加入來源」，這本筆記本的來源會一則一則進來。\n\n" +
+           "在你自己裝的版本裡，這個欄位可以貼網址、貼文字、上傳 PDF，掃描檔會自動做 OCR。"],
     },
     overview: {
       en: ["Generate the overview",
@@ -178,10 +184,10 @@
     },
     podcastGenerate: {
       en: ["Generate the episode",
-           "Press it. This writes the script, then synthesizes the speech.\n\nOnly the script half " +
-           "can be stopped. Synthesis runs afterwards, on the host."],
+           "Press it. The script is written first, then spoken.\n\nStop is available while the " +
+           "script is being written; once speech synthesis starts it runs to the end."],
       "zh-Hant": ["產生節目",
-           "按下去。會先寫稿，再合成語音。\n\n只有寫稿那段可以中止，合成是之後在主機上跑的。"],
+           "按下去。先寫稿，再唸出來。\n\n寫稿的階段可以按停止；進到語音合成之後就會一路做完。"],
     },
     podcastPlay: {
       en: ["Play it, and watch the transcript",
@@ -210,6 +216,62 @@
     const lang = typeof uiLang === "function" ? uiLang() : "en";
     const entry = TEXT[key] || {};
     return entry[lang] || entry.en || ["", ""];
+  };
+
+  // --- chrome copy ---------------------------------------------------------------------------
+  //: The header, the modals and the footer follow `uiLang()` too. Leaving them English inside a
+  //: Chinese interface is the same half-translated page the script was just fixed for; a reader
+  //: does not care which of these strings the product owns and which the demo added.
+  const UI = {
+    en: {
+      simulated: "SIMULATED",
+      simulatedTip: "No server, no model, no network. Real notebooks and real recorded reasoning, " +
+        "replayed in your browser.",
+      notebooks: "Notebooks", notebooksTip: "Switch demo notebook",
+      restart: "↺ Restart", restartTip: "Start the walkthrough again from an empty notebook",
+      install: "↓ Install", installTip: "How to install and run it for real",
+      github: "★ GitHub", githubTip: "Source, documentation and design notes",
+      pickTitle: "Pick a notebook",
+      pickSub: "Each one is a real notebook: real sources, real answers, real recorded reasoning. " +
+        "Switching reloads the workspace.",
+      pickNote: "Both sets are built from the same sources. Only the output language differs: the " +
+        "writing follows the reader, while every quoted passage stays in the words of its source.",
+      installTitle: "Install rlm-notebook",
+      installSub: "Python 3.11 or newer. Click a command to copy it. A live run also needs model " +
+        "credentials and a Deno sandbox (brew install deno).",
+      installMore: "Full documentation and source on GitHub",
+      close: "Close",
+      footer: "A playground: the rlm-notebook web UI itself, running against recorded data in " +
+        "your browser. Nothing is sent anywhere and nothing is kept.",
+      footerLink: "See how it is built",
+      turnEpisode: (n) => `${n}-turn episode`,
+    },
+    "zh-Hant": {
+      simulated: "示範模式",
+      simulatedTip: "沒有伺服器、沒有模型、沒有連線。真實的筆記本與真實的推理紀錄，在你的瀏覽器裡重播。",
+      notebooks: "筆記本", notebooksTip: "換一本示範筆記本",
+      restart: "↺ 重新開始", restartTip: "從空的筆記本重跑一次導覽",
+      install: "↓ 安裝", installTip: "怎麼實際裝起來用",
+      github: "★ GitHub", githubTip: "原始碼、文件與設計紀錄",
+      pickTitle: "挑一本筆記本",
+      pickSub: "每一本都是真的：真的來源、真的回答、真的推理紀錄。換一本會重新載入工作區。",
+      pickNote: "兩組用的是同一批來源，差別只在輸出語言：文字跟著讀者走，引文則留在來源自己的用字。",
+      installTitle: "安裝 rlm-notebook",
+      installSub: "需要 Python 3.11 以上。點一下指令就會複製。實際執行還需要模型金鑰和 Deno 沙箱" +
+        "（brew install deno）。",
+      installMore: "完整文件與原始碼在 GitHub",
+      close: "關閉",
+      footer: "這是示範頁：rlm-notebook 的網頁介面本體，跑在你的瀏覽器裡，讀的是預先錄好的資料。" +
+        "沒有任何東西被送出，也沒有留下任何東西。",
+      footerLink: "看它是怎麼做的",
+      turnEpisode: (n) => `${n} 輪的節目`,
+    },
+  };
+
+  PG.ui = (key, ...args) => {
+    const lang = typeof uiLang === "function" ? uiLang() : "en";
+    const v = (UI[lang] || UI.en)[key] ?? UI.en[key] ?? "";
+    return typeof v === "function" ? v(...args) : v;
   };
 
   PG.SCRIPT = [
