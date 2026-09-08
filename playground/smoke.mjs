@@ -283,10 +283,18 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
   vm.runInContext(readFileSync(join(DIST, "shim.js"), "utf8"), shc, { filename: "shim.js" });
   const SPG = sh.rlmPlayground;
 
+  // The tour builds ONE notebook up from nothing, and only that one starts empty. Every other
+  // notebook opens complete, because the product's own picker switches in place with no reload to
+  // re-stage anything, so a reader who finished the tour and went browsing must not be handed a
+  // blank workspace.
   const nbId = fixtures.scenarios[0].id;
+  SPG.beginTour(nbId);
   let p0 = await SPG.progress(nbId);
   ok(p0.sources === 0 && !p0.overview && p0.turns === 0,
-     "a fresh notebook starts empty (nothing pre-loaded)");
+     "the tour's own notebook starts empty (nothing pre-loaded)");
+  const other = await SPG.progress(fixtures.scenarios[1].id);
+  ok(other.sources > 0 && other.overview && other.turns > 0,
+     `another notebook opens complete (${other.sources} sources, ${other.turns} turns)`);
 
   const fulfilling = SCRIPT.filter((st) => st.fulfil);
   ok(fulfilling.length >= 4, `${fulfilling.length} steps declare what they fulfil`);
@@ -409,11 +417,6 @@ console.log("\nevery class the chrome creates has a rule:");
   const unstyled = [...created].filter((c) => !new RegExp(`\\.${c}\\b`).test(CSS));
   ok(unstyled.length === 0, `every one has a rule${unstyled.length ? ` — missing: ${unstyled}` : ""}`);
 
-  // The group heading must stay quieter than the titles it files, which is the thing that broke.
-  const head = CSS.slice(CSS.indexOf(".pg-scenario-group h3"), CSS.indexOf(".pg-group-note"));
-  const title = CSS.slice(CSS.indexOf(".pg-pickrow-title"), CSS.indexOf(".pg-pickrow-blurb"));
-  const px = (s) => Number((s.match(/font-size:\s*([\d.]+)px/) || [])[1] || NaN);
-  ok(px(head) < px(title), `heading ${px(head)}px is smaller than a title at ${px(title)}px`);
 }
 
 console.log("\nthe demo starts from scratch on every load:");
@@ -785,7 +788,9 @@ console.log("\nheader chrome actually mounts:");
   ok(!threw, threw || "tour.js + chrome.js evaluate cleanly");
   await new Promise((r) => setTimeout(r, 40));
   const added = actions.children.filter((n) => (n.className || "").includes("pg-"));
-  ok(added.length >= 5, `${added.length} chrome controls inserted into .header-actions`);
+  // Four, not five: the Notebooks button was deleted. The product's own title dropdown is the
+  // notebook picker, and a second one in the header was a second modal to keep working.
+  ok(added.length >= 4, `${added.length} chrome controls inserted into .header-actions`);
   // Expected labels come from the copy table, not from strings pinned here: this asserts that the
   // chrome MOUNTED, and rewording a button should not fail a DOM test.
   const labels = added.map((n) => n.textContent || n.className).join(" ");
@@ -870,6 +875,7 @@ console.log("\ndirector selectors still match the shipped UI:");
     "#podcast-generate": 'id="podcast-generate"',
     "#podcast-body": 'id="podcast-body"',
     "traj-drawer": 'id="traj-drawer"',
+    "notebook-current": 'id="notebook-current"',
     "traj-close": 'id="traj-close"',
     "traj-head": '"traj-head',
     "run-status": '"run-status"',

@@ -66,60 +66,16 @@
   margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border);
 }
 
-/* The group heading is a QUIET LABEL, not a document heading. These two rules were collateral from
-   replacing the card grid: they sat between `.pg-grid` and `.pg-card-warn` and went out with it,
-   which left a bare `<h3>` at the browser's default 1.17em bold and made the language name the
-   loudest thing in the modal, above the notebook titles it is only filing. */
-.pg-scenario-group h3 {
-  display: flex; align-items: baseline; gap: 8px; margin: 0 0 8px;
-  font-size: 11.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase;
-  color: var(--text-faint);
-}
-/* The count is subordinate to the name it follows, so it drops the tracking and the caps that make
-   the name read as a label. */
-.pg-group-note { text-transform: none; letter-spacing: 0; font-weight: 400; font-size: 11px; }
-
-/* A LIST, matching the product's own notebook picker (`.notebook-row`): a column of rows separated
-   by a hairline, each a title line over a quiet line, with the hover on the whole row. The grid of
-   bordered cards this replaces stretched every card to its row's tallest sibling, marooned a lone
-   card beside empty space when a group held three, and put a title and a badge on one line inside a
-   240px column so they squeezed each other. A row has no width to fight over. */
-.pg-picklist {
-  display: flex; flex-direction: column;
-  border: 1px solid var(--border); border-radius: var(--radius-lg);
-  background: var(--surface-1); overflow: hidden;
-}
-.pg-pickrow {
-  display: grid; gap: 4px; padding: 12px 14px; text-align: left;
-  border: 0; border-top: 1px solid var(--border);
-  background: none; color: var(--text); cursor: pointer; font: inherit;
-}
-/* The container owns the outer border, so the first row must not draw a second one on top of it. */
-.pg-pickrow:first-child { border-top: 0; }
-.pg-pickrow:hover { background: var(--surface-2); }
-/* An inset bar rather than a border swap: a border would change the row's height on focus and shunt
-   every row below it by a pixel. */
-.pg-pickrow:focus-visible { outline: none; box-shadow: inset 2px 0 0 var(--accent); }
-.pg-pickrow-line { display: flex; align-items: baseline; gap: 8px; }
-/* The title takes the room it needs and the badge keeps its own; `min-width: 0` is what lets a long
-   title wrap instead of pushing the badge off the end. */
-.pg-pickrow-title { min-width: 0; font-size: 13.5px; font-weight: 600; }
-.pg-pickrow-blurb { margin: 0; color: var(--text-dim); font-size: 12.5px; line-height: 1.55; }
-.pg-pickrow-meta {
-  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-  margin-top: 2px; color: var(--text-faint); font-size: 11.5px;
-}
-.pg-card-warn { color: var(--warn); }
+/* The scenario picker's own styles are GONE with it. The product's notebook dropdown does the job,
+   so there is nothing here to style and nothing here to break: two heading rules were lost as
+   collateral from one edit inside this block, and the block that replaced them was the third
+   attempt at a surface the product already had. */
 .pg-audio-note {
   margin-bottom: 10px; padding: 8px 10px;
   border: 1px solid var(--border); border-left: 2px solid var(--warn);
   border-radius: var(--radius);
   background: var(--surface-2); color: var(--text-dim);
   font-size: 12px; line-height: 1.55;
-}
-.pg-badge {
-  flex: 0 0 auto; align-self: center; padding: 2px 7px; border: 1px solid var(--border-strong); border-radius: 999px;
-  color: var(--text-faint); font-size: 10px; letter-spacing: 0.07em; white-space: nowrap;
 }
 
 .pg-install-group h3 {

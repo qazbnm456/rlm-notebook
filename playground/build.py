@@ -52,77 +52,39 @@ SCENARIOS = [
     #
     # English leads because this is a public product page whose README, repo and install commands
     # are English; the Chinese set is one click away in the scenario picker.
-    # `blurb` is a MAPPING, not a string. It is reader-facing copy in a modal that follows the
-    # interface language, so an English-only value put an English paragraph under a Chinese heading.
-    # `badge` is a KEY into the chrome's copy table rather than a word, for the same reason.
-    #
-    # Only ONE notebook carries a badge. Every other one used to say ENGLISH or 中文, directly under
-    # a section heading that already said so, which is a label that costs a line and tells nobody
-    # anything.
+    # `lang` is the only field here the page still reads: `openInitial` picks the notebook whose
+    # output language matches the reader's interface. The per-scenario blurb and badge went with the
+    # scenario modal that displayed them, and the product's own picker names each notebook by its
+    # real title with its source and turn counts beside it.
     {
         "id": "nb-en-security",
         "lang": "English",
         "label": "AI security & exploits",
-        "blurb": {
-            "en": "Three write-ups on AI-reconstructed exploits and agentic-AI defence. The most "
-            "compact corpus, so a run is quick to follow end to end.",
-            "zh-Hant": "三篇談 AI 重建漏洞利用、以及 agentic AI 防禦的文章。語料最精簡，"
-            "一次執行從頭跟到尾很快。",
-        },
-        "badge": "start",
     },
     {
         "id": "nb-en-harness",
         "lang": "English",
         "label": "LLM vulnerability harnesses",
-        "blurb": {
-            "en": "Four engineering posts on building AI harnesses for vulnerability discovery: "
-            "why the scaffolding around a model matters more than the model.",
-            "zh-Hant": "四篇談怎麼替漏洞挖掘打造 AI harness 的工程文章：模型外面那層骨架，"
-            "比模型本身還要緊。",
-        },
     },
     {
         "id": "nb-en-evolution",
         "lang": "English",
         "label": "Self-improving AI",
-        "blurb": {
-            "en": "A paper and three lab write-ups on evolutionary and self-improving systems.",
-            "zh-Hant": "一篇論文加三篇實驗紀錄，主題是演化式與會自我改進的系統。",
-        },
     },
     {
         "id": "nb-443d7daa",
         "lang": "Traditional Chinese",
         "label": "AI 資安挑戰與漏洞分析",
-        "blurb": {
-            "en": "The same three security sources, answered in Traditional Chinese. Compare it "
-            "with the English notebook above: same corpus, same citations, different reader.",
-            "zh-Hant": "同樣那三份資安來源，改用繁體中文回答。跟上面那本英文的對照著看："
-            "同一批語料、同一組引用，換的只是讀者。",
-        },
     },
     {
         "id": "nb-d22c2a9a",
         "lang": "Traditional Chinese",
         "label": "Trinity 與演化式 AI",
-        "blurb": {
-            "en": "Evolutionary AI in Traditional Chinese, with Japanese source material in the "
-            "corpus: the script and register rules are easiest to see here.",
-            "zh-Hant": "繁體中文的演化式 AI，語料裡還混著日文材料：用字和語感的規則在這本最看得出來。",
-        },
     },
     {
         "id": "nb-6f2d49d3",
         "lang": "Traditional Chinese",
         "label": "LLM 漏洞掃獵框架",
-        "blurb": {
-            "en": "The richest corpus: five sources, a chat thread, a note and a 39-turn episode. "
-            "It predates the natural-register rule, so it still carries the word-for-word phrasing "
-            "that rule now catches. Kept as it was recorded.",
-            "zh-Hant": "語料最豐富的一本：五份來源、一串對話、一則筆記，還有 39 輪的節目。"
-            "它早於自然語感那條規則，所以還帶著後來被擋掉的直譯腔。就照當初錄下來的樣子留著。",
-        },
     },
 ]
 

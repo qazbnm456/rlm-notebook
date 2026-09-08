@@ -49,9 +49,24 @@
   //: visible yet — so Reset is a counter reset, not a reload.
   const stages = new Map();
   const blankStage = () => ({ sources: 0, overview: false, turns: 0, podcast: null });
+  //: `view` clamps with `slice(0, n)`, so Infinity means "everything this notebook actually has".
+  const fullStage = () => ({ sources: Infinity, overview: true, turns: Infinity, podcast: "default" });
+
+  //: The tour builds ONE notebook up from nothing, and that notebook alone starts empty. Every other
+  //: one opens complete, because the reader reaching them has finished the tour and is browsing:
+  //: handing them a blank workspace would read as the demo being broken, not as a lesson.
+  //:
+  //: This is what lets the playground use the PRODUCT's own notebook picker instead of a second one
+  //: bolted onto the header. That picker calls `openNotebook(id)` in place, with no reload to
+  //: re-stage anything, so an unstaged notebook has to be worth looking at on arrival.
+  const tourOwns = new Set();
+  PG.beginTour = (id) => {
+    tourOwns.add(id);
+    stages.set(id, blankStage());
+  };
 
   function stageOf(id) {
-    if (!stages.has(id)) stages.set(id, blankStage());
+    if (!stages.has(id)) stages.set(id, tourOwns.has(id) ? blankStage() : fullStage());
     return stages.get(id);
   }
 
@@ -123,6 +138,10 @@
       stages.clear();
     }
     resetWorkspacePrefs();
+    // A reset re-runs the tour, so whichever notebook it starts on has to go back to empty. The set
+    // is kept: `openInitial` re-announces its pick, and a notebook the tour once owned should not
+    // silently become a browse-it-whole one on the next pass.
+    for (const owned of tourOwns) stages.set(owned, blankStage());
   };
   PG.scenarios = async () => (await fixtures()).scenarios;
 

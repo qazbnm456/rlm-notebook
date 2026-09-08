@@ -72,73 +72,11 @@
     };
   }
 
-  // --- scenario picker --------------------------------------------------------------------------
-  const scenarioModal = modal(
-    () => PG.ui("pickTitle"),
-    () => PG.ui("pickSub"),
-    async (body, close) => {
-      //: Grouped by OUTPUT language, because the two groups are built from the same source sets and
-      //: the comparison between them is the thing worth noticing — a flat grid of six would hide it.
-      const scenarios = await PG.scenarios();
-      const groups = new Map();
-      for (const s of scenarios) {
-        if (!groups.has(s.lang)) groups.set(s.lang, []);
-        groups.get(s.lang).push(s);
-      }
-      for (const [lang, items] of groups) {
-        const sec = el("section", "pg-scenario-group");
-        // The heading is the LANGUAGE, translated. `lang` stays English because it is the grouping
-        // KEY (and the fixture's own field); what a reader sees comes from the copy table.
-        const head = el("h3", null, PG.ui(lang === "English" ? "groupEn" : "groupZh"));
-        head.appendChild(el("span", "pg-group-note", PG.ui("groupCount", items.length)));
-        sec.appendChild(head);
-        // A LIST, not a grid of cards. The product's own notebook picker (`.notebook-row`) is a
-        // dense column of rows: a title line, a quiet line under it, hover on the row. The grid this
-        // replaces stretched every card to its row's tallest sibling, left a lone card marooned
-        // beside empty space, and put the title and a badge on one line inside a 240px column so
-        // they fought for it.
-        const list = el("div", "pg-picklist");
-        for (const s of items) {
-          const row = el("button", "pg-pickrow");
-          row.type = "button";
-          const line = el("div", "pg-pickrow-line");
-          line.appendChild(el("strong", "pg-pickrow-title", s.title || s.label));
-          // Only a badge that SAYS something. Every row used to carry its own language, directly
-          // under a heading that had just said it.
-          if (s.badge) line.appendChild(el("span", "pg-badge", PG.ui(`badge.${s.badge}`)));
-          row.appendChild(line);
-          const blurb = s.blurb && typeof s.blurb === "object"
-            ? s.blurb[uiLang()] || s.blurb.en
-            : s.blurb;
-          if (blurb) row.appendChild(el("p", "pg-pickrow-blurb", blurb));
-          if (s.utterances) {
-            const meta = el("div", "pg-pickrow-meta");
-            meta.appendChild(el("span", null, `\u266a ${PG.ui("turnEpisode", s.utterances)}`));
-            if (s.audio && s.audio.trimmed) {
-              meta.appendChild(
-                el("span", "pg-card-warn",
-                   `audio capped at ${Math.round(s.audio.seconds / 60)} min of ${Math.round(
-                     (s.audio.full_seconds || 0) / 60)}`)
-              );
-            }
-            row.appendChild(meta);
-          }
-          row.addEventListener("click", () => {
-            close();
-            location.hash = `#${s.id}`;
-            location.reload();
-          });
-          list.appendChild(row);
-        }
-        sec.appendChild(list);
-        body.appendChild(sec);
-      }
-      const note = el("p", "pg-modal-sub");
-      note.textContent = PG.ui("pickNote");
-      body.appendChild(note);
-    }
-  );
-
+  // The scenario picker was DELETED. The product already has a notebook picker: the title
+  // dropdown, which lists every notebook with its source and turn counts and switches on click. A
+  // second one in the header meant a second modal, a second stylesheet and a second set of bugs, all
+  // to show the same six notebooks less well. The shim answers `GET /notebooks` with all of them, so
+  // the product's own control does the job with nothing added.
   // --- install ----------------------------------------------------------------------------------
   const installModal = modal(
     () => PG.ui("installTitle"),
@@ -207,7 +145,6 @@
     badge.title = PG.ui("simulatedTip");
     put(badge);
 
-    put(button(PG.ui("notebooks"), PG.ui("notebooksTip"), () => scenarioModal.open()));
     put(
       button(PG.ui("restart"), PG.ui("restartTip"), async () => {
         await PG.reset();
@@ -264,6 +201,9 @@
       scenarios[0];
     if (!pick) return;
     location.hash = `#${pick.id}`;
+    // Claim it for the tour BEFORE opening it, or the shim hands back a fully-populated notebook and
+    // step 1 has nothing to add.
+    if (typeof PG.beginTour === "function") PG.beginTour(pick.id);
     if (typeof window.openNotebook === "function") await window.openNotebook(pick.id);
   }
 

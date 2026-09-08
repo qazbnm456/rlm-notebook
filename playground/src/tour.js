@@ -246,12 +246,13 @@
     },
     compare: {
       en: ["Compare the two languages",
-           "Open Notebooks in the header. The English and Chinese sets use the same sources. Only " +
-           "the output language differs.\n\nThe writing follows the reader. Every quoted passage " +
-           "stays in the words of its source."],
+           "The notebook name at the top left is a picker. Six notebooks: three answered in " +
+           "English, three in Traditional Chinese, built from the same sources.\n\nOnly the " +
+           "output language differs. The writing follows the reader; every quoted passage stays " +
+           "in the words of its source."],
       "zh-Hant": ["比一下兩種語言",
-           "打開上面的 Notebooks。英文和中文兩組用的是同一批來源，差別只在輸出語言。\n\n" +
-           "文字跟著讀者走，引文則留在來源自己的用字。"],
+           "左上角那個筆記本名字可以點開換一本。六本：三本用英文回答，三本用繁體中文，來源是同一批。" +
+           "\n\n差別只在輸出語言。文字跟著讀者走，引文則留在來源自己的用字。"],
     },
   };
 
@@ -273,17 +274,9 @@
       simulated: "SIMULATED",
       simulatedTip: "No server, no model, no network. Real notebooks and real recorded reasoning, " +
         "replayed in your browser.",
-      notebooks: "Notebooks", notebooksTip: "Switch demo notebook",
       restart: "↺ Restart", restartTip: "Start the walkthrough again from an empty notebook",
       install: "↓ Install", installTip: "How to install and run it for real",
       github: "★ GitHub", githubTip: "Source, documentation and design notes",
-      groupEn: "English", groupZh: "Traditional Chinese",
-      "badge.start": "START HERE",
-      pickTitle: "Pick a notebook",
-      pickSub: "Each one is a real notebook: real sources, real answers, real recorded reasoning. " +
-        "Switching reloads the workspace.",
-      pickNote: "Both sets are built from the same sources. Only the output language differs: the " +
-        "writing follows the reader, while every quoted passage stays in the words of its source.",
       installTitle: "Install rlm-notebook",
       installSub: "Python 3.11 or newer. Click a command to copy it. A live run also needs model " +
         "credentials and a Deno sandbox (brew install deno).",
@@ -293,20 +286,13 @@
         "your browser. Nothing is sent anywhere and nothing is kept.",
       footerLink: "See how it is built",
       turnEpisode: (n) => `${n}-turn episode`,
-      groupCount: (n) => `${n} notebook${n === 1 ? "" : "s"}`,
     },
     "zh-Hant": {
       simulated: "示範模式",
       simulatedTip: "沒有伺服器、沒有模型、沒有連線。真實的筆記本與真實的推理紀錄，在你的瀏覽器裡重播。",
-      notebooks: "筆記本", notebooksTip: "換一本示範筆記本",
       restart: "↺ 重新開始", restartTip: "從空的筆記本重跑一次導覽",
       install: "↓ 安裝", installTip: "怎麼實際裝起來用",
       github: "★ GitHub", githubTip: "原始碼、文件與設計紀錄",
-      groupEn: "英文", groupZh: "繁體中文",
-      "badge.start": "從這裡開始",
-      pickTitle: "挑一本筆記本",
-      pickSub: "每一本都是真的：真的來源、真的回答、真的推理紀錄。換一本會重新載入工作區。",
-      pickNote: "兩組用的是同一批來源，差別只在輸出語言：文字跟著讀者走，引文則留在來源自己的用字。",
       installTitle: "安裝 rlm-notebook",
       installSub: "需要 Python 3.11 以上。點一下指令就會複製。實際執行還需要模型金鑰和 Deno 沙箱" +
         "（brew install deno）。",
@@ -316,7 +302,6 @@
         "沒有任何東西被送出，也沒有留下任何東西。",
       footerLink: "看它是怎麼做的",
       turnEpisode: (n) => `${n} 輪的節目`,
-      groupCount: (n) => `${n} 本`,
     },
   };
 
@@ -423,7 +408,10 @@
         const a = document.querySelector("#podcast-body audio");
         return !!a && a.currentTime > 1.5;
       } },
-    { id: "compare", key: "compare", target: ".pg-btn, .header-btn", side: "bottom", align: "end",
+    // The PRODUCT's notebook picker, not a button the playground added. There used to be a second
+    // one in the header opening a modal of its own; the dropdown already lists all six with their
+    // source and turn counts, and switching is what it is for.
+    { id: "compare", key: "compare", target: "#notebook-current", side: "bottom", align: "start",
       done: () => false, last: true },
   ];
 
