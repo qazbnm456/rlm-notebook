@@ -156,9 +156,31 @@
 .driver-popover.pg-pop .driver-popover-arrow-side-right { border-right-color: var(--surface-1); }
 .driver-popover.pg-pop .driver-popover-arrow-side-top { border-top-color: var(--surface-1); }
 .driver-popover.pg-pop .driver-popover-arrow-side-bottom { border-bottom-color: var(--surface-1); }
-/* The spotlit control MUST stay clickable — the reader is being asked to press it. driver.js cuts a
+/* The spotlit control MUST stay clickable: the reader is being asked to press it. driver.js cuts a
  * hole in its own overlay; this only makes sure nothing of ours is stacked over that hole. */
 .driver-active-element { z-index: 10000; }
+
+/* THE PLAYGROUND'S OWN CHROME HAS TO OPT BACK IN. driver.js does not block clicks with an overlay
+ * that sits on top; it does it in CSS:
+ *
+ *     .driver-active * { pointer-events: none }
+ *     .driver-active .driver-active-element, .driver-popover { pointer-events: auto }
+ *
+ * so EVERY element on the page is inert except the spotlit control and driver's own popover. The
+ * guided panel is neither, which is why its buttons did nothing and its text could not be selected.
+ * Raising z-index did not help and never could have: nothing was covering it.
+ *
+ * The selectors below are TWO tokens where driver's is one class plus the universal selector, so
+ * they win on specificity regardless of source order — the same reasoning invariant 36 records for
+ * `[hidden]` guards in the product's own stylesheet. */
+.driver-active .pg-tour,
+.driver-active .pg-tour *,
+.driver-active .pg-foot,
+.driver-active .pg-foot *,
+.driver-active .pg-overlay,
+.driver-active .pg-overlay * {
+  pointer-events: auto;
+}
 
 /* --- footer note --------------------------------------------------------------------------------- */
 .pg-foot {

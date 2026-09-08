@@ -245,6 +245,42 @@ console.log("\nheadline demos are present in every scenario:");
 // when the reference node is not a child of the node you called it on. `#settings-open` lives
 // inside `<div class="header-actions">`, so inserting into `<header>` threw NotFoundError, mount()
 // died, and `openInitial()` and the director never ran — the page rendered as the bare product.
+// driver.js disables the whole page with `.driver-active * { pointer-events: none }` and re-enables
+// only the spotlit element and its own popover. Anything of ours that must stay usable while the
+// tour runs has to opt back in with a rule that BEATS that one on specificity — comparing by string
+// would accept a rule that loses the cascade, so this computes it, the way the product's own
+// stylesheet tripwires do.
+console.log("\nplayground chrome stays interactive during the tour:");
+{
+  const CSS = readFileSync(join(DIST, "chrome.css"), "utf8");
+  // (ids, classes/attrs/pseudo-classes, elements). The universal selector contributes nothing,
+  // which is exactly why driver's rule is weak enough to override.
+  const spec = (sel) => [
+    (sel.match(/#[\w-]+/g) || []).length,
+    (sel.match(/\.[\w-]+|\[[^\]]+\]|:[a-z-]+(?!\()/g) || []).length,
+    (sel.match(/(^|[\s>+~])[a-z]+/g) || []).length,
+  ];
+  const beats = (a, b) => a[0] !== b[0] ? a[0] > b[0] : a[1] !== b[1] ? a[1] > b[1] : a[2] >= b[2];
+  const DRIVER = spec(".driver-active *");
+
+  // Rules in chrome.css that set `pointer-events: auto`.
+  const enabling = [];
+  for (const m of CSS.matchAll(/([^{}]+)\{([^}]*)\}/g)) {
+    if (!/pointer-events:\s*auto/.test(m[2])) continue;
+    for (const sel of m[1].split(",")) enabling.push(sel.trim());
+  }
+  ok(enabling.length > 0, `${enabling.length} selectors re-enable pointer events`);
+
+  // Everything the reader must be able to click or select while a step is spotlit.
+  for (const cls of ["pg-tour", "pg-foot", "pg-overlay"]) {
+    const covering = enabling.filter((s) => s.includes(`.${cls}`) && s.includes(".driver-active"));
+    const strong = covering.filter((s) => beats(spec(s), DRIVER));
+    ok(strong.length > 0,
+       `.${cls} opts back in and outranks .driver-active * ` +
+       `(${strong.length}/${covering.length} rules win the cascade)`);
+  }
+}
+
 console.log("\nheader chrome actually mounts:");
 {
   const nodes = [];
