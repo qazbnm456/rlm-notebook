@@ -748,6 +748,8 @@ console.log("\ndirector selectors still match the shipped UI:");
     "#podcast-generate": 'id="podcast-generate"',
     "#podcast-body": 'id="podcast-body"',
     "traj-drawer": 'id="traj-drawer"',
+    "traj-close": 'id="traj-close"',
+    "traj-head": '"traj-head',
     "run-status": '"run-status"',
     "run-log": '"run-log"',
     "chat-history": 'id="chat-history"',

@@ -176,6 +176,15 @@
            "按答案下面的 ⌁ 標記。\n\n裡面看得到：模型每一輪規劃的原話、照實際耗時縮放的工具時間軸、" +
            "token 用量，還有驗證器在放行之前退回過什麼。按 Esc 關掉。"],
     },
+    traceClose: {
+      en: ["Look around, then close it",
+           "The transport replays the run at the speed it really ran, and \u2922 opens the drawer " +
+           "full screen.\n\nPress \u2715 or Esc when you have seen enough. The workspace is " +
+           "underneath, and the next question needs it back."],
+      "zh-Hant": ["看完再關掉",
+           "上面的播放列會照這次執行真正的耗時重播，\u2922 可以展開成全螢幕。\n\n看夠了就按 " +
+           "\u2715 或 Esc。工作區在下面，下一題要用到。"],
+    },
     ask2: {
       en: ["Ask a follow-up",
            "Press Enter again.\n\nEarlier turns are context, not evidence. This question can work " +
@@ -328,7 +337,11 @@
     { id: "watch-ask", key: "watchAsk", target: ".run-status, .run-log, .chat-history",
       side: "top", align: "start", dwell: true, kind: "ask",
       done: () => !PG.isRunning("ask") },
-    { id: "trace", key: "trace", side: "top", align: "start",
+    // NOT `side: "top"`. The pill sits a little way below a SHORT answer, so the chat scroller has
+    // nothing to scroll and there is no room above it; driver fell back to overlaying the popover,
+    // which is the placement that draws no arrow at all. The pill is at the LEFT of a wide column,
+    // so the room is sideways, which is what `overview` and `watch` already use.
+    { id: "trace", key: "trace", side: "right", align: "start",
       // The ANSWER's pill, not the overview's. `.ticker-affordance` alone matched whichever
       // rendered first, which is the overview's, so the spotlight landed on a block the step is not
       // talking about.
@@ -336,6 +349,14 @@
       // strip across the answer instead of ringing the pill. The button inside it is the control.
       target: ".turn:last-of-type .ticker-toggle, .turn .ticker-toggle, .ticker-toggle",
       done: () => !document.getElementById("traj-drawer").hidden },
+    // The drawer is 80vh of fixed-position panel over the whole workspace, so leaving it open does
+    // not merely look untidy: the NEXT step points at the composer's send button, which is behind
+    // it. A tour that opens something has to close it again before it asks for anything else.
+    // Targets `#traj-close` rather than the drawer, because `.driver-active *` kills pointer events
+    // on everything but the spotlit element and its descendants — spotlighting the whole drawer
+    // would work too, but the reader is being asked to press ONE control.
+    { id: "trace-close", key: "traceClose", target: "#traj-close, .traj-head", side: "bottom",
+      align: "end", done: () => document.getElementById("traj-drawer").hidden },
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
       fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
     { id: "podcast-tab", key: "podcastTab", side: "left", align: "start",
