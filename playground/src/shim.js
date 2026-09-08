@@ -310,8 +310,25 @@
   // produced for this notebook, after a delay long enough that the run status, the Stop button and
   // the live ticker all behave the way they do in the product — a run that returned instantly would
   // hide the entire "watch it think" surface this page exists to show.
-  const RUN_MS = 2600;
+  //: Long enough to WATCH. At 2.6s the ticker replayed ten real trace events in 260ms each, which
+  //: is faster than anyone can read, and the guided step advanced before the reader had looked at
+  //: the thing it had just told them to look at. Real runs here took 57s to 262s; this is not an
+  //: attempt to be realistic, just to be legible.
+  const RUN_MS = 7000;
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  //: In-flight runs, so the guided script can hold a step open for exactly as long as the run lasts
+  //: instead of guessing at a duration.
+  let inFlight = 0;
+  PG.isRunning = () => inFlight > 0;
+  const during = async (ms) => {
+    inFlight += 1;
+    try {
+      await sleep(ms);
+    } finally {
+      inFlight -= 1;
+    }
+  };
 
   route("POST", `${NB}/ask`, async (m, req) => {
     const id = decodeURIComponent(m[1]);
@@ -319,7 +336,7 @@
     const st = stageOf(id);
     const body = await req.json();
     PG.announce(body.run_id, id, "ask");
-    await sleep(RUN_MS);
+    await during(RUN_MS);
     // The reader is guided to send the question this notebook really asked, so the turn revealed is
     // the NEXT recorded one. A question typed freehand still lands on it — with the recorded
     // question kept, because the recorded ANSWER is the one thing here that cannot be improvised.
@@ -341,7 +358,7 @@
     const st = stageOf(id);
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, id, "overview");
-    await sleep(RUN_MS);
+    await during(RUN_MS);
     st.overview = true;
     return json(view(nb, st));
   });
@@ -350,7 +367,7 @@
     const nb = await notebook(decodeURIComponent(m[1]));
     const body = await req.json().catch(() => ({}));
     PG.announce(body.run_id, nb.id, `guide:${m[2]}`);
-    await sleep(RUN_MS);
+    await during(RUN_MS);
     return json(PG.guide(nb, m[2]));
   });
 
@@ -363,7 +380,7 @@
     // Synthesis is the slow half in the real product (invariant 43: chatterbox measured 33x
     // edge-tts), so generating an episode waits noticeably longer than a chat turn. The wait is
     // part of what the demo is honest about.
-    await sleep(RUN_MS * 1.6);
+    await during(RUN_MS * 1.6);
     // This notebook holds ONE recorded episode at ONE tier (invariant 42). Whichever length button
     // was pressed, the episode returned is the recorded one — and the page names its real tier
     // rather than implying the button re-generated it.

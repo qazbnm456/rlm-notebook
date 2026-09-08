@@ -234,6 +234,8 @@
       if (step !== this.armed) {
         this.armed = step;
         this.missed = 0;
+        this.sawRun = false;
+        this.waitedFor = 0;
         this.clearSpotlight();
         this.paint(step);
         // Pre-fill the composer so the reader presses send rather than typing a question the demo
@@ -255,6 +257,17 @@
         done = !!step.done(progress);
       } catch {
         done = false;
+      }
+      // A DWELL step ends when a run ends, so it must first SEE one start. Without this it is
+      // already "done" on arrival — no run is in flight yet — and skips past the very thing it
+      // exists to hold the reader on.
+      if (step.dwell) {
+        if (PG.isRunning()) this.sawRun = true;
+        // Hold for a run, but not forever. "Do it for me" fulfils the previous step with no run at
+        // all, and a dwell that waits unconditionally would strand the reader on a step whose whole
+        // job is to show something that is never going to happen.
+        this.waitedFor = (this.waitedFor || 0) + 1;
+        if (!this.sawRun && this.waitedFor < Math.ceil(2500 / POLL_MS)) done = false;
       }
       if (done && !step.last) {
         // A `repeat` step (streaming the sources in) presses the control for the reader after the

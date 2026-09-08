@@ -143,6 +143,15 @@
            "按中間欄的「✨ 產生概覽」。\n\n這是真實的模型執行，會給你整份語料的摘要和幾個值得先問的問題。" +
            "狀態列跑過去的推理，是當初產出它時錄下來的。"],
     },
+    watch: {
+      en: ["Watch it work",
+           "This is the live reasoning trace: the model's own words, step by step, as the run " +
+           "goes.\n\nThe dot pulses while it is working and Stop is real. The tour waits here " +
+           "until the run finishes."],
+      "zh-Hant": ["看它跑",
+           "這是即時的推理軌跡：模型自己的話，一步一步跟著執行走。\n\n" +
+           "圓點在跑的時候會閃，「停止」是真的可以按的。導覽會停在這裡，等這次執行結束。"],
+    },
     ask1: {
       en: ["Ask the first question",
            "The question is already typed. Press Enter to send it.\n\nEvery claim in the answer " +
@@ -295,8 +304,17 @@
       // Built at runtime by `renderChatOverview` (`.chat-starter` wrapping a `.btn`), so the
       // selector has to match what app.js CREATES, not the static markup.
       target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button, #chat-overview",
-      done: (p) => p.overview,
+      // Hands over when the run STARTS, not when it finishes. If this waited for the result, the
+      // dwell step after it would arrive with the run already over and nothing left to watch.
+      done: (p) => p.overview || PG.isRunning(),
     },
+    // A step of its OWN, held open for exactly as long as the run lasts. Telling someone to watch
+    // the reasoning and then advancing the moment the result lands gives them nothing to watch;
+    // `done` reads the shim's in-flight count, so this ends when the run ends rather than after a
+    // guessed number of seconds. "Do it for me" still skips it.
+    { id: "watch", key: "watch", target: ".run-status, .run-log, #chat-overview",
+      side: "right", align: "start", dwell: true,
+      done: () => !PG.isRunning() },
     { id: "ask1", key: "ask1", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[0],
       fulfil: "turn1", done: (p) => p.turns >= 1 },
     { id: "trace", key: "trace", side: "right", align: "start",

@@ -308,6 +308,40 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
   ok(!!end.podcast, "podcast revealed");
 }
 
+// A dwell step holds the reader on a run while it happens. Two ways it can go wrong and both are
+// silent: handing over too late (the run is already finished, so there is nothing to watch) and
+// holding unconditionally (no run is coming, so it never releases).
+console.log("\nthe dwell step cannot strand the reader:");
+{
+  const s = { console: { log() {}, warn() {} }, JSON, Math, Object };
+  s.window = s;
+  vm.createContext(s);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), s);
+  const SCRIPT = s.rlmPlayground.SCRIPT;
+  const dwell = SCRIPT.filter((st) => st.dwell);
+  ok(dwell.length > 0, `${dwell.length} dwell step(s)`);
+
+  for (const d of dwell) {
+    const i = SCRIPT.indexOf(d);
+    const before = SCRIPT[i - 1];
+    ok(!!before, `${d.id} has a step before it`);
+    // The step before must release WHILE the run is in flight, or the dwell arrives too late.
+    s.rlmPlayground.isRunning = () => true;
+    let releasesOnStart = false;
+    try { releasesOnStart = !!before.done({ overview: false, turns: 0, sources: 0, sourcesTotal: 0 }); }
+    catch { releasesOnStart = false; }
+    ok(releasesOnStart, `${before.id} hands over when the run STARTS, not when it ends`);
+    // And the dwell itself must report done once nothing is running, so the director's own
+    // grace counter is the only thing holding it.
+    s.rlmPlayground.isRunning = () => false;
+    ok(!!d.done({}), `${d.id} releases once the run is over`);
+  }
+
+  // The director must bound the wait rather than trust a run to arrive.
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8");
+  ok(/waitedFor[\s\S]{0,200}POLL_MS/.test(DIR), "the dwell wait is bounded in the director");
+}
+
 console.log("\nplayground chrome stays interactive during the tour:");
 {
   const CSS = readFileSync(join(DIST, "chrome.css"), "utf8");
