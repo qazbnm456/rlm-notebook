@@ -92,6 +92,18 @@
           cardHead.appendChild(el("span", "pg-badge", s.badge));
           card.appendChild(cardHead);
           card.appendChild(el("p", null, s.blurb));
+          if (s.utterances) {
+            const meta = el("div", "pg-card-meta");
+            meta.appendChild(el("span", null, `🎧 ${s.utterances}-turn episode`));
+            if (s.audio && s.audio.trimmed) {
+              meta.appendChild(
+                el("span", "pg-card-warn",
+                   `audio capped at ${Math.round(s.audio.seconds / 60)} min of ${Math.round(
+                     (s.audio.full_seconds || 0) / 60)}`)
+              );
+            }
+            card.appendChild(meta);
+          }
           card.addEventListener("click", () => {
             close();
             location.hash = `#${s.id}`;
@@ -262,10 +274,32 @@
     if (typeof window.openNotebook === "function") await window.openNotebook(pick.id);
   }
 
+  //: A capped episode still shows its WHOLE transcript, so its later lines point past the end of
+  //: the audio. Said once, near the player, rather than left as a thing that silently does nothing
+  //: when clicked — the transcript's click-to-seek is one of the behaviours this page exists to
+  //: demonstrate, and a dead click would read as a bug in the product.
+  async function noteTrimmedAudio() {
+    const scenarios = await PG.scenarios();
+    const id = decodeURIComponent(location.hash.replace(/^#/, ""));
+    const s = scenarios.find((x) => x.id === id) || scenarios[0];
+    if (!s || !s.audio || !s.audio.trimmed) return;
+    const body = document.getElementById("podcast-body");
+    if (!body || body.querySelector(".pg-audio-note")) return;
+    const note = el("div", "pg-audio-note");
+    note.textContent =
+      `Playground note: the transcript is the complete ${s.utterances}-turn episode, but the audio ` +
+      `is capped at ${Math.round(s.audio.seconds / 60)} minutes for this page. Lines past that ` +
+      `point still highlight and are still clickable — there is just no audio left to seek to.`;
+    body.prepend(note);
+  }
+
   async function start() {
     mount();
     try {
       await openInitial();
+      // The Podcast panel renders lazily, so re-check when Studio tabs change rather than once.
+      document.addEventListener("click", () => setTimeout(noteTrimmedAudio, 60), true);
+      await noteTrimmedAudio();
     } catch (err) {
       console.warn("playground: could not open the initial notebook", err);
     }

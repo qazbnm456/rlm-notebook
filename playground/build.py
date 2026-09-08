@@ -230,28 +230,53 @@ def build_index() -> str:
     return html
 
 
-def trim_audio(nb_id: str, dest: Path, seconds: int) -> bool:
+def _duration_s(path: Path) -> float:
+    if not shutil.which("ffprobe"):
+        return 0.0
+    out = subprocess.run(
+        ["ffprobe", "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(path)],
+        capture_output=True, text=True, check=False,
+    ).stdout.strip()
+    try:
+        return float(out)
+    except ValueError:
+        return 0.0
+
+
+def trim_audio(nb_id: str, dest: Path, seconds: int) -> dict | None:
+    """Copy or trim the episode, and REPORT whether it was cut.
+
+    `preload="none"` (invariant 42) means the browser fetches audio only when someone presses play,
+    so page weight is not the constraint it looks like — the cap is generous, and a `short` episode
+    usually arrives whole. What the cap does create is a transcript longer than its audio: a `long`
+    episode's later lines would seek past the end and silently do nothing. The transcript is NOT
+    truncated to match (that would understate the tier the episode is demonstrating), so the flag
+    returned here is what lets the page say the audio stops early instead of looking broken."""
     src = NOTEBOOKS / "audio" / f"{nb_id}.mp3"
     if not src.exists():
-        return False
-    if seconds <= 0 or not shutil.which("ffmpeg"):
+        return None
+    full = _duration_s(src)
+    if seconds <= 0 or not shutil.which("ffmpeg") or (full and full <= seconds):
         shutil.copy2(src, dest)
-        return True
-    # Re-encoded low and short on purpose: a landing page that ships 14MB of audio is a landing page
-    # nobody waits for. The transcript is the artifact; the audio only has to prove it is real.
+        return {"seconds": round(full, 1), "trimmed": False}
     subprocess.run(
         ["ffmpeg", "-y", "-loglevel", "error", "-i", str(src), "-t", str(seconds),
          "-b:a", "64k", "-ac", "1", str(dest)],
         check=True,
     )
-    return True
+    return {"seconds": float(seconds), "trimmed": True, "full_seconds": round(full, 1)}
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument("--out", default=str(Path(__file__).resolve().parent / "dist"))
-    ap.add_argument("--audio-seconds", type=int, default=75,
-                    help="0 keeps the full episode; the default trims for page weight")
+    ap.add_argument("--deploy", metavar="DIR",
+                    help="also mirror the build into DIR (e.g. a GitHub Pages checkout). Replaces "
+                         "DIR's contents; DIR is created if absent.")
+    ap.add_argument("--audio-seconds", type=int, default=240,
+                    help="cap per episode in seconds; 0 keeps every episode whole. A shorter "
+                         "episode is never padded or cut, so `short` tiers usually arrive intact.")
     args = ap.parse_args()
 
     out = Path(args.out)
@@ -272,14 +297,27 @@ def main() -> int:
         fixtures["notebooks"][nb_id] = response
         fixtures["sources"][nb_id] = texts
         fixtures["runs"].update(precompute_runs(nb_id))
-        has_audio = trim_audio(nb_id, out / "audio" / f"{nb_id}.mp3", args.audio_seconds)
-        fixtures["scenarios"].append(
-            {**scenario, "title": response.get("title"), "audio": has_audio}
-        )
+        audio = trim_audio(nb_id, out / "audio" / f"{nb_id}.mp3", args.audio_seconds)
+        pod = response.get("podcast") or {}
+        fixtures["scenarios"].append({
+            **scenario,
+            "title": response.get("title"),
+            "audio": audio,
+            "utterances": len(pod.get("utterances") or []),
+        })
 
     (out / "fixtures.json").write_text(
         json.dumps(fixtures, ensure_ascii=False, separators=(",", ":")), encoding="utf-8"
     )
+
+    if args.deploy:
+        # A mirror, not a merge: a stale file left behind from a previous build is exactly the
+        # thing that makes a static site serve a mix of two versions.
+        target = Path(args.deploy).expanduser()
+        if target.exists():
+            shutil.rmtree(target)
+        shutil.copytree(out, target)
+        print(f"deployed -> {target}")
 
     total = sum(p.stat().st_size for p in out.rglob("*") if p.is_file())
     print(f"built {out}")

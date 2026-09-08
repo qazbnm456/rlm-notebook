@@ -91,8 +91,12 @@ The output is plain static files with no build step and no absolute paths, so it
 static host at any sub-path:
 
 ```
-cp -R playground/dist/ ~/Documents/qazbnm456.github.io/rlm-notebook/
+uv run --extra api python playground/build.py \
+    --deploy ~/Documents/qazbnm456.github.io/rlm-notebook
 ```
+
+`--deploy` MIRRORS rather than merges — it replaces the target directory, because a stale file left
+from a previous build is exactly what makes a static site serve a mix of two versions.
 
 `build_index()` rewrites `/style.css` → `./style.css`; the app's paths are absolute because the
 server mounts assets at the root, and a Pages sub-directory is not the root.

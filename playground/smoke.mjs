@@ -202,6 +202,40 @@ ok(Object.keys(fixtures.runs).length > 0, `${Object.keys(fixtures.runs).length} 
 const withTicker = Object.values(fixtures.runs).filter((r) => r.ticker.some((e) => e && e.detail));
 ok(withTicker.length > 0, `${withTicker.length} runs carry real reasoning text`);
 
+// The product page leads with three demos — a grounded answer, the Trajectory drawer, and the
+// podcast — so "does the page actually contain them" is a requirement, not a nicety. A scenario
+// that quietly lost its overview or its trace would still render; it would just demo nothing.
+console.log("\nheadline demos are present in every scenario:");
+{
+  // Tier boundaries are invariant 63's: short 12-18 turns, default 30-45, long 60-90.
+  const tier = (n) => (n <= 20 ? "short" : n <= 50 ? "default" : "long");
+  const seen = new Map();
+  for (const s of fixtures.scenarios) {
+    const nbf = fixtures.notebooks[s.id];
+    const turns = nbf.turns.length;
+    const pod = nbf.podcast;
+    const runs = Object.keys(fixtures.runs).filter((r) => r.startsWith(`${s.id}-`)).length;
+    const label = `${s.lang.slice(0, 2)}/${s.id.replace(/^nb-(en-)?/, "")}`;
+    ok(turns >= 1, `${label}: ${turns} Q&A turn(s)`);
+    ok(!!nbf.overview, `${label}: has an overview`);
+    ok(!!pod && pod.utterances.length > 0, `${label}: ${pod?.utterances.length || 0}-turn podcast`);
+    ok(
+      !!pod && (pod.offsets || []).length === (pod.utterances || []).length,
+      `${label}: offsets match utterances (timed transcript + click-to-seek)`
+    );
+    ok(runs > 0, `${label}: ${runs} recorded run(s) for the Trajectory drawer`);
+    if (pod) {
+      const key = `${s.lang} ${tier(pod.utterances.length)}`;
+      seen.set(key, (seen.get(key) || 0) + 1);
+    }
+  }
+  for (const lang of ["English", "Traditional Chinese"]) {
+    for (const want of ["short", "default", "long"]) {
+      ok(seen.has(`${lang} ${want}`), `tier covered: ${lang} ${want}`);
+    }
+  }
+}
+
 console.log("\naudio rewrite:");
 const media = new sandbox.HTMLMediaElement();
 media.src = `/notebooks/${nb}/audio/file?v=1`;
