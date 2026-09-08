@@ -202,17 +202,40 @@
     //: The popover follows its target; the panel is pinned bottom-right. On any step whose control
     //: sits low and right they land on each other. Measured after each highlight rather than
     //: guessed per step, because where the popover ends up depends on the viewport.
+    //: The panel is pinned bottom-right and the popover follows its target, so on some steps they
+    //: land on each other. A single fixed escape direction does not work: nudging LEFT moves the
+    //: panel toward a popover anchored in the chat column, which is most of them. So all three
+    //: resting places are tried and the first clear one wins; if none is clear the panel stays put
+    //: rather than jittering between two bad options.
     avoidPopover() {
       if (!this.panel) return;
       const pop = document.querySelector(".driver-popover");
-      this.panel.classList.remove("is-nudged");
-      if (!pop) return;
-      const a = pop.getBoundingClientRect();
-      const b = this.panel.getBoundingClientRect();
-      if (a.left < b.right + 12 && a.right > b.left - 12 &&
-          a.top < b.bottom + 12 && a.bottom > b.top - 12) {
-        this.panel.classList.add("is-nudged");
+      const CLASSES = ["is-left", "is-top", "is-topleft"];
+      if (!pop) {
+        this.panel.classList.remove(...CLASSES);
+        return;
       }
+      const a = pop.getBoundingClientRect();
+      // Resting geometry computed from the panel's own fixed offsets, never measured: the panel
+      // has a transform transition, so `getBoundingClientRect` right after changing a class returns
+      // the position it is still animating away from and the overlap is never seen.
+      const w = this.panel.offsetWidth;
+      const h = this.panel.offsetHeight;
+      const GAP = 12;
+      const P = 16;
+      const candidates = [
+        { cls: null, left: window.innerWidth - P - w, top: window.innerHeight - P - h },
+        { cls: "is-left", left: P, top: window.innerHeight - P - h },
+        { cls: "is-top", left: window.innerWidth - P - w, top: P + 56 },
+        { cls: "is-topleft", left: P, top: P + 56 },
+      ];
+      const clear = (c) =>
+        !(a.left < c.left + w + GAP && a.right > c.left - GAP &&
+          a.top < c.top + h + GAP && a.bottom > c.top - GAP);
+
+      const pick = candidates.find(clear);
+      this.panel.classList.remove(...CLASSES);
+      if (pick && pick.cls) this.panel.classList.add(pick.cls);
     }
 
     clearSpotlight() {
@@ -299,9 +322,15 @@
       const target = firstMatch(step.target);
       if (target) {
         this.missed = 0;
-        this.avoidPopover();
         this.showBodyInPanel(false);
         this.highlight(step, target);
+        // AFTER highlighting: driver creates and positions the popover there, so measuring first
+        // sized up either nothing or the previous step's popover. It also PLACES the popover
+        // asynchronously, so one measurement can land before it has settled; the poll re-checks
+        // every tick and a short follow-up catches the common case without waiting 350ms.
+        this.avoidPopover();
+        clearTimeout(this.avoidTimer);
+        this.avoidTimer = setTimeout(() => this.avoidPopover(), 120);
         this.setHint(step.progress ? step.progress(progress) : L("waiting"));
         if (step.repeat && this.started) this.maybeRepeat(target);
       } else {
@@ -336,7 +365,15 @@
     async fulfilAndAdvance() {
       const now = await this.current();
       const step = now && now.step;
-      if (step && step.fulfil) {
+      // NEVER refresh while a run is in flight. `openNotebook` is a full repaint, and a repaint
+      // during a run deletes the run — the product records this twice, as invariant 60 ("a repaint
+      // may not delete a RUN") and invariant 71 (`renderChatOverview` clears the element holding the
+      // run's own Stop button). Pressing this mid-run wiped the answer and the overview off the
+      // screen and left a status strip with nothing behind it.
+      //
+      // There is nothing to fulfil in that case anyway: the run already underway produces exactly
+      // the state this would have forced, so the script just moves on and lets it land.
+      if (step && step.fulfil && !PG.isRunning()) {
         this.setHint(L("doing"));
         try {
           await PG.fulfil(notebookId(), step.fulfil);
@@ -360,6 +397,9 @@
       this.buildPanel();
       // The product re-renders on `ui-lang-changed` rather than threading a language argument
       // through every renderer (invariant 48); the director subscribes for the same reason.
+      // The overlap depends on the viewport, so a resize can create or clear one without any step
+      // changing.
+      window.addEventListener("resize", () => this.avoidPopover());
       window.addEventListener("ui-lang-changed", () => {
         this.armed = null;
         this.lastTarget = null;
@@ -372,6 +412,7 @@
     stop() {
       this.stopped = true;
       clearInterval(this.timer);
+      clearTimeout(this.avoidTimer);
       this.clearSpotlight();
       if (this.panel) this.panel.remove();
       PG.directorStopped = true;

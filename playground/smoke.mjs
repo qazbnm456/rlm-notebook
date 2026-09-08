@@ -318,6 +318,28 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // step 7 reported done because `#podcast-generate:not([hidden])` matched a button whose STUDIO VIEW
 // was hidden rather than the button itself, so step 8 (`done: () => true`) fell through as well and
 // step 9 spotlit a control inside a closed panel.
+// The product records this twice — invariant 60 ("a repaint may not delete a RUN") and invariant 71
+// — and the playground reintroduced it: "Do it for me" called `openNotebook`, a full repaint, while
+// a run was still in flight, and the answer and the overview vanished off the screen.
+console.log("\nnothing repaints while a run is in flight:");
+{
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8");
+  // Comments stripped: the one explaining this bug names `openNotebook` above the guard, and an
+  // ordering check on raw text reads that as the guard coming second.
+  const fn = DIR.slice(DIR.indexOf("async fulfilAndAdvance"), DIR.indexOf("\n    advance("))
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  ok(fn.length > 0, "fulfilAndAdvance is present");
+  ok(/isRunning\(\)/.test(fn), "it checks whether a run is in flight");
+  // The guard has to sit BEFORE the repaint, not after it.
+  ok(fn.indexOf("isRunning()") < fn.indexOf("openNotebook"),
+     "the in-flight check comes before openNotebook");
+  // And nothing else may repaint unconditionally.
+  const repaints = [...DIR.matchAll(/openNotebook\(/g)].length;
+  ok(repaints <= 1, `openNotebook is called from one place only (${repaints})`);
+}
+
 console.log("\nno step completes before the reader acts:");
 {
   const s = { console: { log() {}, warn() {} }, JSON, Math, Object,

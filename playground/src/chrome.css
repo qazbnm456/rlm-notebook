@@ -114,7 +114,6 @@
    CLICKED is a separate question, answered by the pointer-events rules below. */
 .pg-tour {
   position: fixed; right: 16px; bottom: 16px; z-index: 999999999;
-  transition: transform 160ms ease;
   width: min(340px, calc(100vw - 32px));
   display: flex; flex-direction: column;
   border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
@@ -122,7 +121,9 @@
 }
 /* Slid out of the way rather than restacked: correct stacking stops the popover being clipped, but
    a popover sitting ON the panel still hides the progress and the controls. */
-.pg-tour.is-nudged { transform: translateX(calc(-100% - 24px)); }
+.pg-tour.is-left { right: auto; left: 16px; }
+.pg-tour.is-top { bottom: auto; top: 72px; }
+.pg-tour.is-topleft { right: auto; left: 16px; bottom: auto; top: 72px; }
 
 .pg-tour-head {
   display: flex; align-items: center; gap: 8px; padding: 10px 12px;
