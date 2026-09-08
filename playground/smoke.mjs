@@ -375,6 +375,26 @@ console.log("\nnothing local or private reaches the published fixture:");
   ok(richest.length >= 5, `the richest run still has ${richest.length} planner turns`);
 }
 
+// The popover is placed from the target's rect, so the scroll has to happen FIRST. The bug this
+// pins had the two the wrong way round AND gated the scroll on `target === this.lastTarget`, which
+// is the one case `highlight` refuses to act on: a new step was placed against the unscrolled rect,
+// then scrolled out from under its own popover, which stayed behind pointing at nothing.
+console.log("\nthe director scrolls before it places the popover:");
+{
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8")
+    .split("\n").filter((l) => !l.trim().startsWith("//")).join("\n");
+  const reveal = DIR.indexOf("this.revealTarget(target, step.side)");
+  const place = DIR.indexOf("this.highlight(step, target)");
+  ok(reveal > 0 && place > 0, "the tick both scrolls and highlights");
+  ok(reveal < place, "revealTarget runs BEFORE highlight");
+  ok(!/if\s*\([^)]*lastTarget[^)]*\)\s*this\.revealTarget/.test(DIR),
+     "the scroll is not gated on the target being unchanged");
+  // A tick that scrolls without building a new popover has to tell driver to measure again.
+  ok(/\.refresh\s*\(\)/.test(DIR), "a later scroll refreshes the popover's placement");
+  ok(/const\s+moved\s*=\s*this\.revealTarget/.test(DIR),
+     "revealTarget's return value is what decides that");
+}
+
 console.log("\nthe director scrolls without dragging the page:");
 {
   const DIR = readFileSync(join(DIST, "director.js"), "utf8")

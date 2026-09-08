@@ -165,8 +165,10 @@
     }
 
     // --- the spotlight ------------------------------------------------------------------------
+    //: Returns whether it actually built a new popover. The caller needs to know, because the
+    //: no-op case is exactly when a scroll has to be answered with `refresh()` instead.
     highlight(step, target) {
-      if (!factory || !target || target === this.lastTarget) return;
+      if (!factory || !target || target === this.lastTarget) return false;
       this.lastTarget = target;
       try {
         this.driver && this.driver.destroy();
@@ -197,6 +199,7 @@
           ...(step.align ? { align: step.align } : {}),
         },
       });
+      return true;
     }
 
     //: Bring the target into view inside ITS OWN scroller before spotlighting it. driver.js scrolls
@@ -220,7 +223,7 @@
         if (scrolls) break;
         box = box.parentElement;
       }
-      if (!box || box === document.body) return;
+      if (!box || box === document.body) return false;
       const a = el.getBoundingClientRect();
       const b = box.getBoundingClientRect();
       // A generous margin: the popover needs room too, and the composer overlaps the bottom of the
@@ -238,11 +241,15 @@
         roomBelow > MARGIN &&
         (side !== "top" || roomAbove > POPOVER) &&
         (side !== "bottom" || roomBelow > POPOVER);
-      if (comfortable) return;
+      if (comfortable) return false;
       const want = box.scrollTop + a.top - wantTop;
       // Clamped: centring a target near the top computes a negative offset, which the browser would
       // silently pin to 0 anyway. Saying so is cheaper than wondering later.
+      const before = box.scrollTop;
       box.scrollTop = Math.max(0, Math.min(want, box.scrollHeight - box.clientHeight));
+      // Whether it MOVED, not whether it was asked to. A scroller already at the clamp cannot move,
+      // and telling driver to re-place a popover that is already right would only make it flicker.
+      return box.scrollTop !== before;
     }
 
     //: The popover follows its target; the panel is pinned bottom-right. On any step whose control
@@ -386,8 +393,21 @@
       if (target) {
         this.missed = 0;
         this.showBodyInPanel(false);
-        if (target === this.lastTarget) this.revealTarget(target, step.side);
-        this.highlight(step, target);
+        // ORDER IS THE WHOLE POINT. This used to read `if (target === this.lastTarget)`, which is
+        // the one case `highlight` REFUSES to act on — so a new step was placed against the
+        // unscrolled rect and then scrolled out from under its own popover, which stayed behind
+        // pointing at where the control had been. Scroll first, so driver measures a settled rect.
+        const moved = this.revealTarget(target, step.side);
+        const placed = this.highlight(step, target);
+        // A later tick can scroll too (the answer grows, the run log appends). driver placed the
+        // popover from a rect that has since moved, so ask it to measure again.
+        if (moved && !placed && this.driver) {
+          try {
+            this.driver.refresh();
+          } catch {
+            /* refresh on a torn-down driver must not end the script */
+          }
+        }
         // AFTER highlighting: driver creates and positions the popover there, so measuring first
         // sized up either nothing or the previous step's popover. It also PLACES the popover
         // asynchronously, so one measurement can land before it has settled; the poll re-checks
