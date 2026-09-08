@@ -413,7 +413,7 @@ console.log("\nevery class the chrome creates has a rule:");
   for (const m of JS.matchAll(/el\(\s*"[a-z0-9]+"\s*,\s*"([^"]+)"/g)) {
     for (const cls of m[1].split(/\s+/)) if (cls.startsWith("pg-")) created.add(cls);
   }
-  ok(created.size >= 10, `${created.size} pg- classes created in chrome.js`);
+  ok(created.size >= 6, `${created.size} pg- classes created in chrome.js`);
   const unstyled = [...created].filter((c) => !new RegExp(`\\.${c}\\b`).test(CSS));
   ok(unstyled.length === 0, `every one has a rule${unstyled.length ? ` — missing: ${unstyled}` : ""}`);
 
@@ -714,7 +714,7 @@ console.log("\nplayground chrome stays interactive during the tour:");
   ok(enabling.length > 0, `${enabling.length} selectors re-enable pointer events`);
 
   // Everything the reader must be able to click or select while a step is spotlit.
-  for (const cls of ["pg-tour", "pg-foot", "pg-overlay"]) {
+  for (const cls of ["pg-tour", "pg-foot"]) {
     const covering = enabling.filter((s) => s.includes(`.${cls}`) && s.includes(".driver-active"));
     const strong = covering.filter((s) => beats(spec(s), DRIVER));
     ok(strong.length > 0,
@@ -837,7 +837,7 @@ console.log("\nno string is half-translated:");
   const zh = table("zh-Hant");
   const onlyEn = [...en].filter((k) => !zh.has(k));
   const onlyZh = [...zh].filter((k) => !en.has(k));
-  ok(en.size > 10, `chrome copy table has ${en.size} keys`);
+  ok(en.size >= 8, `chrome copy table has ${en.size} keys`);
   ok(onlyEn.length === 0 && onlyZh.length === 0,
      `chrome keys match${onlyEn.length ? ` — only en: ${onlyEn.join(", ")}` : ""}${onlyZh.length ? ` — only zh: ${onlyZh.join(", ")}` : ""}`);
 

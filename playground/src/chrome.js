@@ -38,81 +38,18 @@
   //: overlay swallowing every click on the page).
   //: Title and subtitle are FUNCTIONS, read when the modal opens rather than when it is built, so a
   //: language change between page load and opening it is picked up.
-  function modal(titleText, subtitleText, buildBody) {
-    const asText = (v) => (typeof v === "function" ? v() : v);
-    const overlay = el("div", "modal-overlay pg-overlay");
-    overlay.hidden = true;
-    const box = el("div", "modal pg-modal");
-    const titleEl = el("div", "modal-title");
-    box.appendChild(titleEl);
-    const subEl = el("p", "pg-modal-sub");
-    box.appendChild(subEl);
-    const body = el("div", "pg-modal-body");
-    box.appendChild(body);
-    const foot = el("div", "pg-modal-foot");
-    const close = el("button", "btn", PG.ui("close"));
-    close.type = "button";
-    close.addEventListener("click", () => (overlay.hidden = true));
-    foot.appendChild(close);
-    box.appendChild(foot);
-    overlay.appendChild(box);
-    overlay.addEventListener("click", (e) => {
-      if (e.target === overlay) overlay.hidden = true;
-    });
-    document.body.appendChild(overlay);
-    return {
-      open() {
-        titleEl.textContent = asText(titleText);
-        subEl.textContent = asText(subtitleText);
-        close.textContent = PG.ui("close");
-        body.replaceChildren();
-        buildBody(body, () => (overlay.hidden = true));
-        overlay.hidden = false;
-      },
-    };
-  }
-
+  // The modal HELPER went with them. It had exactly two callers, the scenario picker and the
+  // install sheet, and both were surfaces this page did not need: one the product already had, one
+  // the README already had. Nothing here opens a modal any more.
   // The scenario picker was DELETED. The product already has a notebook picker: the title
   // dropdown, which lists every notebook with its source and turn counts and switches on click. A
   // second one in the header meant a second modal, a second stylesheet and a second set of bugs, all
   // to show the same six notebooks less well. The shim answers `GET /notebooks` with all of them, so
   // the product's own control does the job with nothing added.
-  // --- install ----------------------------------------------------------------------------------
-  const installModal = modal(
-    () => PG.ui("installTitle"),
-    () => PG.ui("installSub"),
-    (body) => {
-      for (const group of PG.INSTALL) {
-        const sec = el("section", "pg-install-group");
-        sec.appendChild(el("h3", null, group.group));
-        for (const [label, cmd] of group.items) {
-          const row = el("button", "pg-cmd");
-          row.type = "button";
-          row.appendChild(el("span", "pg-cmd-label", label));
-          row.appendChild(el("code", null, cmd));
-          const mark = el("span", "pg-cmd-copy", "⧉");
-          row.appendChild(mark);
-          row.addEventListener("click", async () => {
-            try {
-              await navigator.clipboard.writeText(cmd);
-              mark.textContent = "✓";
-            } catch {
-              mark.textContent = "select & copy";
-            }
-            setTimeout(() => (mark.textContent = "⧉"), 1400);
-          });
-          sec.appendChild(row);
-        }
-        body.appendChild(sec);
-      }
-      const link = el("a", "pg-link", `${PG.ui("installMore")} →`);
-      link.href = REPO;
-      link.rel = "noopener";
-      link.target = "_blank";
-      body.appendChild(link);
-    }
-  );
-
+  // The install modal was DELETED, for the same reason the scenario picker was: the README already
+  // has an "Install and run" section, kept current by the people who change the commands. A copy of
+  // it on this page is a second thing to maintain and a third surface to design, and it drifts the
+  // first time a command changes. The button is a link to that section now.
   // The guided tour lives in `director.js` now: a passive checklist asked the reader to find things
   // for themselves, which is the same failure as loading the whole notebook up front.
 
@@ -151,9 +88,12 @@
         location.reload();
       })
     );
-    put(
-      button(PG.ui("install"), PG.ui("installTip"), () => installModal.open(), "pg-btn-primary")
-    );
+    const install = el("a", "header-btn pg-btn pg-btn-primary", PG.ui("install"));
+    install.href = `${REPO}#install-and-run`;
+    install.target = "_blank";
+    install.rel = "noopener";
+    install.title = PG.ui("installTip");
+    put(install);
     const star = el("a", "header-btn pg-btn pg-btn-star", PG.ui("github"));
     star.href = REPO;
     star.target = "_blank";

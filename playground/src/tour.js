@@ -277,10 +277,6 @@
       restart: "↺ Restart", restartTip: "Start the walkthrough again from an empty notebook",
       install: "↓ Install", installTip: "How to install and run it for real",
       github: "★ GitHub", githubTip: "Source, documentation and design notes",
-      installTitle: "Install rlm-notebook",
-      installSub: "Python 3.11 or newer. Click a command to copy it. A live run also needs model " +
-        "credentials and a Deno sandbox (brew install deno).",
-      installMore: "Full documentation and source on GitHub",
       close: "Close",
       footer: "A playground: the rlm-notebook web UI itself, running against recorded data in " +
         "your browser. Nothing is sent anywhere and nothing is kept.",
@@ -293,10 +289,6 @@
       restart: "↺ 重新開始", restartTip: "從空的筆記本重跑一次導覽",
       install: "↓ 安裝", installTip: "怎麼實際裝起來用",
       github: "★ GitHub", githubTip: "原始碼、文件與設計紀錄",
-      installTitle: "安裝 rlm-notebook",
-      installSub: "需要 Python 3.11 以上。點一下指令就會複製。實際執行還需要模型金鑰和 Deno 沙箱" +
-        "（brew install deno）。",
-      installMore: "完整文件與原始碼在 GitHub",
       close: "關閉",
       footer: "這是示範頁：rlm-notebook 的網頁介面本體，跑在你的瀏覽器裡，讀的是預先錄好的資料。" +
         "沒有任何東西被送出，也沒有留下任何東西。",
@@ -415,29 +407,8 @@
       done: () => false, last: true },
   ];
 
-  PG.INSTALL = [
-    {
-      group: "Install",
-      items: [
-        ["uv (recommended)", "uv tool install rlm-notebook"],
-        ["pipx", "pipx install rlm-notebook"],
-        ["pip", "pip install rlm-notebook"],
-      ],
-    },
-    {
-      group: "Run the web UI",
-      items: [
-        ["with the API extra", "uv tool install 'rlm-notebook[api]'"],
-        ["serve", "rlm-notebook serve"],
-        ["then open", "http://localhost:8000/"],
-      ],
-    },
-    {
-      group: "Ask from the CLI",
-      items: [
-        ["one question", "rlm-notebook ask --source https://… 'your question'"],
-        ["an episode", "rlm-notebook audio --source https://… --length long"],
-      ],
-    },
-  ];
+  // `PG.INSTALL` is GONE. It was a hand-copy of the README's "Install and run" section, which is
+  // the half of this page most certain to drift: a command changes in the README, where the person
+  // changing it can see it, and this copy keeps confidently printing the old one. The header button
+  // links to that section instead.
 })();
