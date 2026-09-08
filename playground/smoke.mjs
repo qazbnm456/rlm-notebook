@@ -405,6 +405,32 @@ console.log("\nnothing local or private reaches the published fixture:");
 // rendered the language name larger than the notebook titles under it. Nothing else here can see
 // that, since the Python suite never renders and there is no JS test runner (invariant 36's
 // reasoning, applied to the playground's own chrome).
+// A stylesheet edit that leaves a selector list ending in a comma silently swallows the rule that
+// follows it, and a brace count still balances. Two automated deletion passes here corrupted the
+// file that way, one of them dragging a rule inside a media query. Parse the structure instead.
+console.log("\nchrome.css still parses as a stylesheet:");
+{
+  const CSS = readFileSync(join(DIST, "chrome.css"), "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  let depth = 0, dangling = [];
+  for (const raw of CSS.split("\n")) {
+    const line = raw.trim();
+    depth += (line.match(/\{/g) || []).length - (line.match(/\}/g) || []).length;
+    // A selector list continues with a comma; a line ending in one must be followed by more
+    // selector, never by a closing brace or the end of the file.
+    if (line.endsWith(",") && !line.includes("{")) dangling.push(line);
+  }
+  ok(depth === 0, `braces balance (depth ${depth})`);
+  const CSSLINES = CSS.split("\n").map((l) => l.trim());
+  for (const d of dangling) {
+    const next = CSSLINES[CSSLINES.indexOf(d) + 1] || "";
+    ok(next && !next.startsWith("}") && !next.startsWith("/"),
+       `"${d}" is followed by more selector, not by ${JSON.stringify(next.slice(0, 30))}`);
+  }
+  // Every at-rule closes, and nothing outside one is indented into it.
+  const at = (CSS.match(/@media[^{]*\{/g) || []).length;
+  ok(at >= 1, `${at} media query/queries`);
+}
+
 console.log("\nevery class the chrome creates has a rule:");
 {
   const JS = readFileSync(join(DIST, "chrome.js"), "utf8");

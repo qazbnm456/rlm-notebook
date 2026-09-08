@@ -94,7 +94,7 @@
     install.rel = "noopener";
     install.title = PG.ui("installTip");
     put(install);
-    const star = el("a", "header-btn pg-btn pg-btn-star", PG.ui("github"));
+    const star = el("a", "header-btn pg-btn", PG.ui("github"));
     star.href = REPO;
     star.target = "_blank";
     star.rel = "noopener";

@@ -51,9 +51,28 @@
 .pg-btn:hover { background: var(--surface-3); }
 .pg-btn:focus-visible { border-color: var(--accent); }
 .pg-btn-primary { border-color: var(--accent); color: var(--accent); }
-.pg-btn-star { text-decoration: none; color: inherit; display: inline-flex; align-items: center; }
-.pg-cmd-label { min-width: 128px; color: var(--text-faint); font-size: 11.5px; }
-.pg-cmd-copy { color: var(--text-faint); font-size: 12px; }
+/* Any chrome button that is an ANCHOR, not the star alone. Install became a link to the README's
+   own section and duly grew a browser underline under its label. */
+a.pg-btn { text-decoration: none; color: inherit; display: inline-flex; align-items: center; }
+
+/* No modal section any more: the scenario picker was the product's own notebook dropdown all along,
+   and the install sheet was a copy of the README. Both are deleted, and so is the `modal()` helper
+   that built them, so `.pg-overlay` also leaves the pointer-events opt-in list below. */
+/* The body is a scroller, so the foot needs a rule between them: without one the last row runs
+   under the Close button and reads as clipped rather than scrolled. */
+
+/* The scenario picker's own styles are GONE with it. The product's notebook dropdown does the job,
+   so there is nothing here to style and nothing here to break: two heading rules were lost as
+   collateral from one edit inside this block, and the block that replaced them was the third
+   attempt at a surface the product already had. */
+.pg-audio-note {
+  margin-bottom: 10px; padding: 8px 10px;
+  border: 1px solid var(--border); border-left: 2px solid var(--warn);
+  border-radius: var(--radius);
+  background: var(--surface-2); color: var(--text-dim);
+  font-size: 12px; line-height: 1.55;
+}
+
 
 /* --- guided demo panel + driver.js popover ------------------------------------------------------ */
 /* ABOVE driver.js's overlay, which sits at z-index 1000000000. Below it the panel rendered but was
@@ -160,34 +179,14 @@
  * Raising z-index did not help and never could have: nothing was covering it.
  *
  * The selectors below are TWO tokens where driver's is one class plus the universal selector, so
- * they win on specificity regardless of source order, the same reasoning invariant 36 records for
- * `[hidden]` guards in the product's own stylesheet.
- *
- * `.pg-overlay` is no longer among them: this page opens no modal of its own any more. */
+ * they win on specificity regardless of source order — the same reasoning invariant 36 records for
+ * `[hidden]` guards in the product's own stylesheet. */
 .driver-active .pg-tour,
 .driver-active .pg-tour *,
 .driver-active .pg-foot,
 .driver-active .pg-foot * {
   pointer-events: auto;
 }
-
-/* THE PLAYGROUND'S OWN CHROME HAS TO OPT BACK IN. driver.js does not block clicks with an overlay
- * that sits on top; it does it in CSS:
- *
- *     .driver-active * { pointer-events: none }
- *     .driver-active .driver-active-element, .driver-popover { pointer-events: auto }
- *
- * so EVERY element on the page is inert except the spotlit control and driver's own popover. The
- * guided panel is neither, which is why its buttons did nothing and its text could not be selected.
- * Raising z-index did not help and never could have: nothing was covering it.
- *
- * The selectors below are TWO tokens where driver's is one class plus the universal selector, so
- * they win on specificity regardless of source order — the same reasoning invariant 36 records for
- * `[hidden]` guards in the product's own stylesheet. */
-.driver-active .pg-tour,
-.driver-active .pg-tour *,
-.driver-active .pg-foot,
-.driver-active .pg-foot *,
 
 /* --- footer note --------------------------------------------------------------------------------- */
 .pg-foot {
@@ -201,20 +200,5 @@
 
 @media (max-width: 900px) {
   .pg-tour { right: 8px; bottom: 8px; width: calc(100vw - 16px); max-height: 44vh; }
-  .pg-wordmark-tag {
-  margin-left: 7px; padding: 2px 6px;
-  border: 1px solid var(--accent); border-radius: 999px;
-  color: var(--accent); font-size: 9.5px; font-weight: 700; letter-spacing: 0.12em;
-  vertical-align: 2px;
-}
-.pg-sim { display: none; }
-}
-
-/* Said once, beside the player, when an episode's audio was capped but its transcript was not. */
-.pg-audio-note {
-  margin-bottom: 10px; padding: 8px 10px;
-  border: 1px solid var(--border); border-left: 2px solid var(--warn);
-  border-radius: var(--radius);
-  background: var(--surface-2); color: var(--text-dim);
-  font-size: 12px; line-height: 1.55;
+  .pg-sim { display: none; }
 }
