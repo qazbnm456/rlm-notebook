@@ -107,13 +107,23 @@
 /* --- guided demo panel + driver.js popover ------------------------------------------------------ */
 /* ABOVE driver.js's overlay, which sits at z-index 1000000000. Below it the panel rendered but was
    inert: no text selection, no button clicks, because the overlay swallowed every event. */
+/* BELOW driver.js's popover. `z-index: 1000000000` is on `.driver-popover`; the overlay carries no
+   z-index at all. An earlier note here said "overlay" and put the panel at 1000000002, stacking it
+   OVER the popover and clipping the instruction the reader was meant to read. The panel still beats
+   the overlay, since a positioned element with a z-index outranks an auto one. Whether it can be
+   CLICKED is a separate question, answered by the pointer-events rules below. */
 .pg-tour {
-  position: fixed; right: 16px; bottom: 16px; z-index: 1000000002;
+  position: fixed; right: 16px; bottom: 16px; z-index: 999999999;
+  transition: transform 160ms ease;
   width: min(340px, calc(100vw - 32px));
   display: flex; flex-direction: column;
   border: 1px solid var(--border-strong); border-radius: var(--radius-lg);
   background: var(--surface-1); box-shadow: 0 18px 44px rgb(0 0 0 / 0.32);
 }
+/* Slid out of the way rather than restacked: correct stacking stops the popover being clipped, but
+   a popover sitting ON the panel still hides the progress and the controls. */
+.pg-tour.is-nudged { transform: translateX(calc(-100% - 24px)); }
+
 .pg-tour-head {
   display: flex; align-items: center; gap: 8px; padding: 10px 12px;
   border-bottom: 1px solid var(--border);

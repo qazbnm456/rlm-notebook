@@ -288,6 +288,15 @@
       // The Podcast panel renders lazily, so re-check when Studio tabs change rather than once.
       document.addEventListener("click", () => setTimeout(noteTrimmedAudio, 60), true);
       await noteTrimmedAudio();
+      // Records that the reader engaged with the length control, which is what that step asks of
+      // them. A listener rather than a change to `app.js`, which stays untouched by the playground.
+      document.addEventListener(
+        "click",
+        (e) => {
+          if (e.target.closest && e.target.closest(".podcast-length")) PG.lengthTouched = true;
+        },
+        true
+      );
       if (PG.startDirector) PG.startDirector();
 
       //: Changing the interface language should move the DEMO too. Reading English answers under a

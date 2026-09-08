@@ -314,6 +314,42 @@ console.log("\nskipping a step fulfils it, and never strands a later one:");
 // The interface language is detected from the browser; the DEMO has to follow it, or a Chinese
 // reader gets Chinese buttons around English answers. And the rule has one exception that must not
 // be lost: a hash the reader ARRIVED with is a shared link naming a specific notebook.
+// A step that is already `done` when the reader arrives is a frame nobody sees, and it cascades:
+// step 7 reported done because `#podcast-generate:not([hidden])` matched a button whose STUDIO VIEW
+// was hidden rather than the button itself, so step 8 (`done: () => true`) fell through as well and
+// step 9 spotlit a control inside a closed panel.
+console.log("\nno step completes before the reader acts:");
+{
+  const s = { console: { log() {}, warn() {} }, JSON, Math, Object,
+              document: { querySelector: () => null, getElementById: () => null } };
+  s.window = s;
+  vm.createContext(s);
+  vm.runInContext(readFileSync(join(DIST, "tour.js"), "utf8"), s);
+  const SCRIPT = s.rlmPlayground.SCRIPT;
+  s.rlmPlayground.isRunning = () => false;
+  s.rlmPlayground.lengthTouched = false;
+
+  const fresh = { sources: 0, sourcesTotal: 3, overview: false, turns: 0, turnsTotal: 2,
+                  podcast: null, questions: ["q1", "q2"] };
+  const instant = [];
+  for (const step of SCRIPT) {
+    if (step.dwell || step.last) continue; // held open by the director / deliberately terminal
+    let done;
+    try { done = !!step.done(fresh); } catch { done = false; } // DOM-reading steps throw here
+    if (done) instant.push(step.id);
+  }
+  ok(instant.length === 0,
+     `every step waits for the reader${instant.length ? ` — already done on arrival: ${instant.join(", ")}` : ""}`);
+
+  // The literal form that caused it, forbidden outright — in CODE. Comments explaining the bug
+  // mention the same string, and a naive grep flags the explanation as the defect.
+  const CODE = readFileSync(join(DIST, "tour.js"), "utf8")
+    .split("\n")
+    .filter((l) => !l.trim().startsWith("//"))
+    .join("\n");
+  ok(!/done:\s*\(\)\s*=>\s*true/.test(CODE), "no step declares `done: () => true`");
+}
+
 console.log("\nthe demo notebook follows the interface language:");
 {
   const CHROME = readFileSync(join(DIST, "chrome.js"), "utf8");
@@ -549,6 +585,10 @@ console.log("\ndirector selectors still match the shipped UI:");
     "#podcast-generate": 'id="podcast-generate"',
     "#podcast-body": 'id="podcast-body"',
     "traj-drawer": 'id="traj-drawer"',
+    "run-status": '"run-status"',
+    "run-log": '"run-log"',
+    "chat-history": 'id="chat-history"',
+    "data-view-body": "data-view-body",
     ".pg-btn": '"header-btn pg-btn',
     ".header-btn": '"header-btn',
   };

@@ -159,6 +159,14 @@
       "zh-Hant": ["問第一個問題",
            "問題已經填好了，按 Enter 送出。\n\n答案裡每一句話都會帶編號，指向它的出處。"],
     },
+    watchAsk: {
+      en: ["Watch the answer come back",
+           "Same live trace, this time for a question.\n\nWhen it lands, every claim carries a " +
+           "numbered mark, and a ⌁ pill appears underneath holding the run that produced it."],
+      "zh-Hant": ["看回答跑出來",
+           "一樣是即時軌跡，這次是一個問題的。\n\n跑完之後，每一句話都會帶編號，下面還會出現一個 ⌁ " +
+           "標記，收著產生這個答案的那次執行。"],
+    },
     trace: {
       en: ["Open the reasoning trajectory",
            "Press the ⌁ mark under the answer.\n\nInside: every planner turn in the model's own " +
@@ -316,17 +324,29 @@
       side: "right", align: "start", dwell: true,
       done: () => !PG.isRunning() },
     { id: "ask1", key: "ask1", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[0],
-      fulfil: "turn1", done: (p) => p.turns >= 1 },
-    { id: "trace", key: "trace", side: "right", align: "start",
+      fulfil: "turn1", done: (p) => p.turns >= 1 || PG.isRunning() },
+    { id: "watch-ask", key: "watchAsk", target: ".run-status, .run-log, .chat-history",
+      side: "top", align: "start", dwell: true, done: () => !PG.isRunning() },
+    { id: "trace", key: "trace", side: "top", align: "start",
       target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
       done: () => !document.getElementById("traj-drawer").hidden },
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
       fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
     { id: "podcast-tab", key: "podcastTab", side: "left", align: "start",
       target: '.studio-views [data-view="podcast"], .studio-views button',
-      done: () => !!document.querySelector("#podcast-generate:not([hidden])") },
+      // The BODY, not the button. `#podcast-generate:not([hidden])` matched from the start: the
+      // button carries no `hidden` attribute of its own, its Studio view does. So this step reported
+      // done before the reader had opened the tab, step 8 (`done: () => true`) fell through too,
+      // and step 9 pointed at a button inside a hidden panel.
+      done: () => {
+        const body = document.querySelector('[data-view-body="podcast"]');
+        return !!body && !body.hidden;
+      } },
+    // Reading a step and moving on IS the action here, so it completes on a click anywhere in the
+    // length group — including re-picking the one already active. `done: () => true` made it a
+    // subliminal frame nobody could see.
     { id: "podcast-length", key: "podcastLength", target: ".podcast-length", side: "left",
-      done: () => true, manual: true },
+      done: () => !!PG.lengthTouched },
     { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate", side: "left",
       fulfil: "podcast", done: (p) => !!p.podcast },
     { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio", side: "left",

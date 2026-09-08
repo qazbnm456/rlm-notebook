@@ -44,9 +44,12 @@
       const found = document.querySelector(part);
       if (found && found.offsetParent !== null) return found;
     }
+    // The fallback still requires the element to OCCUPY SPACE. Handing driver.js a zero-size node
+    // (a control inside a hidden Studio view, say) puts the popover at the top-left corner of the
+    // page, pointing at nothing — which is worse than no spotlight at all.
     for (const part of parts) {
       const found = document.querySelector(part);
-      if (found) return found;
+      if (found && (found.offsetWidth > 0 || found.offsetHeight > 0)) return found;
     }
     return null;
   };
@@ -196,8 +199,25 @@
       });
     }
 
+    //: The popover follows its target; the panel is pinned bottom-right. On any step whose control
+    //: sits low and right they land on each other. Measured after each highlight rather than
+    //: guessed per step, because where the popover ends up depends on the viewport.
+    avoidPopover() {
+      if (!this.panel) return;
+      const pop = document.querySelector(".driver-popover");
+      this.panel.classList.remove("is-nudged");
+      if (!pop) return;
+      const a = pop.getBoundingClientRect();
+      const b = this.panel.getBoundingClientRect();
+      if (a.left < b.right + 12 && a.right > b.left - 12 &&
+          a.top < b.bottom + 12 && a.bottom > b.top - 12) {
+        this.panel.classList.add("is-nudged");
+      }
+    }
+
     clearSpotlight() {
       this.lastTarget = null;
+      if (this.panel) this.panel.classList.remove("is-nudged");
       try {
         this.driver && this.driver.destroy();
       } catch {
@@ -279,6 +299,7 @@
       const target = firstMatch(step.target);
       if (target) {
         this.missed = 0;
+        this.avoidPopover();
         this.showBodyInPanel(false);
         this.highlight(step, target);
         this.setHint(step.progress ? step.progress(progress) : L("waiting"));
