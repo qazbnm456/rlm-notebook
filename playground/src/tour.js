@@ -118,7 +118,7 @@
         "A notebook is nothing without a corpus. Press Add — the playground will stream in this " +
         "notebook's real sources one at a time. (You cannot add your own here: ingestion fetches, " +
         "parses and OCRs host-side, which needs a machine, not a browser tab.)",
-      target: "#add-source-form button[type=submit], #add-source-form .btn",
+      target: '#add-source-form button[type="submit"]',
       repeat: true,
       done: (p) => p.sources >= p.sourcesTotal,
       progress: (p) => `${p.sources} / ${p.sourcesTotal} sources`,
@@ -130,7 +130,10 @@
         "This is a real model run in the product: two tasks, a summary and the starter questions. " +
         "Press it and watch the status line — the reasoning ticking past is a recorded trace from " +
         "the run that actually produced this overview.",
-      target: "#chat-overview .btn, #chat-overview button",
+      // Built by `renderChatOverview` at runtime (`.chat-starter` wrapping a `.btn`), not present
+      // in the static markup — so the selector has to match what app.js CREATES, and a fallback
+      // outside `#chat-overview` covers the case where the panel has not been filled yet.
+      target: "#chat-overview button.btn, #chat-overview .chat-starter button, .chat-starter button",
       done: (p) => p.overview,
     },
     {
@@ -152,7 +155,7 @@
         "reasoning, a tool timeline sized by real elapsed time, the token budget, and what the " +
         "pre-SUBMIT validator rejected. Try the nav rail, the replay transport and a timeline " +
         "segment — Esc closes it.",
-      target: ".turn .ticker-affordance, .turn [data-reference], .traj-open, .ticker-pill",
+      target: ".turn .ticker-affordance, #chat-overview .ticker-affordance, .ticker-affordance",
       done: () => !document.getElementById("traj-drawer").hidden,
       afterBody:
         "That drawer is the answer to \u201cwhy did it say that\u201d — and it is why a run keeps " +
@@ -205,7 +208,7 @@
         "Press play. The transcript is subtitles: it scrolls with the playhead and highlights the " +
         "line being spoken, and clicking any line seeks to it. Each line carries its own citations. " +
         "The ↓ Download button hands you the file.",
-      target: ".podcast-body audio, #podcast-body audio",
+      target: "#podcast-body audio",
       done: () => {
         const a = document.querySelector("#podcast-body audio");
         return !!a && a.currentTime > 1.5;
@@ -218,7 +221,7 @@
         "Open Notebooks in the header. The English and Chinese sets are built from the SAME " +
         "sources — only the output language differs. The prose follows the reader; every citation " +
         "quote stays in the source's own words.",
-      target: ".pg-btn",
+      target: ".pg-btn, .header-btn",
       done: () => false,
       last: true,
     },

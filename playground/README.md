@@ -73,6 +73,26 @@ trimmed (`--audio-seconds`) so the page is not 14MB.
 notebook here predates `instructions.NATURAL_REGISTER` and carries thirteen instances of the calque
 that rule prevents; it still ships, but it does not greet anybody.
 
+## What the build needs, and what it cannot reproduce
+
+**`notebooks/` and `traces/` are gitignored** — they are run artifacts, not source — so `build.py`
+reads data that exists only on the machine that generated it. A fresh clone can run `smoke.mjs`
+against an existing `dist/`, but it cannot rebuild one without first generating notebooks of its own.
+
+That is deliberate (committing them would put several megabytes of third-party article text into the
+source repo), and it has a consequence worth stating: **the published `dist/` in the Pages repo is
+the artifact of record.** Regenerating the demo data from scratch produces a different, equally real
+playground, not a byte-identical one.
+
+Two things follow for the demo data itself:
+
+- **Generate through the API, not the CLI.** The CLI writes a trace only when asked (`--trace PATH`,
+  invariant 34); the API always does. No trace means an empty Trajectory drawer, which is one of the
+  three demos the page leads with. Three notebooks here were first built via the CLI and had to be
+  given a traced run afterwards.
+- **Cover the tiers on purpose.** A notebook holds ONE episode (invariant 42), so demonstrating
+  short/default/long takes three notebooks per language. `smoke.mjs` asserts the matrix.
+
 ## Verifying without a browser
 
 This repo has no JavaScript test runner (invariant 36's known gap) and the playground has no server,

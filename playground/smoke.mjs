@@ -236,6 +236,47 @@ console.log("\nheadline demos are present in every scenario:");
   }
 }
 
+// The director spotlights the product's OWN controls by selector. That is the one thing this whole
+// approach risks: `app.js` is copied verbatim and can rename a class at any time, and a selector
+// that stops matching produces NO error — the spotlight just never appears and the demo stalls on a
+// step the reader cannot complete. So every anchor is checked against the shipped source.
+console.log("\ndirector selectors still match the shipped UI:");
+{
+  const TOUR = readFileSync(join(DIST, "tour.js"), "utf8");
+  const HTML = readFileSync(join(DIST, "index.html"), "utf8");
+  // The playground's own chrome counts too: the final step spotlights a button this project adds,
+  // and it can be renamed just as easily as one of the product's.
+  const CHROME = readFileSync(join(DIST, "chrome.js"), "utf8");
+  const hay = APP + HTML + CHROME;
+  // Anchor per selector: the substring that must exist in app.js/index.html for it to resolve.
+  // Runtime-built nodes are anchored on the className app.js assigns, not on static markup.
+  const ANCHORS = {
+    "#add-source-form": 'id="add-source-form"',
+    "#chat-overview": 'id="chat-overview"',
+    "chat-starter": '"chat-starter"',
+    "ticker-affordance": '"ticker-affordance"',
+    "#ask-submit": 'id="ask-submit"',
+    "studio-views": 'id="studio-views"',
+    "podcast-length": '"podcast-length"',
+    "#podcast-generate": 'id="podcast-generate"',
+    "#podcast-body": 'id="podcast-body"',
+    "traj-drawer": 'id="traj-drawer"',
+    ".pg-btn": '"header-btn pg-btn',
+    ".header-btn": '"header-btn',
+  };
+  const targets = [...TOUR.matchAll(/target:\s*['"](.+?)['"],/g)].map((m) => m[1]);
+  ok(targets.length >= 8, `${targets.length} director targets found in tour.js`);
+  for (const [token, anchor] of Object.entries(ANCHORS)) {
+    ok(hay.includes(anchor), `${token} -> ${anchor}`);
+  }
+  // Every target must name at least one token we verified above, so a NEW selector cannot be added
+  // without also being anchored here.
+  const known = Object.keys(ANCHORS);
+  const unanchored = targets.filter((sel) => !known.some((k) => sel.includes(k)));
+  ok(unanchored.length === 0,
+     `every target is anchored${unanchored.length ? ` — unanchored: ${unanchored.join(" | ")}` : ""}`);
+}
+
 console.log("\naudio rewrite:");
 const media = new sandbox.HTMLMediaElement();
 media.src = `/notebooks/${nb}/audio/file?v=1`;
