@@ -59,16 +59,26 @@
   //: The panel's own chrome follows the interface language too — a Chinese page with an English
   //: "Skip step" is the half-translated state this whole change exists to remove.
   const LABEL = {
-    en: { head: "Guided demo", skip: "Skip", exit: "Exit", waiting: "Waiting for you…",
+    //: `next`, NOT "Skip". The button does move the tour on without the reader pressing the control
+    //: themselves, so "Skip" is literally accurate — and it reads as "give up on this", which left a
+    //: reader who simply wanted to keep going unsure whether they were meant to press it at all.
+    //: The tour is a demo, not an exam: moving on IS the ordinary way through, and the label should
+    //: say so. `finish` on the last step, because "Next" with nothing after it is a lie.
+    en: { head: "Guided demo", skip: "Next \u2192", finish: "Finish", exit: "Exit",
+          waiting: "Waiting for you…",
           finding: "Looking for the control…",
           manual: "Do this yourself, then the tour continues.",
           doing: "Doing it for you…",
-          done: "That is the whole product. The Install button has what you need." },
-    "zh-Hant": { head: "導覽", skip: "略過", exit: "結束", waiting: "等你操作…",
+          //: `{install}` is filled from `PG.ui("install")`, never written out. The header button is
+          //: translated, so naming it in English here left a Chinese sentence pointing at a button
+          //: that says 安裝.
+          done: "That is the whole product. {install}, up in the header, has what you need." },
+    "zh-Hant": { head: "導覽", skip: "下一步 \u2192", finish: "完成", exit: "結束",
+                 waiting: "等你操作…",
                  finding: "正在尋找控制項…",
                  manual: "請自己操作一次，導覽會接著走。",
                  doing: "正在幫你完成…",
-                 done: "這就是產品的全貌。安裝方式在上面的「↓ Install」。" },
+                 done: "這就是產品的全貌。安裝方式在上面的「{install}」。" },
   };
   const L = (k) => {
     const lang = typeof uiLang === "function" ? uiLang() : "en";
@@ -133,13 +143,14 @@
     paint(step) {
       const n = PG.SCRIPT.length;
       this.headLabel.textContent = L("head");
-      this.skip.textContent = L("skip");
+      this.skip.textContent = L(step && step.last ? "finish" : "skip");
       this.exit.textContent = L("exit");
       this.count.textContent = `${Math.min(this.index + 1, n)} / ${n}`;
       this.barFill.style.width = `${(this.index / n) * 100}%`;
       this.body.replaceChildren();
       if (!step) {
-        this.body.appendChild(el("p", "pg-done", L("done")));
+        const label = typeof PG.ui === "function" ? PG.ui("install") : "Install";
+        this.body.appendChild(el("p", "pg-done", L("done").replace("{install}", label)));
         this.skip.hidden = true;
         return;
       }

@@ -82,6 +82,24 @@
     return nb && view(nb, stageOf(id));
   }
 
+  //: Resetting the STAGE is not resetting the demo. The workspace remembers which Studio tab was
+  //: last open (`rlmnb-studio-view`, restored on load), so once a reader has reached the Podcast
+  //: tab every later run starts with it already showing — and "open the Podcast tab" is done before
+  //: it is ever shown, which is how that step went missing. The tour stages this notebook from
+  //: empty, and the view the workspace remembers is part of the state it has to stage.
+  //:
+  //: Both the stored value AND the live DOM: Restart does not reload the page, so clearing the key
+  //: alone would leave the panel exactly as it was.
+  const resetStudioView = () => {
+    try {
+      localStorage.removeItem("rlmnb-studio-view");
+    } catch {
+      /* a browser refusing storage is not a reason to fail the reset */
+    }
+    const first = document.querySelector(".studio-view-tab");
+    if (first && !first.classList.contains("is-active")) first.click();
+  };
+
   PG.reset = async (id) => {
     if (id) {
       live.delete(id);
@@ -90,6 +108,7 @@
       live.clear();
       stages.clear();
     }
+    resetStudioView();
   };
   PG.scenarios = async () => (await fixtures()).scenarios;
 

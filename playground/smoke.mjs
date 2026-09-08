@@ -384,6 +384,33 @@ console.log("\nnothing local or private reaches the published fixture:");
 // reads `data.utterances.length` straight off it, so Generate died with "Cannot read properties of
 // undefined" and the demo's headline artifact never rendered. Read what app.js expects, then check
 // the shim's audio handler actually returns it.
+// The director has a label table of its own, separate from the chrome's. A string in one that
+// NAMES a control from the other has to reach for that control's current label, or a translated
+// interface ends up pointing at a button by its English name.
+console.log("\nthe director never spells another table's label:");
+{
+  const DIR = readFileSync(join(DIST, "director.js"), "utf8");
+  const TOUR = readFileSync(join(DIST, "tour.js"), "utf8");
+  const labels = DIR.slice(DIR.indexOf("const LABEL"), DIR.indexOf("const L ="));
+  const dones = [...labels.matchAll(/done:\s*"([^"]*)"/g)].map((m) => m[1]);
+  ok(dones.length === 2, `${dones.length} done strings, one per language`);
+  ok(dones.every((d) => d.includes("{install}")),
+     "both name the install button by placeholder, not by word");
+  ok(/\.replace\("\{install\}",\s*label\)/.test(DIR), "the placeholder is substituted at paint");
+  ok(/PG\.ui\("install"\)/.test(DIR), "and substituted from the chrome's own current label");
+  // Both languages must actually have that label, or the substitution renders "undefined".
+  for (const lang of ["en", '"zh-Hant"']) void lang;
+  ok((TOUR.match(/\binstall:\s*"/g) || []).length >= 2, "both chrome tables define install");
+
+  // The advance button is the ordinary way through a demo, so it must not read as giving up, and
+  // it must not promise a next step on the step that has none.
+  ok(/skip:\s*"Next/.test(labels) && /skip:\s*"下一步/.test(labels),
+     "the advance button says Next, not Skip");
+  ok(/finish:\s*"/.test(labels), "the last step has its own label");
+  ok(/L\(step && step\.last \? "finish" : "skip"\)/.test(DIR),
+     "and the last step is what selects it");
+}
+
 console.log("\nthe shim answers /audio in the shape app.js reads:");
 {
   const APP = readFileSync(join(DIST, "app.js"), "utf8");
