@@ -1,0 +1,261 @@
+/* rlm-notebook PLAYGROUND — the director.
+ *
+ * Runs `PG.SCRIPT`: spotlight one real control, say what it does, then WAIT for the reader to press
+ * it. Nothing advances on a timer. The point is not to play a video at somebody — it is that they
+ * pressed the product's own button and can therefore believe what they just watched.
+ *
+ * `driver.js` (MIT, vendored) does the spotlight, the popover positioning and the scroll-into-view.
+ * It does NOT do the half that matters here: every tour library advances on its own Next button,
+ * and this one advances on `PG.progress()` — the stage the shim has actually reached. So the buttons
+ * are hidden (`showButtons: []`) and `moveNext()` is called from a poll.
+ *
+ * Consequences that shaped this file:
+ *  - The highlighted element must stay clickable (`disableActiveInteraction` left false, and the
+ *    overlay must never sit above it), or the reader cannot do the thing they are being asked to do.
+ *  - `allowClose: false`, because a stray backdrop click would silently end the demo.
+ *  - Steps are re-evaluated against real state, so a reader who explores ahead is never asked to
+ *    press something they already pressed.
+ */
+(() => {
+  "use strict";
+  const PG = window.rlmPlayground;
+  const POLL_MS = 350;
+
+  //: `driver.js` exposes itself as `driver.js.driver` from the IIFE build. Absence is not fatal:
+  //: the script still runs, just without the spotlight, which keeps a vendored-asset 404 from
+  //: taking the whole page down.
+  const factory =
+    (window.driver && window.driver.js && window.driver.js.driver) || (window.driver || {}).driver;
+
+  const el = (tag, cls, text) => {
+    const n = document.createElement(tag);
+    if (cls) n.className = cls;
+    if (text != null) n.textContent = text;
+    return n;
+  };
+
+  const firstMatch = (selector) => {
+    for (const part of selector.split(",")) {
+      const found = document.querySelector(part.trim());
+      if (found && found.offsetParent !== null) return found;
+    }
+    return null;
+  };
+
+  const notebookId = () => decodeURIComponent(location.hash.replace(/^#/, ""));
+
+  class Director {
+    constructor() {
+      this.index = 0;
+      this.stopped = false;
+      this.driver = null;
+      this.panel = null;
+      this.lastTarget = null;
+    }
+
+    // --- the panel ----------------------------------------------------------------------------
+    //: A persistent panel BESIDE the spotlight, not only inside the popover. The popover moves with
+    //: the target and can be missed; the panel is the one thing that is always in the same place
+    //: when a reader looks up and asks "what am I supposed to do".
+    buildPanel() {
+      const panel = el("aside", "pg-tour");
+      const head = el("div", "pg-tour-head");
+      head.appendChild(el("span", "pg-tour-title", "Guided demo"));
+      this.count = el("span", "pg-tour-count");
+      head.appendChild(this.count);
+      const collapse = el("button", "pg-tour-collapse", "–");
+      collapse.type = "button";
+      collapse.addEventListener("click", () => {
+        const open = !panel.classList.toggle("is-collapsed");
+        collapse.textContent = open ? "–" : "+";
+      });
+      head.appendChild(collapse);
+      panel.appendChild(head);
+
+      this.bar = el("div", "pg-bar");
+      this.barFill = el("div", "pg-bar-fill");
+      this.bar.appendChild(this.barFill);
+      panel.appendChild(this.bar);
+
+      this.body = el("div", "pg-tour-list");
+      panel.appendChild(this.body);
+
+      const foot = el("div", "pg-tour-foot");
+      this.skip = el("button", "btn pg-step-btn", "Skip step");
+      this.skip.type = "button";
+      this.skip.addEventListener("click", () => this.advance(true));
+      foot.appendChild(this.skip);
+      const stop = el("button", "btn pg-step-btn", "Exit demo");
+      stop.type = "button";
+      stop.addEventListener("click", () => this.stop());
+      foot.appendChild(stop);
+      panel.appendChild(foot);
+
+      document.body.appendChild(panel);
+      this.panel = panel;
+    }
+
+    paint(step) {
+      const n = PG.SCRIPT.length;
+      this.count.textContent = `${Math.min(this.index + 1, n)} / ${n}`;
+      this.barFill.style.width = `${(this.index / n) * 100}%`;
+      this.body.replaceChildren();
+      if (!step) {
+        this.body.appendChild(el("p", "pg-done", "That is the whole product. Install it below."));
+        this.skip.hidden = true;
+        return;
+      }
+      this.body.appendChild(el("div", "pg-step-title", step.title));
+      this.body.appendChild(el("p", null, step.body));
+      this.hint = el("div", "pg-step-hint");
+      this.body.appendChild(this.hint);
+    }
+
+    setHint(text) {
+      if (this.hint) this.hint.textContent = text || "";
+    }
+
+    // --- the spotlight ------------------------------------------------------------------------
+    highlight(step, target) {
+      if (!factory || !target || target === this.lastTarget) return;
+      this.lastTarget = target;
+      try {
+        this.driver && this.driver.destroy();
+      } catch {
+        /* a destroyed driver throwing must not end the script */
+      }
+      this.driver = factory({
+        // No Next button: this tour advances on what the reader actually did, not on a click that
+        // would let them skip past the thing being demonstrated.
+        showButtons: [],
+        allowClose: false,
+        overlayOpacity: 0.55,
+        stagePadding: 6,
+        popoverClass: "pg-pop",
+      });
+      this.driver.highlight({
+        element: target,
+        popover: { title: step.title, description: step.body },
+      });
+    }
+
+    clearSpotlight() {
+      this.lastTarget = null;
+      try {
+        this.driver && this.driver.destroy();
+      } catch {
+        /* ignore */
+      }
+      this.driver = null;
+    }
+
+    // --- the loop -----------------------------------------------------------------------------
+    async current() {
+      const progress = await PG.progress(notebookId());
+      if (!progress) return null;
+      while (this.index < PG.SCRIPT.length) {
+        const step = PG.SCRIPT[this.index];
+        if (step.skipIf && step.skipIf(progress)) {
+          this.index += 1;
+          continue;
+        }
+        return { step, progress };
+      }
+      return null;
+    }
+
+    async tick() {
+      if (this.stopped) return;
+      const now = await this.current();
+      if (!now) {
+        this.clearSpotlight();
+        this.paint(null);
+        return;
+      }
+      const { step, progress } = now;
+
+      if (step !== this.armed) {
+        this.armed = step;
+        this.clearSpotlight();
+        this.paint(step);
+        // Pre-fill the composer so the reader presses send rather than typing a question the demo
+        // then has to pretend it recognised.
+        if (step.fill) {
+          const input = document.getElementById("ask-input");
+          const text = step.fill(progress);
+          if (input && text) {
+            input.value = text;
+            input.dispatchEvent(new Event("input", { bubbles: true }));
+            input.focus();
+          }
+        }
+      }
+
+      // `done` is evaluated every tick against real state, so exploring ahead never strands anybody.
+      let done = false;
+      try {
+        done = !!step.done(progress);
+      } catch {
+        done = false;
+      }
+      if (done && !step.last) {
+        // A `repeat` step (streaming the sources in) presses the control for the reader after the
+        // first press: they started it, and watching three identical clicks is not a demo.
+        this.advance();
+        return;
+      }
+
+      const target = firstMatch(step.target);
+      if (target) {
+        this.highlight(step, target);
+        this.setHint(step.progress ? step.progress(progress) : "Waiting for you…");
+        if (step.repeat && this.started) this.maybeRepeat(target);
+      } else {
+        this.setHint("Looking for the control…");
+      }
+      if (step.repeat && !this.started && target) {
+        target.addEventListener("click", () => (this.started = true), { once: true });
+      }
+    }
+
+    //: One press starts it; the director presses the rest, spaced out, so the sources stream in the
+    //: way an ingest of several URLs actually feels rather than appearing all at once.
+    maybeRepeat(target) {
+      if (this.repeating) return;
+      this.repeating = true;
+      setTimeout(() => {
+        this.repeating = false;
+        if (!this.stopped) target.click();
+      }, 700);
+    }
+
+    advance(manual) {
+      this.index += 1;
+      this.started = false;
+      this.armed = null;
+      this.clearSpotlight();
+      if (manual) this.tick();
+    }
+
+    start() {
+      this.buildPanel();
+      this.timer = setInterval(() => this.tick(), POLL_MS);
+      this.tick();
+    }
+
+    stop() {
+      this.stopped = true;
+      clearInterval(this.timer);
+      this.clearSpotlight();
+      if (this.panel) this.panel.remove();
+      PG.directorStopped = true;
+    }
+  }
+
+  PG.startDirector = () => {
+    if (PG.director) PG.director.stop();
+    PG.director = new Director();
+    PG.director.stopped = false;
+    PG.director.start();
+  };
+})();

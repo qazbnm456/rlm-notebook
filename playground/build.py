@@ -24,6 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 WEB = ROOT / "rlm_notebook" / "web"
 SRC = Path(__file__).resolve().parent / "src"
+VENDOR = Path(__file__).resolve().parent / "vendor"
 NOTEBOOKS = ROOT / "notebooks"
 TRACES = ROOT / "traces"
 
@@ -210,6 +211,7 @@ def build_index() -> str:
     html = html.replace(
         '<link rel="stylesheet" href="./style.css" />',
         '<link rel="stylesheet" href="./style.css" />\n'
+        '<link rel="stylesheet" href="./driver.css" />\n'
         '<link rel="stylesheet" href="./chrome.css" />',
     )
     # The shim MUST be evaluated before `app.js`, which captures nothing but calls the globals it
@@ -222,7 +224,10 @@ def build_index() -> str:
     # `chrome.js` runs AFTER the app so the header it augments already exists.
     html = html.replace(
         '<script src="./app.js"></script>',
-        '<script src="./app.js"></script>\n<script src="./chrome.js"></script>',
+        '<script src="./app.js"></script>\n'
+        '<script src="./driver.js.iife.js"></script>\n'
+        '<script src="./chrome.js"></script>\n'
+        '<script src="./director.js"></script>',
     )
     html = html.replace(
         "<title>rlm-notebook</title>", "<title>rlm-notebook — interactive playground</title>"
@@ -286,8 +291,11 @@ def main() -> int:
 
     for name in VERBATIM:
         shutil.copy2(WEB / name, out / name)
-    for name in ("shim.js", "chrome.css", "tour.js", "chrome.js"):
+    for name in ("shim.js", "chrome.css", "tour.js", "chrome.js", "director.js"):
         shutil.copy2(SRC / name, out / name)
+    # Vendored, not CDN-loaded: the published page keeps no third-party origin in its critical path.
+    for name in ("driver.js.iife.js", "driver.css"):
+        shutil.copy2(VENDOR / name, out / name)
     (out / "index.html").write_text(build_index(), encoding="utf-8")
 
     fixtures = {"scenarios": [], "notebooks": {}, "sources": {}, "runs": {}}

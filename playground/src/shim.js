@@ -40,7 +40,35 @@
   const live = new Map();
   const PG = (window.rlmPlayground = window.rlmPlayground || {});
 
-  async function notebook(id) {
+  //: THE STAGE. A demo that opens with everything already in it demonstrates nothing — the reader
+  //: sees a finished screenshot and learns neither what the product does nor that they did it. So
+  //: the notebook is revealed a piece at a time, and each piece is revealed by the reader pressing
+  //: the product's OWN control. `view()` is the filter; the routes below advance it.
+  //:
+  //: The underlying fixture is never mutated by staging — `stage` only says how much of it is
+  //: visible yet — so Reset is a counter reset, not a reload.
+  const stages = new Map();
+  const blankStage = () => ({ sources: 0, overview: false, turns: 0, podcast: null });
+
+  function stageOf(id) {
+    if (!stages.has(id)) stages.set(id, blankStage());
+    return stages.get(id);
+  }
+
+  //: The reveal is capped by what the notebook really has. Pressing "add source" a fourth time on a
+  //: three-source notebook must not invent a fourth.
+  function view(nb, st) {
+    const podcast = st.podcast && nb.podcast ? { ...nb.podcast, stale: false } : null;
+    return {
+      ...nb,
+      sources: nb.sources.slice(0, st.sources),
+      turns: nb.turns.slice(0, st.turns),
+      overview: st.overview ? nb.overview : null,
+      podcast,
+    };
+  }
+
+  async function full(id) {
     if (!live.has(id)) {
       const f = await fixtures();
       if (!f.notebooks[id]) return null;
@@ -49,11 +77,39 @@
     return live.get(id);
   }
 
+  async function notebook(id) {
+    const nb = await full(id);
+    return nb && view(nb, stageOf(id));
+  }
+
   PG.reset = async (id) => {
-    if (id) live.delete(id);
-    else live.clear();
+    if (id) {
+      live.delete(id);
+      stages.delete(id);
+    } else {
+      live.clear();
+      stages.clear();
+    }
   };
   PG.scenarios = async () => (await fixtures()).scenarios;
+
+  //: What the director reads to know whether a step is finished, and how much is left to reveal.
+  PG.progress = async (id) => {
+    const nb = await full(id);
+    const st = stageOf(id);
+    if (!nb) return null;
+    return {
+      sources: st.sources,
+      sourcesTotal: nb.sources.length,
+      overview: st.overview,
+      hasOverview: !!nb.overview,
+      turns: st.turns,
+      turnsTotal: nb.turns.length,
+      podcast: st.podcast,
+      hasPodcast: !!nb.podcast,
+      questions: nb.turns.map((x) => x.question),
+    };
+  };
 
   // --- helpers ----------------------------------------------------------------------------------
   const json = (body, status = 200) =>
@@ -131,20 +187,23 @@
     return src ? json(src) : notFound("source not found");
   });
 
-  route("POST", `${NB}/sources`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
-    const body = await req.json();
-    for (const url of body.sources || []) nb.sources.push(simulatedSource(nb, url, "web"));
-    for (const t of body.texts || [])
-      nb.sources.push(simulatedSource(nb, t.slice(0, 60).replace(/\s+/g, " "), "text"));
-    return json(nb);
-  });
+  //: Pressing Add reveals THE NEXT REAL SOURCE, whatever was typed in the box. The reader gets the
+  //: motion of adding a source — the row appearing, the corpus growing — without the playground
+  //: pretending it fetched and parsed a URL it never touched. Ingestion is host-side and needs a
+  //: network, a parser and an OCR stack (invariant 3); none of that exists in a browser tab.
+  //:
+  //: Once the real sources run out, a further press falls back to a source labelled as simulated,
+  //: so the control never appears broken.
+  async function addSource(id) {
+    const nb = await full(id);
+    const st = stageOf(id);
+    if (st.sources < nb.sources.length) st.sources += 1;
+    else nb.sources.push(simulatedSource(nb, "added-in-the-playground", "text"));
+    return json(view(nb, st));
+  }
 
-  route("POST", `${NB}/sources/upload`, async (m) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
-    nb.sources.push(simulatedSource(nb, "uploaded-file", "pdf"));
-    return json(nb);
-  });
+  route("POST", `${NB}/sources`, async (m) => addSource(decodeURIComponent(m[1])));
+  route("POST", `${NB}/sources/upload`, async (m) => addSource(decodeURIComponent(m[1])));
 
   route("DELETE", `${NB}/sources/([^/]+)`, async (m) => {
     const nb = await notebook(decodeURIComponent(m[1]));
@@ -240,32 +299,36 @@
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   route("POST", `${NB}/ask`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+    const id = decodeURIComponent(m[1]);
+    const nb = await full(id);
+    const st = stageOf(id);
     const body = await req.json();
-    PG.announce(body.run_id, nb.id, "ask");
+    PG.announce(body.run_id, id, "ask");
     await sleep(RUN_MS);
-    const canned = nb.turns[nb.turns.length - 1] || null;
-    const pool = (await fixtures()).notebooks[nb.id].turns;
-    const pick = pool.find((t) => t.question.trim() === (body.question || "").trim()) ||
-      pool[nb.turns.length % pool.length] || canned;
-    if (!pick) return json({ detail: "no canned answer" }, 422);
-    const turn = { ...structuredClone(pick), question: body.question, run_id: body.run_id };
-    if (body.regenerate && nb.turns.length) nb.turns[nb.turns.length - 1] = turn;
-    else nb.turns.push(turn);
+    // The reader is guided to send the question this notebook really asked, so the turn revealed is
+    // the NEXT recorded one. A question typed freehand still lands on it — with the recorded
+    // question kept, because the recorded ANSWER is the one thing here that cannot be improvised.
+    const idx = body.regenerate && st.turns > 0 ? st.turns - 1 : st.turns;
+    const pick = nb.turns[idx] || nb.turns[nb.turns.length - 1];
+    if (!pick) return json({ detail: "no recorded answer" }, 422);
+    if (!body.regenerate) st.turns = Math.min(st.turns + 1, nb.turns.length);
     return json({
-      answer: turn.answer, citations: turn.citations,
-      follow_ups: turn.follow_ups, run_id: turn.run_id,
+      answer: pick.answer,
+      citations: pick.citations,
+      follow_ups: pick.follow_ups,
+      run_id: pick.run_id || body.run_id,
     });
   });
 
   route("POST", `${NB}/overview`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+    const id = decodeURIComponent(m[1]);
+    const nb = await full(id);
+    const st = stageOf(id);
     const body = await req.json().catch(() => ({}));
-    PG.announce(body.run_id, nb.id, "overview");
+    PG.announce(body.run_id, id, "overview");
     await sleep(RUN_MS);
-    const pristine = (await fixtures()).notebooks[nb.id].overview;
-    nb.overview = pristine ? { ...structuredClone(pristine), stale: false } : null;
-    return json(nb);
+    st.overview = true;
+    return json(view(nb, st));
   });
 
   route("POST", `${NB}/guide/([a-z]+)`, async (m, req) => {
@@ -277,13 +340,21 @@
   });
 
   route("POST", `${NB}/audio`, async (m, req) => {
-    const nb = await notebook(decodeURIComponent(m[1]));
+    const id = decodeURIComponent(m[1]);
+    const nb = await full(id);
+    const st = stageOf(id);
     const body = await req.json().catch(() => ({}));
-    PG.announce(body.run_id, nb.id, "audio");
-    await sleep(RUN_MS);
-    const pristine = (await fixtures()).notebooks[nb.id].podcast;
-    nb.podcast = pristine ? { ...structuredClone(pristine), stale: false } : null;
-    return json({ podcast: nb.podcast, run_id: body.run_id });
+    PG.announce(body.run_id, id, "audio");
+    // Synthesis is the slow half in the real product (invariant 43: chatterbox measured 33x
+    // edge-tts), so generating an episode waits noticeably longer than a chat turn. The wait is
+    // part of what the demo is honest about.
+    await sleep(RUN_MS * 1.6);
+    // This notebook holds ONE recorded episode at ONE tier (invariant 42). Whichever length button
+    // was pressed, the episode returned is the recorded one — and the page names its real tier
+    // rather than implying the button re-generated it.
+    st.podcast = body.length || "default";
+    const out = view(nb, st);
+    return json({ podcast: out.podcast, run_id: body.run_id });
   });
 
   // --- 1. fetch ---------------------------------------------------------------------------------

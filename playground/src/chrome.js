@@ -159,56 +159,8 @@
     }
   );
 
-  // --- guided tour ------------------------------------------------------------------------------
-  //: A dockable panel rather than a fourth column: the workspace is already three columns, and
-  //: stealing one to explain the other two would misrepresent the layout the reader is being sold.
-  function buildTour() {
-    const done = new Set(JSON.parse(sessionStorage.getItem("pg-tour") || "[]"));
-    const panel = el("aside", "pg-tour");
-    const head = el("div", "pg-tour-head");
-    head.appendChild(el("span", "pg-tour-title", "Guided tour"));
-    const count = el("span", "pg-tour-count");
-    head.appendChild(count);
-    const collapse = el("button", "pg-tour-collapse", "–");
-    collapse.type = "button";
-    collapse.title = "Collapse";
-    head.appendChild(collapse);
-    panel.appendChild(head);
-    const list = el("div", "pg-tour-list");
-    panel.appendChild(list);
-
-    const paint = () => {
-      count.textContent = `${done.size} / ${PG.TOUR.length}`;
-      list.replaceChildren();
-      for (const step of PG.TOUR) {
-        const item = el("div", `pg-step${done.has(step.id) ? " is-done" : ""}`);
-        const t = el("div", "pg-step-title");
-        t.appendChild(el("span", "pg-step-mark", done.has(step.id) ? "✓" : "○"));
-        t.appendChild(el("span", null, step.title));
-        item.appendChild(t);
-        item.appendChild(el("p", null, step.body));
-        const hint = el("div", "pg-step-hint");
-        hint.appendChild(el("span", null, step.hint));
-        const mark = el("button", "btn pg-step-btn", done.has(step.id) ? "Undo" : "Mark done");
-        mark.type = "button";
-        mark.addEventListener("click", () => {
-          done.has(step.id) ? done.delete(step.id) : done.add(step.id);
-          sessionStorage.setItem("pg-tour", JSON.stringify([...done]));
-          paint();
-        });
-        hint.appendChild(mark);
-        item.appendChild(hint);
-        list.appendChild(item);
-      }
-    };
-    collapse.addEventListener("click", () => {
-      const open = !panel.classList.toggle("is-collapsed");
-      collapse.textContent = open ? "–" : "+";
-      collapse.title = open ? "Collapse" : "Expand";
-    });
-    paint();
-    document.body.appendChild(panel);
-  }
+  // The guided tour lives in `director.js` now: a passive checklist asked the reader to find things
+  // for themselves, which is the same failure as loading the whole notebook up front.
 
   // --- header ------------------------------------------------------------------------------------
   function mount() {
@@ -226,9 +178,8 @@
 
     header.insertBefore(button("Notebooks", "Switch demo notebook", () => scenarioModal.open()), settings);
     header.insertBefore(
-      button("Reset", "Discard playground edits and reload", async () => {
+      button("↺ Restart demo", "Start the guided walkthrough from an empty notebook", async () => {
         await PG.reset();
-        sessionStorage.removeItem("pg-tour");
         location.reload();
       }),
       settings
@@ -243,8 +194,6 @@
     star.rel = "noopener";
     star.title = "Source, documentation and invariants";
     header.insertBefore(star, settings);
-
-    buildTour();
 
     const foot = el("div", "pg-foot");
     foot.appendChild(
@@ -300,6 +249,7 @@
       // The Podcast panel renders lazily, so re-check when Studio tabs change rather than once.
       document.addEventListener("click", () => setTimeout(noteTrimmedAudio, 60), true);
       await noteTrimmedAudio();
+      if (PG.startDirector) PG.startDirector();
     } catch (err) {
       console.warn("playground: could not open the initial notebook", err);
     }

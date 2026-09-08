@@ -101,55 +101,126 @@
   // --- guided tour ------------------------------------------------------------------------------
   //: witr's playground taught the lesson this copies: a simulated product that does not TELL you
   //: what to try is a screenshot you can click. Each step names one action and what to look for.
-  //: Ordered by what actually sells the product, not by where things sit on screen. The three
-  //: headline demos come first — a grounded answer, the reasoning behind it, and the podcast —
-  //: because those are the three a stranger cannot picture from a README and would otherwise have
-  //: to install the whole stack to see.
-  PG.TOUR = [
+  // --- the guided script ------------------------------------------------------------------------
+  //: Each step SPOTLIGHTS one real control, says what it is about to do, and then WAITS for the
+  //: reader to press it. Nothing advances on a timer, because the point is not to play a video at
+  //: someone — it is that they did it, on the product's own controls, and can therefore believe the
+  //: thing they just watched.
+  //:
+  //: `target` is a selector into the SHIPPED markup. `done(p)` reads `PG.progress()` — the stage the
+  //: shim has actually reached — rather than a click, so a reader who explores ahead is never told
+  //: to press something they already pressed.
+  PG.SCRIPT = [
     {
-      id: "ask",
-      title: "1 · Ask a grounded question",
+      id: "sources",
+      title: "Add the sources",
       body:
-        "Press a starter question, or type your own. Watch the status line while it runs: that is a " +
-        "reasoning trace from a run that really happened, replayed at its real shape. The answer " +
-        "comes back with numbered strokes — every claim points at the passage it came from.",
-      hint: "Press a starter question under the overview.",
+        "A notebook is nothing without a corpus. Press Add — the playground will stream in this " +
+        "notebook's real sources one at a time. (You cannot add your own here: ingestion fetches, " +
+        "parses and OCRs host-side, which needs a machine, not a browser tab.)",
+      target: "#add-source-form button[type=submit], #add-source-form .btn",
+      repeat: true,
+      done: (p) => p.sources >= p.sourcesTotal,
+      progress: (p) => `${p.sources} / ${p.sourcesTotal} sources`,
+    },
+    {
+      id: "overview",
+      title: "Generate the overview",
+      body:
+        "This is a real model run in the product: two tasks, a summary and the starter questions. " +
+        "Press it and watch the status line — the reasoning ticking past is a recorded trace from " +
+        "the run that actually produced this overview.",
+      target: "#chat-overview .btn, #chat-overview button",
+      done: (p) => p.overview,
+    },
+    {
+      id: "ask1",
+      title: "Ask the first question",
+      body:
+        "The question is already in the box. Press Enter (or the send button) — Shift+Enter would " +
+        "just add a line. Every claim in the answer comes back with a numbered stroke pointing at " +
+        "the passage it came from.",
+      target: "#ask-submit",
+      fill: (p) => p.questions[0],
+      done: (p) => p.turns >= 1,
     },
     {
       id: "trace",
-      title: "2 · Open the reasoning trajectory",
+      title: "Open the Trajectory drawer",
       body:
-        "Every answer keeps the run that produced it. The ⌁ pill opens the Trajectory drawer: " +
-        "planner turns with the model's own reasoning, a tool timeline sized by real elapsed time, " +
-        "the token budget, and what the pre-SUBMIT validator rejected before it would submit.",
-      hint: "Click the ⌁ steps pill under an answer.",
+        "Press the ⌁ pill under the answer. Inside: every planner turn with the model's own " +
+        "reasoning, a tool timeline sized by real elapsed time, the token budget, and what the " +
+        "pre-SUBMIT validator rejected. Try the nav rail, the replay transport and a timeline " +
+        "segment — Esc closes it.",
+      target: ".turn .ticker-affordance, .turn [data-reference], .traj-open, .ticker-pill",
+      done: () => !document.getElementById("traj-drawer").hidden,
+      afterBody:
+        "That drawer is the answer to \u201cwhy did it say that\u201d — and it is why a run keeps " +
+        "the id of the trace that produced it.",
     },
     {
-      id: "podcast",
-      title: "3 · Play the Audio Overview",
+      id: "ask2",
+      title: "Ask a follow-up",
       body:
-        "A two-host episode written from the same sources and synthesized locally. The transcript " +
-        "is subtitles: it scrolls with the playhead, and clicking a line seeks to it. Every line " +
-        "carries its own citations.",
-      hint: "Open the Podcast tab in Studio, then press play.",
+        "History is context, never a source: the follow-up can resolve \u201cit\u201d from the " +
+        "conversation, but its citations are verified fresh against the corpus every time.",
+      target: "#ask-submit",
+      fill: (p) => p.questions[1],
+      skipIf: (p) => p.turnsTotal < 2,
+      done: (p) => p.turns >= 2,
     },
     {
-      id: "source",
-      title: "Check a citation against the source",
+      id: "podcast-tab",
+      title: "Open the Podcast tab",
       body:
-        "Click a row in Sources to read the original. A citation verifies a COORDINATE — that the " +
-        "passage exists where the model said it does — never that the prose around it is faithful. " +
-        "That distinction is the whole design, and the UI never claims more than it checked.",
-      hint: "Click any row in the Sources column.",
+        "Studio holds the artifacts. The Podcast tab generates a two-host Audio Overview from the " +
+        "same sources — script first, then speech synthesis.",
+      target: '.studio-views [data-view="podcast"], .studio-views button',
+      done: () => !!document.querySelector("#podcast-generate:not([hidden])"),
     },
     {
-      id: "language",
-      title: "Switch language and compare",
+      id: "podcast-length",
+      title: "Pick a length",
       body:
-        "The English and Chinese notebooks are built from the SAME sources. Only the output " +
-        "language differs: the prose follows the reader, while every citation quote stays in the " +
-        "source's own words.",
-      hint: "Open Notebooks in the header and pick the other language.",
+        "Three tiers, and they are numbers rather than adjectives: Short is 12-18 turns, Default " +
+        "30-45, Long 60-90. It is asked here, at generation time, because that is the moment you " +
+        "have an opinion about how long you want to listen.",
+      target: ".podcast-length",
+      done: () => true,
+      manual: true,
+    },
+    {
+      id: "podcast-generate",
+      title: "Generate the episode",
+      body:
+        "This runs the script task and then synthesizes speech. Only the script half is cancellable " +
+        "— synthesis runs host-side after the subprocess returns.",
+      target: "#podcast-generate",
+      done: (p) => !!p.podcast,
+    },
+    {
+      id: "podcast-play",
+      title: "Play it, and watch the transcript",
+      body:
+        "Press play. The transcript is subtitles: it scrolls with the playhead and highlights the " +
+        "line being spoken, and clicking any line seeks to it. Each line carries its own citations. " +
+        "The ↓ Download button hands you the file.",
+      target: ".podcast-body audio, #podcast-body audio",
+      done: () => {
+        const a = document.querySelector("#podcast-body audio");
+        return !!a && a.currentTime > 1.5;
+      },
+    },
+    {
+      id: "compare",
+      title: "Now compare the languages",
+      body:
+        "Open Notebooks in the header. The English and Chinese sets are built from the SAME " +
+        "sources — only the output language differs. The prose follows the reader; every citation " +
+        "quote stays in the source's own words.",
+      target: ".pg-btn",
+      done: () => false,
+      last: true,
     },
   ];
 
