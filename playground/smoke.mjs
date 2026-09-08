@@ -379,6 +379,29 @@ console.log("\nnothing local or private reaches the published fixture:");
 // pins had the two the wrong way round AND gated the scroll on `target === this.lastTarget`, which
 // is the one case `highlight` refuses to act on: a new step was placed against the unscrolled rect,
 // then scrolled out from under its own popover, which stayed behind pointing at nothing.
+// `POST /audio` is the ONE endpoint whose reply is not a `NotebookResponse`: the real API answers
+// with a flat `AudioResponse`, and the shim was nesting the episode under `{podcast}`. `app.js`
+// reads `data.utterances.length` straight off it, so Generate died with "Cannot read properties of
+// undefined" and the demo's headline artifact never rendered. Read what app.js expects, then check
+// the shim's audio handler actually returns it.
+console.log("\nthe shim answers /audio in the shape app.js reads:");
+{
+  const APP = readFileSync(join(DIST, "app.js"), "utf8");
+  const SHIM = readFileSync(join(DIST, "shim.js"), "utf8");
+  const gen = APP.slice(APP.indexOf("data.utterances.length") - 2000,
+                        APP.indexOf("data.utterances.length") + 2000);
+  const wants = [...new Set([...gen.matchAll(/\bdata\.([a-z_]+)/g)].map((m) => m[1]))];
+  ok(wants.includes("utterances"), `app.js reads ${wants.length} field(s) off the reply`);
+
+  const at = SHIM.indexOf('st.podcast = body.length');
+  ok(at > 0, "the shim has an /audio handler");
+  const handler = SHIM.slice(at, SHIM.indexOf("});", SHIM.indexOf("return json({", at)));
+  for (const field of wants) {
+    ok(new RegExp(`\\b${field}\\s*:`).test(handler), `the reply carries ${field}`);
+  }
+  ok(!/return json\(\{\s*podcast:/.test(handler), "the reply is flat, not nested under podcast");
+}
+
 console.log("\nthe director scrolls before it places the popover:");
 {
   const DIR = readFileSync(join(DIST, "director.js"), "utf8")

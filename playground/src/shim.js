@@ -416,7 +416,19 @@
     // rather than implying the button re-generated it.
     st.podcast = body.length || "default";
     const out = view(nb, st);
-    return json({ podcast: out.podcast, run_id: body.run_id });
+    // FLAT, matching `api.AudioResponse` — NOT the nested `{podcast}` of `NotebookResponse`. This
+    // endpoint is the one place the two shapes differ, and the shim had the wrong one: `app.js`
+    // reads `data.utterances.length` straight off the reply, so pressing Generate died with
+    // "Cannot read properties of undefined" and the demo's headline artifact never appeared.
+    const ep = out.podcast || {};
+    return json({
+      utterances: ep.utterances || [],
+      offsets: ep.offsets || [],
+      audio_suffix: ep.audio_suffix || ".mp3",
+      // The real endpoint can return the episode inline; here the `<audio>` src is intercepted
+      // separately, so there is nothing to inline and the field is honestly null.
+      audio_base64: null,
+    });
   });
 
   // --- 1. fetch ---------------------------------------------------------------------------------

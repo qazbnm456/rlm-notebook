@@ -194,6 +194,15 @@
            "一樣按 Enter。\n\n前面的對話只是脈絡，不算證據。這一題可以從對話推出「它」指的是什麼，" +
            "但引用會重新對著來源查一次。"],
     },
+    watchAsk2: {
+      en: ["Watch the second answer land",
+           "A separate run, with a trace of its own.\n\nThe conversation told it what \u201cit\u201d " +
+           "refers to. The sources decide what it is allowed to claim, and every coordinate is " +
+           "checked against them again from scratch."],
+      "zh-Hant": ["看第二個回答落地",
+           "這是另一次執行，有自己的軌跡。\n\n對話告訴它「它」指的是誰，能主張什麼則是來源說了算，" +
+           "每一個座標都重新查過一次。"],
+    },
     podcastTab: {
       en: ["Open the Podcast tab",
            "Studio is where the artifacts live. Podcast turns the same sources into a two-host " +
@@ -216,6 +225,15 @@
            "script is being written; once speech synthesis starts it runs to the end."],
       "zh-Hant": ["產生節目",
            "按下去。先寫稿，再唸出來。\n\n寫稿的階段可以按停止；進到語音合成之後就會一路做完。"],
+    },
+    watchPodcast: {
+      en: ["Watch it write, then speak",
+           "Two halves, and only the first can be stopped.\n\nThe script is a grounded run like " +
+           "any other, checked against the sources before it is accepted. Synthesis is a separate " +
+           "step that reads the finished script aloud."],
+      "zh-Hant": ["看它先寫稿，再唸出來",
+           "兩個階段，只有前半段停得下來。\n\n寫稿跟其他執行一樣，要對著來源查證過才算數；後面的" +
+           "語音合成是另一件事，把寫好的稿子唸出來。"],
     },
     podcastPlay: {
       en: ["Play it, and watch the transcript",
@@ -357,8 +375,17 @@
     // would work too, but the reader is being asked to press ONE control.
     { id: "trace-close", key: "traceClose", target: "#traj-close, .traj-head", side: "bottom",
       align: "end", done: () => document.getElementById("traj-drawer").hidden },
+    // `|| PG.isRunning("ask")` like `ask1`, not `p.turns >= 2` alone. Waiting for the finished turn
+    // left "press Enter" on screen for the whole run, next to a composer that had already sent it.
     { id: "ask2", key: "ask2", target: "#ask-submit", side: "top", align: "end", fill: (p) => p.questions[1],
-      fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2, done: (p) => p.turns >= 2 },
+      fulfil: "turn2", skipIf: (p) => p.turnsTotal < 2,
+      done: (p) => p.turns >= 2 || PG.isRunning("ask") },
+    // The mirror of `watch-ask`, which the first question has and the second did not: the run was
+    // live with nothing pointing at it. Carries `ask2`'s `skipIf`, or on a one-turn notebook it
+    // would find no run in flight and complete on its first tick.
+    { id: "watch-ask2", key: "watchAsk2", target: ".run-status, .run-log, .chat-history",
+      side: "top", align: "start", dwell: true, kind: "ask",
+      skipIf: (p) => p.turnsTotal < 2, done: () => !PG.isRunning("ask") },
     { id: "podcast-tab", key: "podcastTab", side: "left", align: "start",
       target: '.studio-views [data-view="podcast"], .studio-views button',
       // The BODY, not the button. `#podcast-generate:not([hidden])` matched from the start: the
@@ -374,8 +401,17 @@
     // subliminal frame nobody could see.
     { id: "podcast-length", key: "podcastLength", target: ".podcast-length", side: "left",
       done: () => !!PG.lengthTouched },
+    // Hands over when the run STARTS. `!!p.podcast` alone kept "press this" on screen for the whole
+    // of the slowest run in the demo, beside a button that had already been pressed.
     { id: "podcast-generate", key: "podcastGenerate", target: "#podcast-generate", side: "left",
-      fulfil: "podcast", done: (p) => !!p.podcast },
+      fulfil: "podcast", kind: "audio",
+      done: (p) => !!p.podcast || PG.isRunning("audio") },
+    // The podcast's own watch step. Every other run-taking step in the script had one; this is the
+    // LONGEST run in the demo and it was the one without. `kind: "audio"` is what Skip needs to end
+    // the run it is skipping — the shim registers this run under that name, not under "podcast".
+    { id: "watch-podcast", key: "watchPodcast", target: ".run-status, .run-log, #podcast-body",
+      side: "left", align: "start", dwell: true, kind: "audio",
+      done: () => !PG.isRunning("audio") },
     { id: "podcast-play", key: "podcastPlay", target: "#podcast-body audio", side: "left",
       done: () => {
         const a = document.querySelector("#podcast-body audio");
