@@ -56,9 +56,15 @@ questions with verifiable citations, and get a distilled research artifact out.
   import time during `RapidOCR()` and reset the level, which measured as still nine lines per page
   and over five hundred on a 260-page scan.
 
-  **Not verified this session**: the container build. Docker's daemon was not running by the time
-  the base image changed, so 3.13 in the `Dockerfile` rests on the same evidence as the rest of
-  this entry rather than on a build.
+  **The container was then built and driven**, which is where the models-in-the-wheel claim stopped
+  being a reading of a `RECORD` file: `docker run --network none` OCR'd a rendered line correctly,
+  so the image needs no npm or model egress to do the one thing it exists for. Python 3.13.15,
+  deno 2.1.4, tesseract 5.5.0, rapidocr 3.9.2, onnxruntime 1.29.0; `/notebooks`, `/`, `/settings`
+  and `/settings/choices` all 200 with no model configured; one stderr line where there were nine,
+  and it is onnxruntime's own `Unknown CPU vendor` note under Docker Desktop on aarch64, not ours.
+  The same run incidentally confirmed two earlier fixes end to end: `PYTHONUNBUFFERED=1` makes the
+  data-directory line reach `docker logs` at all, and the loopback warning fires on the image's own
+  `--host 0.0.0.0`.
 
 - **`rlm-notebook serve`, a container, an install story for an application, and the three
   independent reviews that found what all of it was missing.**
