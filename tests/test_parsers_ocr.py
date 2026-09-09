@@ -1,9 +1,28 @@
 from __future__ import annotations
 
+import inspect
 import json
 from pathlib import Path
 
+import pytest
+
 from rlm_notebook.parsers import _ocr
+
+
+class _Out:
+    """Stand-in for `rapidocr.utils.output.RapidOCROutput`, the type `RapidOCR.__call__` returns.
+
+    Two fields are all `_try_rapidocr` touches, so two fields are all this defines — and
+    `test_the_rapidocr_stand_in_matches_the_real_output_type` checks that against the real class
+    rather than against this file's own idea of it. That check is the point of the stand-in: the
+    package this project depends on RENAMED itself and changed this contract from a
+    `(rows, elapse)` tuple to an object, and a hand-written fake is exactly what keeps passing
+    while the real shape moves underneath it.
+    """
+
+    def __init__(self, boxes, txts):
+        self.boxes = boxes
+        self.txts = txts
 
 
 def _quad(x0: float, x1: float, y: float) -> list[list[float]]:
@@ -362,7 +381,7 @@ def test_try_rapidocr_returns_none_on_a_runtime_failure_never_raises(monkeypatch
         def __call__(self, arr):
             raise RuntimeError("simulated OCR engine crash")
 
-    monkeypatch.setattr("rapidocr_onnxruntime.RapidOCR", lambda: _FakeEngine())
+    monkeypatch.setattr("rapidocr.RapidOCR", lambda: _FakeEngine())
 
     class _FakeImage:
         def convert(self, mode):
@@ -374,9 +393,9 @@ def test_try_rapidocr_returns_none_on_a_runtime_failure_never_raises(monkeypatch
 def test_try_rapidocr_returns_none_when_result_is_empty(monkeypatch):
     class _FakeEngine:
         def __call__(self, arr):
-            return [], None
+            return _Out(None, None)
 
-    monkeypatch.setattr("rapidocr_onnxruntime.RapidOCR", lambda: _FakeEngine())
+    monkeypatch.setattr("rapidocr.RapidOCR", lambda: _FakeEngine())
 
     class _FakeImage:
         def convert(self, mode):
@@ -388,13 +407,12 @@ def test_try_rapidocr_returns_none_when_result_is_empty(monkeypatch):
 def test_try_rapidocr_joins_multiple_text_regions(monkeypatch):
     class _FakeEngine:
         def __call__(self, arr):
-            return [
-                ([[0, 0]], "hello", 0.9),
-                ([[0, 0]], "world", 0.8),
-                ([[0, 0]], "   ", 0.1),  # whitespace-only region, excluded
-            ], None
+            return _Out(
+                [[[0, 0]], [[0, 0]], [[0, 0]]],
+                ("hello", "world", "   "),  # the whitespace-only region is excluded downstream
+            )
 
-    monkeypatch.setattr("rapidocr_onnxruntime.RapidOCR", lambda: _FakeEngine())
+    monkeypatch.setattr("rapidocr.RapidOCR", lambda: _FakeEngine())
 
     class _FakeImage:
         def convert(self, mode):
@@ -410,14 +428,12 @@ def test_try_rapidocr_orders_regions_by_layout_not_by_detection_order(monkeypatc
 
     class _FakeEngine:
         def __call__(self, arr):
-            return [
-                (_quad(0, 100, 10), "left one", 0.9),
-                (_quad(200, 300, 10), "right one", 0.9),
-                (_quad(0, 100, 30), "left two", 0.9),
-                (_quad(200, 300, 30), "right two", 0.9),
-            ], None
+            return _Out(
+                [_quad(0, 100, 10), _quad(200, 300, 10), _quad(0, 100, 30), _quad(200, 300, 30)],
+                ("left one", "right one", "left two", "right two"),
+            )
 
-    monkeypatch.setattr("rapidocr_onnxruntime.RapidOCR", lambda: _FakeEngine())
+    monkeypatch.setattr("rapidocr.RapidOCR", lambda: _FakeEngine())
 
     class _FakeImage:
         def convert(self, mode):
@@ -429,7 +445,9 @@ def test_try_rapidocr_orders_regions_by_layout_not_by_detection_order(monkeypatc
 def test_try_rapidocr_returns_none_when_the_detector_result_has_an_unexpected_shape(monkeypatch):
     """`ocr_image` documents that it never raises, and `reading_order` reads coordinates straight
     out of whatever the detector returned — so the ordering call belongs INSIDE the try. The pin on
-    `rapidocr-onnxruntime` has no upper bound; a future box format must degrade, not crash."""
+    `rapidocr` has no upper bound; a future box format must degrade, not crash. The distribution
+    already renamed itself once and changed this very shape, so "a future box format" is a thing
+    that has happened, not a hypothetical."""
 
     class _FakeImage:
         def convert(self, mode):
@@ -437,9 +455,9 @@ def test_try_rapidocr_returns_none_when_the_detector_result_has_an_unexpected_sh
 
     for label, rows in [
         ("None box", [(None, "text", 0.9)]),
-        ("flat xyxy box", [([0, 0, 1, 1], "text", 0.9)]),
-        ("two-element rows", [([[0, 0]], "text")]),
-        ("non-numeric coordinate", [([["a", "b"]], "text", 0.9)]),
+        ("flat xyxy box", ([[0, 0, 1, 1]], ("text",))),
+        ("non-numeric coordinate", ([[["a", "b"]]], ("text",))),
+        ("more boxes than texts", ([_quad(0, 10, 0), _quad(0, 10, 20)], ("only one",))),
     ]:
 
         class _FakeEngine:
@@ -447,9 +465,9 @@ def test_try_rapidocr_returns_none_when_the_detector_result_has_an_unexpected_sh
                 self.rows = rows
 
             def __call__(self, arr):
-                return self.rows, None
+                return _Out(*self.rows)
 
-        monkeypatch.setattr("rapidocr_onnxruntime.RapidOCR", lambda rows=rows: _FakeEngine(rows))
+        monkeypatch.setattr("rapidocr.RapidOCR", lambda rows=rows: _FakeEngine(rows))
         assert _ocr._try_rapidocr(_FakeImage()) is None, label
         assert _ocr.ocr_image(_FakeImage()) == "", label
 
@@ -546,3 +564,31 @@ def test_a_sparse_band_does_not_make_a_two_column_page_decline():
     ordered = _ocr.reading_order(regions).split()
     middle = ordered[ordered.index("CAPTION-1") + 1 : ordered.index("CAPTION-2")]
     assert middle == ["b-left1", "b-left2", "b-right1"], middle
+
+
+def test_the_rapidocr_stand_in_matches_the_real_output_type():
+    """Every fake above is a `_Out`, and a fake that has drifted from the real type tests nothing.
+
+    This is not hypothetical here: `rapidocr-onnxruntime` returned `(rows, elapse)` where each row
+    was `(box, text, score)`, and `rapidocr` returns an object with parallel `boxes` and `txts`.
+    Every one of those fakes kept passing against a contract the library no longer had, because a
+    monkeypatched name cannot notice that the thing it replaced changed shape. Pinned against the
+    REAL class so the next such change fails here rather than in production.
+    """
+    import dataclasses
+
+    rapidocr = pytest.importorskip("rapidocr")
+    real = rapidocr.utils.output.RapidOCROutput
+    fields = {f.name for f in dataclasses.fields(real)}
+    for attr in ("boxes", "txts"):
+        assert attr in fields, f"the real output no longer carries `{attr}`; the fakes are lying"
+        assert hasattr(_Out(None, None), attr)
+
+    # And the shape of each, on a real run's worth of geometry: `boxes` is (N, 4, 2) quads and
+    # `txts` a parallel tuple, which is what makes `zip` the whole adapter in `_try_rapidocr`.
+    assert "_try_rapidocr" in dir(_ocr)
+    source = inspect.getsource(_ocr._try_rapidocr)
+    assert "zip(out.boxes, out.txts, strict=True)" in source, (
+        "the adapter changed; this test's stand-in describes the shape the adapter reads, and "
+        "`strict=True` is what stops a length mismatch silently truncating a page"
+    )

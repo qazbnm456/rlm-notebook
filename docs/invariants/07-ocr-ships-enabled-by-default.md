@@ -25,10 +25,37 @@ dependencies of its own, so `.to_pil()` previously worked only by luck via a tra
 only a missing one. **Invariant 74 NARROWS that gap; it does not close it** — and not by the
 bad-character-ratio heuristic this line used to promise, which measurement showed cannot work
 alone. A layer too garbled to yield eight Latin tokens still scores `None` and is never
-challenged, which is most of the short strings the incident record quotes. **`tests/_pdf_fixtures.py` builds test PDFs with `reportlab`, a `dev`-only
+challenged, which is most of the short strings the incident record quotes. **`tests/_pdf_fixtures.py` builds
+test PDFs with `reportlab`, a `dev`-only
 dependency** — never a runtime dependency of the shipped package.
 
-**CJK is covered by the DEFAULT backend and needs no second model.** RapidOCR ships
+**THE DISTRIBUTION IS `rapidocr`, NOT `rapidocr-onnxruntime`, and the models moved with it.**
+Same upstream project (RapidAI/RapidOCR, Apache-2.0); the old distribution name was frozen at
+1.4.4 in January 2025 and capped `Requires-Python <3.13`, which is what made `pip install` refuse
+this whole project on 3.13 and 3.14 while uv resolved past the bound. Three consequences a later
+reader needs:
+
+- **`onnxruntime` is OURS to declare now.** `rapidocr` 3.x supports six engines and pulls none of
+  them, so without an explicit dependency the OCR path imports fine and fails at first use.
+- **The shipped models are PP-OCRv6 (`det_small` + `rec_small`) plus a v2.0 cls model**, in the
+  wheel rather than downloaded at first use — checked in its `RECORD`, which is what keeps the
+  container working with no network. The measurements below were taken on `ch_PP-OCRv4` and are
+  therefore about a model this project no longer ships; they are kept because the DECISION they
+  support (no second Chinese model) is unchanged, not because the figures still describe what runs.
+- **The API changed and the adapter is `zip(out.boxes, out.txts, strict=True)`.** `strict` is not
+  tidiness: the old return was one list of `(box, text, score)` rows, where a length mismatch was
+  unrepresentable, and the new one is two PARALLEL sequences where a plain `zip` truncates to the
+  shorter and returns a partial page as though it were whole. Invariant 44's `Podcast.offsets`
+  lesson on a second pair. Found by a test case written for this migration, not in review.
+
+**A measured accuracy GAIN, which is the part that made this more than a packaging fix.** On one
+rendered two-column page, 7 of 12 regions differ and the new model is right in every one: the old
+recogniser drops word spacing (`thebenchmark`, `sublayerswhichareapplied`), which for a project
+whose citations are verified by exact `quote` matching (invariant 5) is worse than a wrong
+character. On a three-line Traditional Chinese fixture, 3/3 exact against 2/3. That CJK sample is
+far smaller than the one below and is a direction, not a replacement for it.
+
+**CJK is covered by the DEFAULT backend and needs no second model.** RapidOCR then shipped
 `ch_PP-OCRv4`, which is Chinese-native. Measured on rendered text: Simplified 1.000 on a
 paragraph and 20/21 per isolated character; Traditional 0.879-0.973 per paragraph and 16-17/21
 isolated. PaddleOCR's `chinese_cht` recognition model was fetched, wired in through RapidOCR's

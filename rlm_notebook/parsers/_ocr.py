@@ -245,24 +245,64 @@ def _is_wordlike(token: str) -> bool:
     return token.isupper() or token[1:].lower() == token[1:]
 
 
+def _quiet_rapidocr() -> None:
+    """Stop RapidOCR narrating every page to stderr.
+
+    It installs its OWN handler on a logger named `RapidOCR` with `propagate = False`, at INFO, and
+    then logs nine lines per construction — the engine name, and for each of three models a "file
+    exists and is valid" line naming its ABSOLUTE path inside site-packages. `_try_rapidocr` builds
+    an engine per page, so a 260-page scan whose 61 textless pages reach OCR (invariant 74's own
+    measurement) prints over five hundred lines of it, burying `parse_pdf`'s one honest line about
+    what that document actually cost.
+
+    THE HANDLER, NOT THE LOGGER, and that is the whole trick. Several of rapidocr's own modules
+    construct `utils.log.Logger("RapidOCR")` at import time, and each construction calls
+    `setLevel(INFO)` on the shared logger — those imports happen DURING `RapidOCR()`, so a level
+    set beforehand is put back before a single page is read (measured: still nine lines). The
+    handler is created once, under `if not self.logger.handlers`, so every later construction skips
+    it and a level set there survives. Measured at zero lines.
+
+    Raised to WARNING rather than silenced: a real failure still has somewhere to go. Applied ONLY
+    to a handler still at the library's own default INFO, so an operator who set it themselves — to
+    DEBUG while chasing a model-loading problem, say — keeps what they asked for. That check is the
+    reason this is a function and not two lines at import time.
+    """
+    import logging
+
+    for handler in logging.getLogger("RapidOCR").handlers:
+        if handler.level == logging.INFO:
+            handler.setLevel(logging.WARNING)
+
+
 def _try_rapidocr(image) -> str | None:
     try:
-        from rapidocr_onnxruntime import RapidOCR
+        from rapidocr import RapidOCR
     except ImportError:
         return None
+    _quiet_rapidocr()
     try:
         import numpy as np
 
-        result, _ = RapidOCR()(np.array(image.convert("RGB")))
-        if not result:
+        # `RapidOCROutput`, not the `(rows, elapse)` tuple `rapidocr-onnxruntime` returned. `boxes`
+        # is an `(N, 4, 2)` array of quads and `txts` a parallel tuple of strings, so `zip` is the
+        # whole adapter and `reading_order` reads the same quad shape it always did.
+        out = RapidOCR()(np.array(image.convert("RGB")))
+        if out.boxes is None or not out.txts:
             return None
         # INSIDE the try, deliberately. `reading_order` reads coordinates out of whatever the
         # detector returned, so it is exposed to the result's SHAPE — a future rapidocr changing
-        # its box format or row arity (the pin is `>=1.3`, with no upper bound) would otherwise
+        # its box format or row arity (the pin is `>=3.9`, with no upper bound) would otherwise
         # raise straight through `ocr_image`, whose docstring promises it never does. Verified: a
         # `None` box, a flat xyxy box, a 2-tuple row and a non-numeric coordinate all escaped when
         # this line sat outside.
-        text = reading_order([(box, text) for box, text, _ in result])
+        #
+        # `strict=True` because they are now TWO PARALLEL SEQUENCES where they used to be one list
+        # of `(box, text, score)` rows: a length mismatch was unrepresentable before and is
+        # representable now, and a plain `zip` would silently truncate to the shorter one — dropping
+        # detected text and returning a partial page as though it were the whole one. Raising lands
+        # in the `except` below, which falls through to Tesseract, which is the honest outcome.
+        # This is invariant 44's parallel-array lesson (`Podcast.offsets`) on a second pair.
+        text = reading_order(list(zip(out.boxes, out.txts, strict=True)))
     except Exception:  # noqa: BLE001 — an OCR engine choking on an unusual rendered page must
         # fall through to the next backend (or to "no OCR text"), never take down ingestion of an
         # otherwise-fine multi-page PDF. Same "degrade, don't crash, at an extraction boundary"

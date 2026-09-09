@@ -5,7 +5,11 @@ detection order interleaves the columns of a two-column scan.** RapidOCR reports
 region and no layout, and emits regions roughly line-by-line ACROSS the full page, so
 `" ".join(text for _, text, _ in result)` produced prose that jumps between columns mid-sentence.
 Measured against the same pages' own text layer, over two real papers: a two-column paper scored
-**0.425 -> 0.756**, a single-column one 0.802 -> 0.792. **The text-layer path was never affected** —
+**0.425 -> 0.756**, a single-column one 0.802 -> 0.792. **Those figures were measured on the OLD
+detector** (`rapidocr-onnxruntime`'s ch_PP-OCRv4); invariant 7 records the move to `rapidocr` and
+PP-OCRv6. They are not re-measured here on purpose — the tests below assert STRUCTURE and
+DIRECTION rather than a figure precisely so an engine change does not invalidate them, and both
+still pass unchanged on the new detector. **The text-layer path was never affected** —
 `pypdfium2` reads a LaTeX two-column paper in correct column order already, because the content stream
 is written a column at a time — so this is an OCR-path defect only, and only scanned/textless pages
 reach it (invariant 7).

@@ -276,18 +276,23 @@ def _ocr_orderings(pdf_path):
 
     import numpy as np
     import pypdfium2 as pdfium
-    from rapidocr_onnxruntime import RapidOCR
+    from rapidocr import RapidOCR
 
-    from rlm_notebook.parsers._ocr import reading_order
+    from rlm_notebook.parsers._ocr import _quiet_rapidocr, reading_order
 
+    _quiet_rapidocr()
     page = pdfium.PdfDocument(str(pdf_path))[0]
-    result, _ = RapidOCR()(np.array(page.render(scale=2.0).to_pil().convert("RGB")))
+    # `RapidOCROutput` — parallel `boxes`/`txts`, not the `(box, text, score)` rows the old
+    # distribution returned. `strict=True` here for the same reason `_try_rapidocr` uses it.
+    out = RapidOCR()(np.array(page.render(scale=2.0).to_pil().convert("RGB")))
+    rows = [(box, text) for box, text in zip(out.boxes, out.txts, strict=True)]
+
     def words(text):
         return re.findall(r"[a-z]+", text.lower())
 
-    raw = words(" ".join(t for _, t, _ in result if t.strip()))
-    ordered = words(reading_order([(box, t) for box, t, _ in result]))
-    return raw, ordered, [box for box, t, _ in result if t.strip()]
+    raw = words(" ".join(text for _, text in rows if text.strip()))
+    ordered = words(reading_order(rows))
+    return raw, ordered, [box for box, text in rows if text.strip()]
 
 
 def test_reading_order_beats_detection_order_on_a_real_two_column_render(tmp_path):

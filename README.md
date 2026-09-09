@@ -33,9 +33,7 @@ uv tool install "rlm-notebook[api] @ git+https://github.com/qazbnm456/rlm-notebo
 
 Not on PyPI yet, hence the repository URL. Drop `[api]` if you only want the CLI.
 
-**Python 3.11 or 3.12, not 3.13.** `rapidocr-onnxruntime` declares `Requires-Python <3.13`, so pip
-refuses to resolve this project on 3.13 (`uv` will install it anyway, which is uv resolving past
-that bound rather than the bound not being there).
+**Python 3.11 or newer**, including 3.13 and 3.14.
 
 **Two system dependencies no Python manifest can express**, which is also why there is a container:
 

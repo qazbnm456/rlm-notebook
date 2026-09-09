@@ -17,12 +17,9 @@
 # delete sources, and change settings for notebooks they never named. A bare `-p 8000:8000`
 # publishes it on every interface of the host.
 
-# 3.12, NOT 3.13, and this is a real constraint rather than caution: `rapidocr-onnxruntime`
-# declares `Requires-Python >=3.6,<3.13`, so `pip install` on 3.13 fails outright with "No matching
-# distribution found". The local `uv` environment runs 3.13 with rapidocr 1.4.4 anyway, which is uv
-# resolving past the bound rather than the bound not existing. 3.12 is the newest interpreter every
-# core dependency actually declares support for.
-FROM python:3.12-slim AS base
+# 3.13. This was pinned to 3.12 while `rapidocr-onnxruntime` capped itself at `<3.13`; the switch to
+# `rapidocr` (which declares `>=3.8,<4` and was verified running on 3.13 and 3.14) lifted that.
+FROM python:3.13-slim AS base
 
 # `deno` is fetched as a release binary rather than through the install script, so the version is
 # pinned and the build does not depend on a shell script fetched at build time.

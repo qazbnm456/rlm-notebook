@@ -11,6 +11,55 @@ questions with verifiable citations, and get a distilled research artifact out.
 
 ## [Unreleased]
 
+- **The OCR backend moves from `rapidocr-onnxruntime` to `rapidocr`, which unblocks Python 3.13
+  and 3.14 and reads better while it is there.**
+
+  **The packaging problem it solves.** `rapidocr-onnxruntime` was frozen at 1.4.4 in January 2025
+  and declares `Requires-Python >=3.6,<3.13`, so `pip install` refused this whole project on 3.13
+  and 3.14 while uv resolved past the bound — the manifest said `>=3.11` and pip disagreed, and the
+  error named rapidocr rather than rlm-notebook. `rapidocr` is the same upstream project
+  (RapidAI/RapidOCR, Apache-2.0, a commit the day this was written), declares `>=3.8,<4`, and was
+  verified installing, importing and RUNNING on both 3.13 and 3.14 before anything was changed
+  here — invariant 43's "nothing is adopted until it has been installed and run".
+
+  **The alternative was capping at `<3.13`, and it was evaluated and rejected.** Python 3.14 is
+  current and 3.13 is one behind, so the cap gives up two generations, not one; 3.11 reaches
+  security-EOL in October 2027. It kills the `chatterbox` extra outright (marked `>= 3.13`), breaks
+  the development environment (every venv here is 3.13), and expires anyway. It buys a shrinking
+  window; the migration buys the package upstream actually maintains.
+
+  **It is also measurably more accurate, which was not the reason but is the bigger one.** On one
+  rendered two-column page, 7 of 12 regions differ and the new model is right in every case: the
+  old recogniser drops word spacing (`thebenchmark`, `sublayerswhichareapplied`). For a project
+  whose citations are verified by exact `quote` matching (invariant 5), losing word boundaries is
+  worse than a wrong character. On a three-line Traditional Chinese fixture, 3/3 exact against 2/3,
+  rendered through the `.ttc` face index invariant 7 records as the trap that makes such a
+  measurement worthless, with the ink checked before believing the number.
+
+  **A defect the migration created and a test caught.** The old return was one list of
+  `(box, text, score)` rows; the new one is two PARALLEL sequences, `boxes` and `txts`. A plain
+  `zip` truncates to the shorter and returns a partial page as though it were the whole one, which
+  a length mismatch made representable for the first time. `strict=True` raises instead, which
+  lands in the existing `except` and falls through to Tesseract. Invariant 44's `Podcast.offsets`
+  lesson on a second parallel pair.
+
+  **Every fake in `tests/test_parsers_ocr.py` had been passing against a contract the library no
+  longer had**, because a monkeypatched name cannot notice that the thing it replaced changed
+  shape. They are `_Out` stand-ins now, and a new test pins that stand-in against the REAL
+  `RapidOCROutput` dataclass so the next such change fails in the suite.
+
+  Also: `onnxruntime` becomes an explicit dependency (`rapidocr` 3.x supports six engines and pulls
+  none), the shipped models are PP-OCRv6 and live IN the wheel rather than downloading at first use
+  (checked in its `RECORD`, which is what keeps the container working with no network), the
+  container base moves back to 3.13, and `_quiet_rapidocr` raises the library's own log HANDLER to
+  WARNING — the LOGGER cannot be quieted, because several rapidocr modules reconstruct it at
+  import time during `RapidOCR()` and reset the level, which measured as still nine lines per page
+  and over five hundred on a 260-page scan.
+
+  **Not verified this session**: the container build. Docker's daemon was not running by the time
+  the base image changed, so 3.13 in the `Dockerfile` rests on the same evidence as the rest of
+  this entry rather than on a build.
+
 - **`rlm-notebook serve`, a container, an install story for an application, and the three
   independent reviews that found what all of it was missing.**
 
